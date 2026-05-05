@@ -240,15 +240,15 @@ function stripFlags(args: string[]): string[] {
   const result: string[] = [];
   let i = 0;
   while (i < args.length) {
-    if (args[i].startsWith("--")) {
-      // skip flag and its value
-      if (args[i].includes("=")) {
+    const arg = args[i]!;
+    if (arg.startsWith("--")) {
+      if (arg.includes("=")) {
         i++;
       } else {
         i += 2;
       }
     } else {
-      result.push(args[i]);
+      result.push(arg);
       i++;
     }
   }

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+bun.lockb
+*.log
+.env
+.DS_Store
+
+# Dashboard
+dashboard/dashboard-bin
+dashboard/mae-dashboard
+dashboard/**/*_templ.go
+dashboard/data/
+
+# Session data
+data/sessions/

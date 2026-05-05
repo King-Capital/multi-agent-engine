@@ -20,8 +20,8 @@ tools:
   - glob
 domain:
   read: ["**/*"]
-  write: ["$DOMAIN_WRITE"]
-  update: ["$DOMAIN_WRITE", "expertise/builder.md"]
+  write: ["**/*"]
+  update: ["**/*", "expertise/builder.md"]
   delete: []
 ---
 

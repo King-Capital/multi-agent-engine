@@ -1,4 +1,5 @@
 import { $ } from "bun";
+import { mkdirSync } from "fs";
 import type { PlatformAdapter, DelegateOptions, DelegateResult } from "../types";
 
 export class CodexAdapter implements PlatformAdapter {
@@ -25,14 +26,16 @@ export class CodexAdapter implements PlatformAdapter {
 
     const prompt = `${opts.systemPrompt}\n\n---\n\n${opts.userPrompt}`;
 
-    console.log(`[codex] Spawning ${opts.persona.name} (${this.mapModel(opts.model)})`);
+    console.log(`[codex] Spawning ${opts.persona.name} (${this.mapModel(opts.model)}) in ${opts.workingDir}`);
+
+    mkdirSync(opts.sessionDir, { recursive: true });
 
     try {
       const proc = Bun.spawn(args, {
         stdin: new Response(prompt).body!,
         stdout: "pipe",
         stderr: "pipe",
-        cwd: opts.sessionDir,
+        cwd: opts.workingDir,
       });
 
       const output = await new Response(proc.stdout).text();

@@ -30,14 +30,14 @@ templ SessionListItems(sessions []*models.Session) {
 					<span class={ "w-2 h-2 rounded-full flex-shrink-0 " + sessionDotClass(sess.Status) }></span>
 					<span class="text-sm font-bold truncate">{ sess.Name }</span>
 				</div>
-				<!-- Chain + task info -->
-				if sess.TeamConfig != "" {
-					<div class="ml-3.5 mb-0.5">
+				<!-- Chain + platform info -->
+				<div class="ml-3.5 mb-0.5 flex items-center gap-1.5">
+					if sess.TeamConfig != "" {
 						<span class="text-xs px-1 py-0.25 rounded bg-neutral-50/5 text-neutral-400">
 							{ sess.TeamConfig }
 						</span>
-					</div>
-				}
+					}
+				</div>
 				if sess.TaskPrompt != "" {
 					<p class="text-xs text-neutral-500 ml-3.5 truncate" title={ sess.TaskPrompt }>
 						{ truncateText(sess.TaskPrompt, 60) }
@@ -80,12 +80,14 @@ templ AgentTree(sess *models.Session) {
 templ AgentNode(agent *models.Agent, sess *models.Session, depth int) {
 	<div class={ agentNodeClass(depth) }>
 		<div class="flex items-center gap-1.5 py-1">
+			<!-- Status emoji indicator -->
+			<span class="text-sm leading-none" title={ string(agent.Status) }>
+				{ statusEmoji(agent.Status) }
+			</span>
 			<!-- Role icon -->
-			<span class={ "text-sm " + roleIconColor(agent) }>
+			<span class={ "text-xs font-bold " + roleIconColor(agent) }>
 				{ roleIcon(agent.Role) }
 			</span>
-			<!-- Status indicator -->
-			<span class={ "w-1.5 h-1.5 rounded-full " + statusDotClass(agent.Status) }></span>
 			<!-- Name -->
 			<span class="text-xs font-bold truncate" style={ "color:" + agentColor(agent) }>
 				{ agent.Name }
@@ -152,8 +154,7 @@ templ MessageBubble(evt models.Event, sess *models.Session) {
 				{ evt.Timestamp.Format("15:04:05") }
 			</span>
 		</div>
-		<div class="glass rounded-md p-2.5 text-sm text-neutral-300 ml-4">
-			{ evt.Data.Content }
+		<div class="glass rounded-md p-2.5 text-sm text-neutral-300 ml-4 msg-md" data-md={ evt.Data.Content }>
 		</div>
 	</div>
 }
@@ -164,19 +165,44 @@ templ ToolCallEntry(evt models.Event, sess *models.Session) {
 	if agent != nil {
 		{{ color = agentColor(agent) }}
 	}
-	<div class="mb-1.5 ml-4 flex items-center gap-1.5 text-xs text-neutral-500">
-		<span class={ toolStatusIcon(evt.Data.ToolStatus) }></span>
-		<span style={ "color:" + color }>
-			if agent != nil {
-				{ agent.Name }
-			} else {
-				{ evt.AgentID }
+	<div class="mb-1 ml-4 text-xs" x-data="{ open: false }">
+		<!-- Collapsed header (always visible) -->
+		<button
+			class="flex items-center gap-1.5 text-neutral-500 hover:text-neutral-300 transition-colors w-full text-left"
+			@click="open = !open"
+		>
+			<span class="text-neutral-600 w-3 flex-shrink-0" x-text="open ? '▼' : '▶'"></span>
+			<span class={ toolStatusIcon(evt.Data.ToolStatus) }></span>
+			<span style={ "color:" + color } class="font-medium">
+				if agent != nil {
+					{ agent.Name }
+				} else {
+					{ evt.AgentID }
+				}
+			</span>
+			<span class="text-neutral-400">{ evt.Data.Tool }</span>
+			if evt.Data.FilePath != "" {
+				<span class="text-neutral-500 truncate max-w-60" title={ evt.Data.FilePath }>{ evt.Data.FilePath }</span>
 			}
-		</span>
-		<span class="text-neutral-600">{ evt.Data.Tool }</span>
-		if evt.Data.FilePath != "" {
-			<span class="text-neutral-500 truncate max-w-60">{ evt.Data.FilePath }</span>
-		}
+			if evt.Timestamp.Unix() > 0 {
+				<span class="text-neutral-700 ml-auto flex-shrink-0">{ evt.Timestamp.Format("15:04:05") }</span>
+			}
+		</button>
+		<!-- Expanded detail -->
+		<div x-show="open" x-transition class="mt-1 ml-4 space-y-1">
+			if evt.Data.ToolArgs != "" {
+				<div class="glass rounded p-1.5">
+					<p class="text-neutral-600 mb-0.5 font-bold">args</p>
+					<pre class="text-neutral-400 whitespace-pre-wrap break-all text-xs max-h-32 overflow-y-auto">{ evt.Data.ToolArgs }</pre>
+				</div>
+			}
+			if evt.Data.ToolResult != "" {
+				<div class="glass rounded p-1.5">
+					<p class="text-neutral-600 mb-0.5 font-bold">result</p>
+					<pre class="text-neutral-400 whitespace-pre-wrap break-all text-xs max-h-32 overflow-y-auto">{ evt.Data.ToolResult }</pre>
+				</div>
+			}
+		</div>
 	</div>
 }
 
@@ -253,21 +279,49 @@ templ TillDonePanel(td *models.TillDoneState) {
 
 templ CostTracker(sess *models.Session) {
 	<div>
-		<div class="flex items-center justify-between mb-1.5">
-			<span class="text-xs font-bold text-neutral-400">Total Cost</span>
+		<div class="flex items-center justify-between mb-2">
+			<span class="text-xs font-bold text-neutral-400">Cost Tree</span>
 			<span class="text-sm font-bold neon-green">
-				{ fmt.Sprintf("$%.3f", sess.TotalCost) }
+				{ fmt.Sprintf("$%.2f", sess.TotalCost) }
 			</span>
 		</div>
-		<div class="flex items-center justify-between text-xs text-neutral-500">
-			<span>Tokens</span>
-			<span>{ formatTokens(sess.TotalTokens) }</span>
+		<!-- Per-agent cost tree -->
+		<div class="text-xs font-mono mb-2">
+			for i, root := range getRootAgents(sess) {
+				{{ isLastRoot := i == len(getRootAgents(sess))-1 }}
+				@CostTreeNode(root, sess, "", isLastRoot)
+			}
 		</div>
-		<div class="flex items-center justify-between text-xs text-neutral-500">
-			<span>Agents</span>
-			<span>{ fmt.Sprintf("%d", len(sess.Agents)) }</span>
+		<!-- Totals footer -->
+		<div class="border-t border-neutral-50/5 pt-1.5 mt-1.5 flex items-center justify-between text-xs text-neutral-500">
+			<span>{ fmt.Sprintf("%d agents", len(sess.Agents)) }</span>
+			<span>{ formatTokens(sess.TotalTokens) } tok</span>
 		</div>
 	</div>
+}
+
+templ CostTreeNode(agent *models.Agent, sess *models.Session, prefix string, isLast bool) {
+	{{ children := getChildren(sess, agent.ID) }}
+	{{ connector := "├── " }}
+	if isLast {
+		{{ connector = "└── " }}
+	}
+	<div class="text-neutral-400 leading-5">
+		<span class="text-neutral-700">{ prefix }{ connector }</span>
+		<span style={ "color:" + agentColor(agent) }>{ agent.Name }</span>
+		<span class="text-neutral-500"> { fmt.Sprintf("$%.2f", agent.CostUSD) }</span>
+		if agent.Model != "" {
+			<span class="text-neutral-700"> { shortModel(agent.Model) }</span>
+		}
+	</div>
+	{{ childPrefix := prefix + "│   " }}
+	if isLast {
+		{{ childPrefix = prefix + "    " }}
+	}
+	for ci, child := range children {
+		{{ isLastChild := ci == len(children)-1 }}
+		@CostTreeNode(child, sess, childPrefix, isLastChild)
+	}
 }
 
 // --- Helper functions ---
@@ -292,15 +346,30 @@ func sessionDotClass(status string) string {
 func statusDotClass(status models.AgentStatus) string {
 	switch status {
 	case models.StatusRunning:
-		return "bg-green-400 pulse"
+		return "bg-orange-400 pulse"
 	case models.StatusDone:
-		return "bg-blue-400"
+		return "bg-green-400"
 	case models.StatusError:
-		return "bg-red-400"
+		return "bg-red-500"
 	case models.StatusBlocked:
 		return "bg-yellow-400"
 	default:
 		return "bg-neutral-500"
+	}
+}
+
+func statusEmoji(status models.AgentStatus) string {
+	switch status {
+	case models.StatusRunning:
+		return "🟠"
+	case models.StatusDone:
+		return "🟢"
+	case models.StatusError:
+		return "🔴"
+	case models.StatusBlocked:
+		return "🟡"
+	default:
+		return "⚪"
 	}
 }
 

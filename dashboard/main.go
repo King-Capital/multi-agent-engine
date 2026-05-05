@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +25,7 @@ import (
 )
 
 var store *events.Store
+var dbEnabled bool
 
 func main() {
 	dataDir := os.Getenv("DASHBOARD_DATA_DIR")
@@ -34,6 +37,14 @@ func main() {
 	store, err = events.NewStore(dataDir)
 	if err != nil {
 		log.Fatalf("failed to create store: %v", err)
+	}
+
+	// Initialize PostgreSQL (optional -- dashboard works without it)
+	if err := InitDB(); err != nil {
+		log.Printf("WARNING: PostgreSQL unavailable, running without persistence: %v", err)
+		dbEnabled = false
+	} else {
+		dbEnabled = true
 	}
 
 	port := os.Getenv("DASHBOARD_PORT")
@@ -65,7 +76,20 @@ func main() {
 		r.Get("/sessions/{sessionID}/stream", handleSSE)
 		r.Get("/stream", handleSSEAll)
 		r.Delete("/sessions/completed", handleClearCompleted)
+		r.Delete("/sessions/stale", handleClearStale)
+		r.Delete("/sessions/all", handleClearAll)
 		r.Post("/sessions/{sessionID}/message", handleUserMessage)
+
+		// PG-backed user and session management endpoints
+		r.Get("/users", handleAPIGetUsers)
+		r.Route("/pg/sessions", func(r chi.Router) {
+			r.Get("/", handleAPIGetSessions)
+			r.Post("/", handleAPICreateSession)
+			r.Patch("/{id}", handleAPIPatchSession)
+			r.Get("/{id}/agents", handleAPIGetAgents)
+			r.Post("/{id}/agents", handleAPICreateAgent)
+		})
+		r.Patch("/pg/agents/{id}", handleAPIPatchAgent)
 	})
 
 	r.Get("/htmx/sessions", handleHTMXSessions)
@@ -99,7 +123,7 @@ func main() {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
@@ -145,6 +169,24 @@ func handlePostEvent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "store error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Persist to PG in background (best-effort, don't block SSE)
+	if dbEnabled {
+		go func() {
+			payload, _ := json.Marshal(evt)
+			agentID := evt.AgentID
+			dbEvt := &DBEvent{
+				SessionID: evt.SessionID,
+				AgentID:   &agentID,
+				EventType: string(evt.EventType),
+				Payload:   payload,
+			}
+			if err := RecordEvent(context.Background(), dbEvt); err != nil {
+				log.Printf("pg event persist error: %v", err)
+			}
+		}()
+	}
+
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -565,6 +607,23 @@ func handleClearCompleted(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
 }
 
+func handleClearStale(w http.ResponseWriter, r *http.Request) {
+	store.ClearStale(10 * time.Minute)
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
+}
+
+func handleClearAll(w http.ResponseWriter, r *http.Request) {
+	store.ClearAll()
+	if r.Header.Get("HX-Request") == "true" {
+		sessions := store.ListSessions()
+		templates.SessionListItems(sessions).Render(r.Context(), w)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
+}
+
 func handleHTMXSessions(w http.ResponseWriter, r *http.Request) {
 	sessions := store.ListSessions()
 	templates.SessionListItems(sessions).Render(r.Context(), w)
@@ -606,4 +665,229 @@ func handleHTMXCosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	templates.CostTracker(sess).Render(r.Context(), w)
+}
+
+// --- PG-backed API handlers ---
+
+func requireDB(w http.ResponseWriter) bool {
+	if !dbEnabled {
+		http.Error(w, "database not available", http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+
+func handleAPIGetUsers(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+	users, err := GetUsers(r.Context())
+	if err != nil {
+		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(users)
+}
+
+func handleAPIGetSessions(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+	username := r.URL.Query().Get("user")
+	var sessions []DBSession
+	var err error
+	if username != "" {
+		sessions, err = GetSessionsByUser(r.Context(), username)
+	} else {
+		sessions, err = GetSessions(r.Context())
+	}
+	if err != nil {
+		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(sessions)
+}
+
+func handleAPICreateSession(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+	var req struct {
+		ID       string          `json:"id"`
+		Name     string          `json:"name"`
+		Platform string          `json:"platform"`
+		User     string          `json:"user"`
+		UserID   *int            `json:"user_id,omitempty"`
+		Team     *string         `json:"team,omitempty"`
+		Chain    *string         `json:"chain,omitempty"`
+		Config   json.RawMessage `json:"config,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	if req.Platform == "" {
+		req.Platform = "multi-agent-engine"
+	}
+
+	if req.UserID == nil && req.User != "" {
+		u, err := GetUserByUsername(r.Context(), req.User)
+		if err != nil {
+			http.Error(w, "user lookup: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if u != nil {
+			req.UserID = &u.ID
+		}
+	}
+
+	sess := &DBSession{
+		ID:       req.ID,
+		UserID:   req.UserID,
+		Name:     req.Name,
+		Platform: req.Platform,
+		Team:     req.Team,
+		Chain:    req.Chain,
+		Status:   "active",
+		Config:   req.Config,
+	}
+	if sess.ID == "" {
+		b := make([]byte, 16)
+		rand.Read(b)
+		b[6] = (b[6] & 0x0f) | 0x40
+		b[8] = (b[8] & 0x3f) | 0x80
+		sess.ID = fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+	}
+
+	if err := CreateSession(r.Context(), sess); err != nil {
+		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(sess)
+}
+
+func handleAPIPatchSession(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var req struct {
+		Name   *string `json:"name,omitempty"`
+		Status *string `json:"status,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := UpdateSession(r.Context(), id, req.Name, req.Status); err != nil {
+		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	sess, err := GetDBSession(r.Context(), id)
+	if err != nil {
+		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(sess)
+}
+
+func handleAPIGetAgents(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+	sessionID := chi.URLParam(r, "id")
+	agents, err := GetAgentsBySession(r.Context(), sessionID)
+	if err != nil {
+		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(agents)
+}
+
+func handleAPICreateAgent(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+	sessionID := chi.URLParam(r, "id")
+	var req struct {
+		AgentID string          `json:"agent_id"`
+		Role    string          `json:"role"`
+		Persona *string         `json:"persona,omitempty"`
+		Adapter *string         `json:"adapter,omitempty"`
+		Status  string          `json:"status"`
+		Prompt  *string         `json:"prompt,omitempty"`
+		Config  json.RawMessage `json:"config,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.AgentID == "" || req.Role == "" {
+		http.Error(w, "agent_id and role are required", http.StatusBadRequest)
+		return
+	}
+	if req.Status == "" {
+		req.Status = "pending"
+	}
+
+	agent := &DBAgent{
+		SessionID: sessionID,
+		AgentID:   req.AgentID,
+		Role:      req.Role,
+		Persona:   req.Persona,
+		Adapter:   req.Adapter,
+		Status:    req.Status,
+		Prompt:    req.Prompt,
+		Config:    req.Config,
+	}
+	if err := CreateAgent(r.Context(), agent); err != nil {
+		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(agent)
+}
+
+func handleAPIPatchAgent(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "invalid agent id", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		Status  *string         `json:"status,omitempty"`
+		Config  json.RawMessage `json:"config,omitempty"`
+		Result  json.RawMessage `json:"result,omitempty"`
+		CostUSD *float64        `json:"cost_usd,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := UpdateAgent(r.Context(), id, req.Status, req.Config, req.Result, req.CostUSD); err != nil {
+		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	agent, err := GetDBAgent(r.Context(), id)
+	if err != nil {
+		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(agent)
 }

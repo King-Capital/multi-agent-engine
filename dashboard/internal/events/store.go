@@ -204,6 +204,29 @@ func (s *Store) ClearCompleted() {
 	}
 }
 
+func (s *Store) ClearStale(maxAge time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cutoff := time.Now().Add(-maxAge)
+	for id, sess := range s.sessions {
+		if sess.Status == "active" && len(sess.Agents) == 0 && sess.StartedAt.Before(cutoff) {
+			delete(s.sessions, id)
+			fpath := filepath.Join(s.dir, id+".jsonl")
+			os.Remove(fpath)
+		}
+	}
+}
+
+func (s *Store) ClearAll() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id := range s.sessions {
+		delete(s.sessions, id)
+		fpath := filepath.Join(s.dir, id+".jsonl")
+		os.Remove(fpath)
+	}
+}
+
 func (s *Store) Subscribe(sessionID string) chan models.Event {
 	s.mu.Lock()
 	defer s.mu.Unlock()

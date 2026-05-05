@@ -7,7 +7,9 @@ import (
 
 templ DashboardPage(sessions []*models.Session) {
 	@Layout("Dashboard") {
-		<div class="flex h-full" x-data="{ selectedSession: '', sidebarWidth: 288 }">
+		<div class="flex h-full" x-data="{ selectedSession: '', sidebarWidth: 288, currentUser: '', users: [] }" x-init="
+			fetch('/api/users').then(r => r.ok ? r.json() : []).then(u => { users = u || []; }).catch(() => {})
+		">
 			<!-- Sidebar: Session List (resizable) -->
 			<aside class="border-r border-neutral-50/5 bg-neutral-50/3 flex flex-col h-full flex-shrink-0" :style="'width:' + sidebarWidth + 'px'">
 				<div class="p-4 border-b border-neutral-50/5">
@@ -20,6 +22,18 @@ templ DashboardPage(sessions []*models.Session) {
 						<a href="/agents" class="text-xs text-neutral-500 hover:text-neutral-300 flex items-center gap-1" title="Agent Registry">
 							<i class="ph-bold ph-robot"></i>
 						</a>
+					</div>
+					<!-- User Selector -->
+					<div class="mt-2" x-show="users.length > 0" x-cloak>
+						<select
+							x-model="currentUser"
+							class="w-full text-xs bg-neutral-50/5 border border-neutral-50/10 rounded px-2 py-1.5 text-neutral-300 focus:outline-none focus:border-cyan-500/50"
+						>
+							<option value="">All Users</option>
+							<template x-for="u in users" :key="u.username">
+								<option :value="u.username" x-text="u.display_name + ' (' + u.role + ')'"></option>
+							</template>
+						</select>
 					</div>
 				</div>
 				<div x-data="{ filters: new Set() }" class="flex-1 flex flex-col overflow-hidden">
@@ -35,15 +49,23 @@ templ DashboardPage(sessions []*models.Session) {
 							</div>
 							<button
 								class="text-xs text-neutral-600 hover:text-red-400 transition-colors"
-								title="Clear completed sessions"
-								hx-delete="/api/sessions/completed"
-								hx-confirm="Clear all completed sessions?"
+								title="Clear all sessions"
+								hx-delete="/api/sessions/all"
+								hx-target="#session-list"
+								hx-swap="innerHTML"
+								hx-confirm="Clear all sessions?"
 							>
 								<i class="ph-bold ph-trash"></i>
 							</button>
 						</div>
 					</div>
-					<div class="flex-1 overflow-y-auto scrollbar-thin p-2">
+					<div
+						class="flex-1 overflow-y-auto scrollbar-thin p-2"
+						id="session-list"
+						hx-get="/htmx/sessions"
+						hx-trigger="every 5s"
+						hx-swap="innerHTML"
+					>
 						@SessionListItems(sessions)
 					</div>
 				</div>

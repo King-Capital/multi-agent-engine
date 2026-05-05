@@ -1,3 +1,21 @@
+/**
+ * ADVISORY ONLY -- Security checks in this module are NOT enforced at the adapter level.
+ *
+ * The adapters bypass these checks at runtime:
+ *   - claude-code.ts uses `--permission-mode bypassPermissions` (full tool access)
+ *   - codex.ts uses `--full-auto` (no confirmation prompts)
+ *
+ * What these checks DO provide:
+ *   - sanitizeAgentInput(): strips prompt injection patterns from task text
+ *   - validateAgentOutput(): detects leaked credentials in agent output (used by orchestrator to redact)
+ *   - registerPersonaHash() / verifyPersonaIntegrity(): detects persona file tampering after load
+ *   - checkBashCommand(), checkFileAccess(), checkConfigMutation(): domain/path validation logic
+ *
+ * These functions are available for future enforcement (e.g., a sandboxed adapter mode)
+ * but currently only sanitizeAgentInput and validateAgentOutput are called by the orchestrator.
+ * The file-access and bash-command checks are never invoked in the current adapter flow.
+ */
+
 import { readFileSync } from "fs";
 import { join } from "path";
 import { parse as parseYaml } from "yaml";

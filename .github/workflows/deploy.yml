@@ -1,0 +1,105 @@
+name: Deploy MAE Dashboard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'engine/**'
+      - 'dashboard/**'
+      - 'agents/**'
+      - 'configs/**'
+      - 'deploy/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: mae
+          POSTGRES_PASSWORD: mae
+          POSTGRES_DB: mae
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: dashboard/go.sum
+
+      - name: Run migrations
+        run: PGPASSWORD=mae psql -h localhost -U mae -d mae -f dashboard/migrations/001_initial.sql
+
+      - name: Install engine dependencies
+        working-directory: engine
+        run: bun install
+
+      - name: Engine type check
+        working-directory: engine
+        run: bunx tsc --noEmit
+
+      - name: Engine tests
+        working-directory: engine
+        run: bun test
+
+      - name: Dashboard build
+        working-directory: dashboard
+        run: go build -o mae-dashboard .
+
+      - name: Dashboard vet
+        working-directory: dashboard
+        run: go vet ./...
+
+  deploy:
+    needs: test
+    runs-on: self-hosted
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pull latest
+        run: |
+          cd /opt/mae
+          git fetch origin main
+          git reset --hard origin/main
+
+      - name: Install engine dependencies
+        run: |
+          cd /opt/mae/engine
+          bun install --frozen-lockfile
+
+      - name: Run migrations
+        run: psql -U mae -d mae -f /opt/mae/dashboard/migrations/001_initial.sql 2>/dev/null || true
+
+      - name: Build dashboard
+        run: |
+          cd /opt/mae/dashboard
+          go build -o mae-dashboard .
+
+      - name: Restart dashboard
+        run: |
+          sudo systemctl restart mae-dashboard
+          sleep 2
+          systemctl is-active mae-dashboard
+
+      - name: Health check
+        run: |
+          curl -sf http://localhost:3000/api/users > /dev/null
+          echo "Dashboard healthy"
