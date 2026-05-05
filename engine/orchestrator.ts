@@ -19,12 +19,12 @@ import { delegateWithHealing } from "./self-healing";
 import type {
   PlatformAdapter,
   DelegateResult,
+  DelegateOptions,
   Chain,
   ChainStep,
   TeamConfig,
   SessionState,
   TillDoneItem,
-  ThinkingLevel,
 } from "./types";
 
 export class Orchestrator {
@@ -74,7 +74,8 @@ export class Orchestrator {
     }
 
     const chain = getChain(chainName);
-    const sessionName = opts.sessionName ?? `${chainName}-${sessionId}`;
+    const taskSummary = (taskBody.split("\n")[0] ?? "").replace(/^#+\s*/, "").slice(0, 50).trim();
+    const sessionName = opts.sessionName ?? `${taskSummary || chainName}`;
 
     const session: SessionState = {
       id: sessionId,
@@ -136,6 +137,7 @@ export class Orchestrator {
 
     for (let i = 0; i < chain.steps.length; i++) {
       const step = chain.steps[i];
+      if (!step) continue;
 
       if (step.parallel) {
         const results = await this.runParallelStep(session, step, task, previousOutput, adapterName);
@@ -178,9 +180,11 @@ export class Orchestrator {
     const leadPersona = loadPersona(teamConfig.lead.path);
     const leadPrompt = this.buildLeadPrompt(teamConfig, task, previousOutput, step.till_done);
 
+    const leadId = `${step.team}-lead`;
+
     await this.emitter.agentSpawn(
       session.id,
-      `${step.team}-lead`,
+      leadId,
       "orch-1",
       teamConfig.lead.name,
       "lead",
@@ -198,25 +202,15 @@ export class Orchestrator {
     );
 
     // Enforce: leads must not have write/edit tools (only delegate + read tools)
-    const hasWriteTools = leadPersona.tools.some((t) =>
-      ["write", "edit"].includes(t)
+    leadPersona.tools = leadPersona.tools.filter(
+      (t) => !["write", "edit", "delegate"].includes(t)
     );
-    if (hasWriteTools) {
-      console.warn(
-        `[orchestrator] WARNING: Lead ${leadPersona.name} has write/edit tools. ` +
-        `Leads should delegate, not execute. Stripping write tools.`
-      );
-      leadPersona.tools = leadPersona.tools.filter(
-        (t) => !["write", "edit"].includes(t)
-      );
-    }
 
-    // Lock persona integrity -- detect tampering after load
     registerPersonaHash(teamConfig.lead.path);
 
     const sanitizedLeadPrompt = sanitizeAgentInput(leadPrompt);
 
-    const delegateOpts = {
+    const leadOpts = {
       persona: leadPersona,
       systemPrompt: buildSystemPrompt(leadPersona),
       userPrompt: sanitizedLeadPrompt,
@@ -231,24 +225,127 @@ export class Orchestrator {
       teamColor: teamConfig["team-color"],
     };
 
-    const result = await delegateWithHealing({
+    const leadResult = await delegateWithHealing({
       adapter,
-      opts: delegateOpts,
+      opts: leadOpts,
       sessionId: session.id,
       agentRole: "lead",
       onEvent: (type, data) => this.emitter.emit({
         session_id: session.id,
-        agent_id: `${step.team}-lead`,
+        agent_id: leadId,
         event_type: type,
         timestamp: new Date().toISOString(),
         data,
       }),
     });
 
-    this.redactSensitiveOutput(result, leadPersona.name);
+    this.redactSensitiveOutput(leadResult, leadPersona.name);
+    session.totalCost += leadResult.costUsd;
+    session.totalTokens += leadResult.tokensUsed;
 
-    session.totalCost += result.costUsd;
-    session.totalTokens += result.tokensUsed;
+    await this.emitter.costUpdate(session.id, leadId, leadResult.costUsd, leadResult.tokensUsed, 0);
+    await this.emitter.message(
+      session.id, leadId, teamConfig.lead.name, "Orchestrator",
+      leadResult.output.slice(0, 500) + (leadResult.output.length > 500 ? "..." : "")
+    );
+
+    // If lead failed or team has no workers, return lead result directly
+    if (!teamConfig.members.length || leadResult.grade === "FAILED") {
+      return leadResult;
+    }
+
+    // Flat delegation: spawn workers with targeted assignments (or full brief for single worker)
+    const hasMultipleWorkers = teamConfig.members.length > 1;
+    let activeMembers = hasMultipleWorkers
+      ? teamConfig.members.filter((m) => this.parseWorkerAssignment(leadResult.output, m.name) !== null)
+      : [...teamConfig.members];
+
+    if (activeMembers.length === 0) {
+      console.log(`[orchestrator] Lead produced no worker assignments. Using full brief for first worker.`);
+      activeMembers = [teamConfig.members[0]!];
+    }
+
+    console.log(`[orchestrator] Lead briefed. Spawning ${activeMembers.length} worker(s): ${activeMembers.map((m) => m.name).join(", ")}`);
+
+    const workerPromises = activeMembers.map(async (member) => {
+      const workerPersona = loadPersona(member.path);
+      const workerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+
+      await this.emitter.agentSpawn(
+        session.id,
+        workerId,
+        leadId,
+        member.name,
+        "worker",
+        resolveModel(member.model),
+        teamConfig["team-name"],
+        member.color ?? teamConfig["team-color"]
+      );
+
+      const assignment = hasMultipleWorkers
+        ? this.parseWorkerAssignment(leadResult.output, member.name)
+        : null;
+
+      const workerPrompt = assignment
+        ? [
+            `Your assignment from ${teamConfig.lead.name}:`,
+            assignment,
+            "",
+            `Original task context: ${task}`,
+            previousOutput ? `\nPrevious step context:\n${previousOutput}` : "",
+          ].join("\n")
+        : [
+            `Brief from ${teamConfig.lead.name}:`,
+            leadResult.output,
+            "",
+            `Original task: ${task}`,
+            previousOutput ? `\nPrevious step context:\n${previousOutput}` : "",
+            step.till_done ? `\nTill done:\n${step.till_done.map((t) => `- [ ] ${t}`).join("\n")}` : "",
+          ].join("\n");
+
+      const workerOpts: DelegateOptions = {
+        persona: workerPersona,
+        systemPrompt: buildSystemPrompt(workerPersona),
+        userPrompt: sanitizeAgentInput(workerPrompt),
+        model: resolveModel(member.model),
+        thinking: "medium" as const,
+        tools: workerPersona.tools,
+        domain: workerPersona.domain,
+        workingDir: session.workingDir,
+        sessionDir: `data/sessions/${session.id}`,
+        parentId: leadId,
+        teamName: teamConfig["team-name"],
+        teamColor: member.color ?? teamConfig["team-color"],
+      };
+
+      const workerResult = await delegateWithHealing({
+        adapter,
+        opts: workerOpts,
+        sessionId: session.id,
+        agentRole: "worker",
+        onEvent: (type, data) => this.emitter.emit({
+          session_id: session.id,
+          agent_id: workerId,
+          event_type: type,
+          timestamp: new Date().toISOString(),
+          data,
+        }),
+      });
+
+      this.redactSensitiveOutput(workerResult, member.name);
+      session.totalCost += workerResult.costUsd;
+      session.totalTokens += workerResult.tokensUsed;
+
+      await this.emitter.costUpdate(session.id, workerId, workerResult.costUsd, workerResult.tokensUsed, 0);
+      await this.emitter.message(
+        session.id, workerId, member.name, teamConfig.lead.name,
+        workerResult.output.slice(0, 500) + (workerResult.output.length > 500 ? "..." : "")
+      );
+
+      return workerResult;
+    });
+
+    const workerResults = await Promise.all(workerPromises);
 
     const budgets = this.loadBudgets();
     if (budgets && session.totalCost > budgets.max_per_session_usd) {
@@ -256,23 +353,30 @@ export class Orchestrator {
       throw new Error(`Session budget exceeded: $${session.totalCost.toFixed(2)}`);
     }
 
-    await this.emitter.costUpdate(
-      session.id,
-      `${step.team}-lead`,
-      result.costUsd,
-      result.tokensUsed,
-      0
-    );
+    // Combine worker results
+    const combinedOutput = workerResults.map((r) => `[${r.agentName}]:\n${r.output}`).join("\n\n---\n\n");
+    const combinedFindings = workerResults.flatMap((r) => r.findings ?? []);
+    const worstGrade = this.worstGrade(workerResults.map((r) => r.grade));
 
-    await this.emitter.message(
-      session.id,
-      `${step.team}-lead`,
-      teamConfig.lead.name,
-      "Orchestrator",
-      result.output.slice(0, 500) + (result.output.length > 500 ? "..." : "")
-    );
+    return {
+      agentId: leadId,
+      agentName: teamConfig.lead.name,
+      output: combinedOutput,
+      grade: worstGrade,
+      findings: combinedFindings,
+      costUsd: workerResults.reduce((sum, r) => sum + r.costUsd, 0) + leadResult.costUsd,
+      tokensUsed: workerResults.reduce((sum, r) => sum + r.tokensUsed, 0) + leadResult.tokensUsed,
+    };
+  }
 
-    return result;
+  private worstGrade(grades: (string | undefined)[]): "PERFECT" | "VERIFIED" | "PARTIAL" | "FEEDBACK" | "FAILED" | undefined {
+    const order: Record<string, number> = { PERFECT: 0, VERIFIED: 1, PARTIAL: 2, FEEDBACK: 3, FAILED: 4 };
+    let worst: string | undefined;
+    for (const g of grades) {
+      if (!g) continue;
+      if (!worst || (order[g] ?? 0) > (order[worst] ?? 0)) worst = g;
+    }
+    return worst as any;
   }
 
   private async runParallelStep(
@@ -443,6 +547,24 @@ export class Orchestrator {
       .map((m) => `- ${m.name} (${m.model}): ${m["consult-when"] ?? "general tasks"}`)
       .join("\n");
 
+    const hasMultipleWorkers = team.members.length > 1;
+
+    const delegationInstructions = hasMultipleWorkers
+      ? [
+          `You have ${team.members.length} workers. Split the task into independent assignments.`,
+          `Each worker runs IN PARALLEL on the same repo -- assignments MUST NOT touch the same files.`,
+          "",
+          `Output your plan using this exact format for each worker:`,
+          "",
+          ...team.members.map((m) => [
+            `### ASSIGNMENT: ${m.name}`,
+            `[Specific instructions for this worker. Which files to modify, what to change, what to verify.]`,
+            "",
+          ].join("\n")),
+          `If the task is too small to split, assign everything to ${team.members[0]!.name} and give the others "SKIP: No work needed."`,
+        ].join("\n")
+      : `Delegate to your worker as needed. Report back when complete.`;
+
     return [
       `@${team.lead.name}:`,
       "",
@@ -454,8 +576,20 @@ export class Orchestrator {
       "",
       tillDone ? `Till done:\n${tillDone.map((t) => `- [ ] ${t}`).join("\n")}` : "",
       "",
-      `Delegate to your workers as needed. Report back when complete.`,
+      delegationInstructions,
     ].join("\n");
+  }
+
+  private parseWorkerAssignment(leadOutput: string, workerName: string): string | null {
+    const pattern = new RegExp(
+      `### ASSIGNMENT:\\s*${workerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\n([\\s\\S]*?)(?=### ASSIGNMENT:|$)`,
+      "i"
+    );
+    const match = leadOutput.match(pattern);
+    if (!match?.[1]) return null;
+    const assignment = match[1].trim();
+    if (assignment.startsWith("SKIP:")) return null;
+    return assignment;
   }
 
   private buildTillDone(chain: Chain): TillDoneItem[] {
@@ -470,7 +604,7 @@ export class Orchestrator {
         items.push({ description: `${label} complete`, completed: false, active: false });
       }
     }
-    if (items.length > 0) items[0].active = true;
+    if (items.length > 0) items[0]!.active = true;
     return items;
   }
 
@@ -478,25 +612,25 @@ export class Orchestrator {
     let idx = 0;
     const chain = getChain(session.chain);
     for (let i = 0; i <= stepIndex && i < chain.steps.length; i++) {
-      const step = chain.steps[i];
+      const step = chain.steps[i]!;
       const count = step.till_done?.length ?? 1;
       for (let j = 0; j < count; j++) {
         if (idx < session.tillDone.length) {
-          session.tillDone[idx].completed = true;
-          session.tillDone[idx].active = false;
+          session.tillDone[idx]!.completed = true;
+          session.tillDone[idx]!.active = false;
           idx++;
         }
       }
     }
     if (idx < session.tillDone.length) {
-      session.tillDone[idx].active = true;
+      session.tillDone[idx]!.active = true;
     }
   }
 
   private interpolatePrompt(body: string, args: string[]): string {
     let result = body;
     for (let i = 0; i < args.length; i++) {
-      result = result.replaceAll(`$${i + 1}`, args[i]);
+      result = result.replaceAll(`${i + 1}`, args[i]!);
     }
     return result;
   }

@@ -1,6 +1,7 @@
 import { writeFileSync } from "fs";
 import { join } from "path";
 import { resolveModel } from "./config";
+import { sanitizeAgentInput } from "./security";
 import type { DelegateResult, DelegateOptions, PlatformAdapter, ThinkingLevel } from "./types";
 
 const MODEL_ESCALATION: Record<string, string> = {
@@ -72,7 +73,7 @@ export async function delegateWithHealing(ctx: SelfHealContext): Promise<Delegat
     "",
     "## Previous Attempt Failed",
     `Your first attempt failed with: ${result.grade ?? "empty output"}`,
-    result.output ? `Previous output:\n${result.output.slice(0, 1000)}` : "No output was produced.",
+    result.output ? `Previous output:\n${sanitizeAgentInput(result.output.slice(0, 1000))}` : "No output was produced.",
     "Try again with a different approach.",
   ].join("\n");
 
@@ -118,7 +119,7 @@ export async function delegateWithHealing(ctx: SelfHealContext): Promise<Delegat
 
 function logOutput(sessionDir: string, agentName: string, attempt: number, result: DelegateResult): void {
   try {
-    const slug = agentName.toLowerCase().replace(/\s+/g, "-");
+    const slug = agentName.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/^-+|-+$/g, "");
     const path = join(sessionDir, `${slug}_attempt${attempt}.md`);
     const content = [
       `# ${agentName} - Attempt ${attempt}`,

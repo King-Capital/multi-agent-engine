@@ -3,14 +3,14 @@ name: Agent Engine Tests
 on:
   push:
     paths:
-      - 'platforms/multi-agent/engine/**'
-      - 'platforms/multi-agent/agents/**'
-      - 'platforms/multi-agent/configs/**'
+      - 'engine/**'
+      - 'agents/**'
+      - 'configs/**'
   pull_request:
     paths:
-      - 'platforms/multi-agent/engine/**'
-      - 'platforms/multi-agent/agents/**'
-      - 'platforms/multi-agent/configs/**'
+      - 'engine/**'
+      - 'agents/**'
+      - 'configs/**'
 
 jobs:
   test:
@@ -27,15 +27,13 @@ jobs:
       - uses: extractions/setup-just@v2
 
       - name: Install dependencies
-        working-directory: platforms/multi-agent/engine
+        working-directory: engine
         run: bun install
 
       - name: Run security + integration tests
-        working-directory: platforms/multi-agent
         run: just test
 
       - name: Verify all configs load
-        working-directory: platforms/multi-agent
         run: |
           just teams > /dev/null
           just chains > /dev/null

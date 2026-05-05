@@ -28,6 +28,15 @@ Orchestration engine that coordinates teams of AI agents through structured chai
     Dashboard (Go/templ/HTMX) ------> SSE event stream
 ```
 
+## Prerequisites
+
+| Tool | Install |
+|------|---------|
+| [Bun](https://bun.sh) | See bun.sh for install instructions |
+| [just](https://github.com/casey/just) | `brew install just` |
+| [Go](https://go.dev) (1.22+) | `brew install go` |
+| [templ](https://templ.guide) | `go install github.com/a-h/templ/cmd/templ@latest` |
+
 ## Quickstart
 
 ```bash

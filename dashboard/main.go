@@ -65,6 +65,8 @@ func main() {
 		r.Get("/sessions/{sessionID}/stream", handleSSE)
 		r.Get("/stream", handleSSEAll)
 		r.Delete("/sessions/completed", handleClearCompleted)
+		r.Delete("/sessions/stale", handleClearStale)
+		r.Delete("/sessions/all", handleClearAll)
 		r.Post("/sessions/{sessionID}/message", handleUserMessage)
 	})
 
@@ -99,7 +101,7 @@ func main() {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
@@ -561,6 +563,23 @@ Return ONLY the improved system prompt markdown, no explanation.`, slug, strings
 
 func handleClearCompleted(w http.ResponseWriter, r *http.Request) {
 	store.ClearCompleted()
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
+}
+
+func handleClearStale(w http.ResponseWriter, r *http.Request) {
+	store.ClearStale(10 * time.Minute)
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
+}
+
+func handleClearAll(w http.ResponseWriter, r *http.Request) {
+	store.ClearAll()
+	if r.Header.Get("HX-Request") == "true" {
+		sessions := store.ListSessions()
+		templates.SessionListItems(sessions).Render(r.Context(), w)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
 }

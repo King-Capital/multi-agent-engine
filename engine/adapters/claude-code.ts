@@ -5,6 +5,23 @@ import type { PlatformAdapter, DelegateOptions, DelegateResult } from "../types"
 export class ClaudeCodeAdapter implements PlatformAdapter {
   name = "claude-code";
 
+  private static readonly MODEL_MAP: Record<string, string> = {
+    "litellm/opus-nocache": "claude-opus-4-6",
+    "litellm/opus": "claude-opus-4-6",
+    "litellm/sonnet-nocache": "claude-sonnet-4-6",
+    "litellm/sonnet": "claude-sonnet-4-6",
+    "litellm/haiku": "claude-haiku-4-5",
+    "litellm/pro-nocache": "claude-sonnet-4-6",
+    "litellm/flash": "claude-haiku-4-5",
+  };
+
+  private resolveCliModel(model: string): string {
+    if (ClaudeCodeAdapter.MODEL_MAP[model]) return ClaudeCodeAdapter.MODEL_MAP[model];
+    if (model.startsWith("claude-")) return model;
+    if (model.startsWith("litellm/")) return "claude-sonnet-4-6";
+    return model;
+  }
+
   async isAvailable(): Promise<boolean> {
     try {
       const result = await $`which claude`.text();
@@ -33,7 +50,7 @@ export class ClaudeCodeAdapter implements PlatformAdapter {
     const args = [
       "claude",
       "--print",
-      "--model", opts.model,
+      "--model", this.resolveCliModel(opts.model),
       "--system-prompt", systemPrompt,
       "--max-turns", "25",
       "--output-format", "text",

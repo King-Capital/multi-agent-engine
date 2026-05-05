@@ -38,7 +38,7 @@ export function loadPersona(path: string): PersonaConfig {
   const raw = readFileSync(fullPath, "utf-8");
   const fmMatch = raw.match(/^---\n([\s\S]*?)\n---/);
   if (!fmMatch) throw new Error(`No frontmatter in ${path}`);
-  return parseYaml(fmMatch[1]) as PersonaConfig;
+  return parseYaml(fmMatch[1]!) as PersonaConfig;
 }
 
 export function loadPrompt(name: string): { config: PromptConfig; body: string } {
@@ -47,8 +47,8 @@ export function loadPrompt(name: string): { config: PromptConfig; body: string }
   const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!fmMatch) throw new Error(`No frontmatter in prompt ${name}`);
   return {
-    config: parseYaml(fmMatch[1]) as PromptConfig,
-    body: fmMatch[2].trim(),
+    config: parseYaml(fmMatch[1]!) as PromptConfig,
+    body: fmMatch[2]!.trim(),
   };
 }
 

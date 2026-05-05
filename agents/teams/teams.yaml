@@ -35,13 +35,27 @@ teams:
       model: quality
       color: "#00d4ff"
     members:
-      - name: Builder
+      - name: Builder Alpha
         path: agents/personas/builder.md
         model: main
         color: "#00d4ff"
         consult-when: >
-          Code implementation, file creation, editing, running builds
-          and tests, infrastructure changes.
+          Primary builder. Code implementation, file creation, editing,
+          running builds and tests.
+      - name: Builder Beta
+        path: agents/personas/builder.md
+        model: quality
+        color: "#00b4d8"
+        consult-when: >
+          Secondary builder. Parallel implementation, handles independent
+          fixes and changes simultaneously.
+      - name: Builder Gamma
+        path: agents/personas/builder.md
+        model: main
+        color: "#0090b0"
+        consult-when: >
+          Tertiary builder. Additional parallelism for large fix sets,
+          docs, config, and infrastructure changes.
 
   - team-name: Engineering B
     team-color: "#00d4ff"

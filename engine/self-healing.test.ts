@@ -28,13 +28,13 @@ function makeSuccess(output = "Done"): DelegateResult {
 
 function makeOpts(): DelegateOptions {
   return {
-    persona: { name: "Test", model: "main", expertise: "", skills: [], tools: ["read"], domain: { read: ["**/*"], write: [] } },
+    persona: { name: "Test", model: "main", expertise: "", skills: [], tools: ["read"], domain: { read: ["**/*"], write: [], update: [] } },
     systemPrompt: "test",
     userPrompt: "test task",
     model: "litellm/sonnet-nocache",
     thinking: "medium",
     tools: ["read"],
-    domain: { read: ["**/*"], write: [] },
+    domain: { read: ["**/*"], write: [], update: [] },
     workingDir: "/tmp",
     sessionDir: "/tmp/test-session",
     teamName: "Test",

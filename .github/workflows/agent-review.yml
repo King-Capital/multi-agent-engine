@@ -35,16 +35,14 @@ jobs:
       - uses: extractions/setup-just@v2
 
       - name: Install engine dependencies
-        working-directory: platforms/multi-agent/engine
+        working-directory: engine
         run: bun install
 
       - name: Run agent review (dry-run)
-        working-directory: platforms/multi-agent
         run: |
           just dry "Review PR #${{ github.event.pull_request.number }}: $(git log --oneline -1)"
         env:
           DASHBOARD_URL: ""
 
       - name: Run tests
-        working-directory: platforms/multi-agent
         run: just test

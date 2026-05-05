@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.log
+dashboard/dashboard-bin
+dashboard/**/*_templ.go
+data/sessions/
+.env
+.DS_Store
