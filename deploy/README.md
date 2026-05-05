@@ -18,7 +18,7 @@
    systemctl daemon-reload
    systemctl enable --now mae-dashboard
    ```
-4. **Add Caddy snippet** to CT 205's Caddyfile (see `caddy-snippet.txt`), replacing `<CT_LAN_IP>` with the MAE container's LAN IP
+4. **Add Caddy snippet** to CT 205's Caddyfile (see `caddy-snippet.txt`), replacing `10.71.20.72` with the MAE container's LAN IP
 5. **Add DNS record:** `ai-agents.rodaddy.live` -> CT 205 (10.71.20.55) via Pi-hole
 6. **Verify:**
    ```bash
