@@ -105,6 +105,14 @@ export function buildSystemPrompt(persona: PersonaConfig): string {
     .join("\n");
 }
 
+export function loadModelRouting(): {
+  budgets?: { max_per_session_usd: number; warn_at_usd: number; max_per_agent_usd: number; max_total_tokens: number };
+  aliases?: Record<string, string>;
+  models?: Record<string, { primary: string }>;
+} {
+  return cachedRead("configs/model-routing.yaml");
+}
+
 export function resolveModel(alias: string): string {
   const config = cachedRead<{
     aliases?: Record<string, string>;

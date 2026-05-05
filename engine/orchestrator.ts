@@ -7,6 +7,7 @@ import {
   getChain,
   getTeam,
   loadPrompt,
+  loadModelRouting,
 } from "./config";
 import { EventEmitter } from "./event-emitter";
 import {
@@ -249,6 +250,12 @@ export class Orchestrator {
     session.totalCost += result.costUsd;
     session.totalTokens += result.tokensUsed;
 
+    const budgets = this.loadBudgets();
+    if (budgets && session.totalCost > budgets.max_per_session_usd) {
+      console.error(`[orchestrator] Budget exceeded: $${session.totalCost.toFixed(2)} > $${budgets.max_per_session_usd}`);
+      throw new Error(`Session budget exceeded: $${session.totalCost.toFixed(2)}`);
+    }
+
     await this.emitter.costUpdate(
       session.id,
       `${step.team}-lead`,
@@ -371,6 +378,12 @@ export class Orchestrator {
 
     session.totalCost += result.costUsd;
     session.totalTokens += result.tokensUsed;
+
+    const budgets = this.loadBudgets();
+    if (budgets && session.totalCost > budgets.max_per_session_usd) {
+      console.error(`[orchestrator] Budget exceeded: $${session.totalCost.toFixed(2)} > $${budgets.max_per_session_usd}`);
+      throw new Error(`Session budget exceeded: $${session.totalCost.toFixed(2)}`);
+    }
 
     return result;
   }
@@ -498,6 +511,13 @@ export class Orchestrator {
       .replace(/ghp_[A-Za-z0-9_]{36}/g, "[REDACTED]")
       .replace(/sk-[A-Za-z0-9]{48}/g, "[REDACTED]")
       .replace(/sk-ant-[A-Za-z0-9-]{95}/g, "[REDACTED]");
+  }
+
+  private loadBudgets(): { max_per_session_usd: number; warn_at_usd: number } | null {
+    try {
+      const config = loadModelRouting();
+      return config.budgets ?? null;
+    } catch { return null; }
   }
 
   private getAdapter(name?: string): PlatformAdapter {

@@ -232,12 +232,15 @@ export function getDomainTemplate(name: string): DomainConfig | undefined {
 function matchGlob(path: string, pattern: string): boolean {
   if (pattern === "**/*") return true;
 
-  const escaped = pattern
+  // Normalize -- block path traversal
+  const normalizedPath = path.replace(/\.\.\//g, "");
+
+  const regexStr = pattern
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
     .replace(/\*\*/g, "{{GLOBSTAR}}")
     .replace(/\*/g, "[^/]*")
     .replace(/\?/g, "[^/]")
     .replace(/{{GLOBSTAR}}/g, ".*");
 
-  return new RegExp(`^${escaped}$`).test(path) || path.startsWith(pattern.replace(/\*/g, ""));
+  return new RegExp(`^${regexStr}$`).test(normalizedPath);
 }
