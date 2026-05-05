@@ -1,0 +1,36 @@
+package templates
+
+import "github.com/goinfinite/ui/src/import"
+
+templ Layout(title string) {
+	<!DOCTYPE html>
+	<html lang="en" class="h-full">
+		<head>
+			<meta charset="UTF-8"/>
+			<title>{ title } | Agent Dashboard</title>
+			@uiImport.HeadTagsMinimalCss()
+			@uiImport.HeadTagsFullJs()
+			<script src="https://cdn.jsdelivr.net/npm/idiomorph@0.3.0/dist/idiomorph-ext.min.js"></script>
+			<style>
+				body {
+					font-family: "Lato", "Helvetica Neue", Arial, sans-serif;
+					background: #0a0e17;
+					color: #e2e8f0;
+				}
+				.agent-line { border-left: 2px solid #334155; margin-left: 12px; padding-left: 12px; }
+				.pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+				@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+				.glass { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(8px); }
+				.neon-green { color: #36f9f6; }
+				.neon-pink { color: #ff6b9d; }
+				.neon-yellow { color: #ffd93d; }
+				.scrollbar-thin::-webkit-scrollbar { width: 6px; }
+				.scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+				.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+			</style>
+		</head>
+		<body class="h-full bg-[#0a0e17] text-neutral-200">
+			{ children... }
+		</body>
+	</html>
+}

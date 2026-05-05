@@ -1,0 +1,158 @@
+orchestrator:
+  name: Orchestrator
+  path: agents/personas/orchestrator.md
+  model: quality
+  color: "#36f9f6"
+
+teams:
+  - team-name: Planning
+    team-color: "#ffd93d"
+    consult-when: >
+      Analyzing codebases, producing implementation plans, exploring
+      file structures, mapping dependencies, assessing risks.
+    lead:
+      name: Planning Lead
+      path: agents/personas/planner.md
+      model: quality
+      color: "#ffd93d"
+    members:
+      - name: Scout
+        path: agents/personas/scout.md
+        model: fast
+        color: "#ffd93d"
+        consult-when: >
+          Fast codebase exploration, file discovery, dependency mapping,
+          quick triage of large codebases.
+
+  - team-name: Engineering
+    team-color: "#00d4ff"
+    consult-when: >
+      Writing code, implementing features, fixing bugs, building
+      infrastructure, creating new files, modifying existing code.
+    lead:
+      name: Engineering Lead
+      path: agents/personas/planner.md
+      model: quality
+      color: "#00d4ff"
+    members:
+      - name: Builder
+        path: agents/personas/builder.md
+        model: main
+        color: "#00d4ff"
+        consult-when: >
+          Code implementation, file creation, editing, running builds
+          and tests, infrastructure changes.
+
+  - team-name: Engineering B
+    team-color: "#00d4ff"
+    consult-when: >
+      Parallel code implementation with a different model family
+      for cross-model redundancy.
+    lead:
+      name: Engineering Lead (B)
+      path: agents/personas/planner.md
+      model: pro
+      color: "#00d4ff"
+    members:
+      - name: Builder (B)
+        path: agents/personas/builder.md
+        model: pro
+        color: "#00b4d8"
+        consult-when: >
+          Same task as primary builder but using Gemini model family.
+
+  - team-name: Validation
+    team-color: "#ff6b9d"
+    consult-when: >
+      Code review, security review, QA testing, verifying implementations
+      against requirements, grading code quality.
+    lead:
+      name: Validation Lead
+      path: agents/personas/validator.md
+      model: quality
+      color: "#ff6b9d"
+    members:
+      - name: Code Reviewer
+        path: agents/personas/reviewer.md
+        model: quality
+        color: "#ff6b9d"
+        consult-when: >
+          Code correctness review, quality checks, P0-P3 severity
+          grading, atomic claim verification.
+      - name: Security Reviewer
+        path: agents/personas/red-team.md
+        model: quality
+        color: "#ff4466"
+        consult-when: >
+          OWASP checks, prompt injection, command injection, credential
+          leaks, domain escape, config-as-execution attacks.
+
+  - team-name: Validation B
+    team-color: "#ff6b9d"
+    consult-when: >
+      Parallel validation with different model for cross-model verification.
+    lead:
+      name: Validation Lead (B)
+      path: agents/personas/validator.md
+      model: pro
+      color: "#ff6b9d"
+    members:
+      - name: Code Reviewer (B)
+        path: agents/personas/reviewer.md
+        model: pro
+        color: "#ff6b9d"
+        consult-when: >
+          Same review scope using Gemini model family for cross-model validation.
+
+  # --- Swarm Teams (Review) ---
+
+  - team-name: Red Team
+    team-color: "#ff4466"
+    consult-when: >
+      Adversarial review, security testing, attack surface analysis,
+      finding what others miss, breaking assumptions.
+    lead:
+      name: Validation Lead
+      path: agents/personas/validator.md
+      model: quality
+      color: "#ff4466"
+    members:
+      - name: Adversarial Reviewer
+        path: agents/personas/adversarial-reviewer.md
+        model: quality
+        color: "#ff2244"
+        consult-when: >
+          Devil's advocate review, assumption challenging, attack vector
+          identification, edge case discovery.
+      - name: Security Reviewer
+        path: agents/personas/red-team.md
+        model: quality
+        color: "#ff4466"
+        consult-when: >
+          OWASP, injection, credential leaks, domain escape, prompt injection.
+
+  - team-name: Blue Team
+    team-color: "#4488ff"
+    consult-when: >
+      Correctness verification, quality review, maintainability assessment,
+      deterministic claim validation.
+    lead:
+      name: Validation Lead (B)
+      path: agents/personas/validator.md
+      model: pro
+      color: "#4488ff"
+    members:
+      - name: Correctness Reviewer
+        path: agents/personas/correctness-reviewer.md
+        model: quality
+        color: "#4488ff"
+        consult-when: >
+          Atomic claim verification, deterministic checks, type safety,
+          edge case coverage, spec compliance.
+      - name: Quality Reviewer
+        path: agents/personas/quality-reviewer.md
+        model: pro
+        color: "#66aaff"
+        consult-when: >
+          Maintainability, naming, structure, duplication, dead code,
+          test quality, readability.

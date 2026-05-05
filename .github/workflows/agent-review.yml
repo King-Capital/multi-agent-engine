@@ -1,0 +1,50 @@
+name: Multi-Agent Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  workflow_dispatch:
+    inputs:
+      chain:
+        description: 'Chain to run (review-only, plan-build-review, scout-then-plan)'
+        required: false
+        default: 'review-only'
+      task:
+        description: 'Task description'
+        required: false
+        default: 'Review the PR changes'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  agent-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: extractions/setup-just@v2
+
+      - name: Install engine dependencies
+        working-directory: platforms/multi-agent/engine
+        run: bun install
+
+      - name: Run agent review (dry-run)
+        working-directory: platforms/multi-agent
+        run: |
+          just dry "Review PR #${{ github.event.pull_request.number }}: $(git log --oneline -1)"
+        env:
+          DASHBOARD_URL: ""
+
+      - name: Run tests
+        working-directory: platforms/multi-agent
+        run: just test

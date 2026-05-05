@@ -1,0 +1,291 @@
+package templates
+
+import (
+	"fmt"
+	"github.com/rodaddy/multi-agent-dashboard/internal/models"
+)
+
+templ DashboardPage(sessions []*models.Session) {
+	@Layout("Dashboard") {
+		<div class="flex h-full" x-data="{ selectedSession: '', sidebarWidth: 288 }">
+			<!-- Sidebar: Session List (resizable) -->
+			<aside class="border-r border-neutral-50/5 bg-neutral-50/3 flex flex-col h-full flex-shrink-0" :style="'width:' + sidebarWidth + 'px'">
+				<div class="p-4 border-b border-neutral-50/5">
+					<h1 class="text-lg font-bold flex items-center gap-2">
+						<i class="ph-bold ph-lightning text-xl neon-green"></i>
+						Agent Dashboard
+					</h1>
+					<div class="flex items-center justify-between">
+						<p class="text-xs text-neutral-400 mt-1">Multi-Agent Orchestration</p>
+						<a href="/agents" class="text-xs text-neutral-500 hover:text-neutral-300 flex items-center gap-1" title="Agent Registry">
+							<i class="ph-bold ph-robot"></i>
+						</a>
+					</div>
+				</div>
+				<div x-data="{ filters: new Set() }" class="flex-1 flex flex-col overflow-hidden">
+					<div class="px-2 pt-2 border-b border-neutral-50/5 pb-2 flex-shrink-0">
+						<div class="flex gap-1 items-center justify-between">
+							<div class="flex gap-1 flex-wrap">
+								<button class="text-xs px-1.5 py-0.5 rounded transition-colors" :class="filters.size === 0 ? 'bg-neutral-50/10 text-neutral-200' : 'text-neutral-500 hover:text-neutral-300'" @click="filters.clear(); $el.closest('[x-data]').__x.$data.filters = new Set()">All</button>
+								<button class="text-xs px-2 py-0.5 rounded transition-all" :class="filters.has('active') ? 'bg-green-500 text-white ring-1 ring-green-400' : 'bg-green-500/15 text-green-400 hover:bg-green-500/25'" @click="filters.has('active') ? filters.delete('active') : filters.add('active'); filters = new Set(filters)">Active</button>
+								<button class="text-xs px-2 py-0.5 rounded transition-all" :class="filters.has('waiting') ? 'bg-yellow-500 text-white ring-1 ring-yellow-400' : 'bg-yellow-500/15 text-yellow-400 hover:bg-yellow-500/25'" @click="filters.has('waiting') ? filters.delete('waiting') : filters.add('waiting'); filters = new Set(filters)">Wait</button>
+								<button class="text-xs px-2 py-0.5 rounded transition-all" :class="filters.has('paused') ? 'bg-amber-500 text-white ring-1 ring-amber-400' : 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'" @click="filters.has('paused') ? filters.delete('paused') : filters.add('paused'); filters = new Set(filters)">Pause</button>
+								<button class="text-xs px-2 py-0.5 rounded transition-all" :class="filters.has('completed') ? 'bg-blue-500 text-white ring-1 ring-blue-400' : 'bg-blue-500/15 text-blue-400 hover:bg-blue-500/25'" @click="filters.has('completed') ? filters.delete('completed') : filters.add('completed'); filters = new Set(filters)">Done</button>
+								<button class="text-xs px-2 py-0.5 rounded transition-all" :class="filters.has('error') ? 'bg-red-500 text-white ring-1 ring-red-400' : 'bg-red-500/15 text-red-400 hover:bg-red-500/25'" @click="filters.has('error') ? filters.delete('error') : filters.add('error'); filters = new Set(filters)">Error</button>
+							</div>
+							<button
+								class="text-xs text-neutral-600 hover:text-red-400 transition-colors"
+								title="Clear completed sessions"
+								hx-delete="/api/sessions/completed"
+								hx-confirm="Clear all completed sessions?"
+							>
+								<i class="ph-bold ph-trash"></i>
+							</button>
+						</div>
+					</div>
+					<div class="flex-1 overflow-y-auto scrollbar-thin p-2">
+						@SessionListItems(sessions)
+					</div>
+				</div>
+			</aside>
+
+			<!-- Resize Handle -->
+			<div
+				class="w-1 cursor-col-resize hover:bg-cyan-500/30 active:bg-cyan-500/50 transition-colors flex-shrink-0"
+				@mousedown.prevent="
+					const startX = $event.clientX;
+					const startW = sidebarWidth;
+					const onMove = (e) => { sidebarWidth = Math.max(200, Math.min(600, startW + e.clientX - startX)); };
+					const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+					document.addEventListener('mousemove', onMove);
+					document.addEventListener('mouseup', onUp);
+				"
+			></div>
+
+			<!-- Main Content -->
+			<main class="flex-1 flex flex-col h-full overflow-hidden">
+				if len(sessions) == 0 {
+					@EmptyState()
+				} else {
+					<div class="p-4 text-center text-neutral-500">
+						<p>Select a session from the sidebar, or start an agent team to begin.</p>
+					</div>
+				}
+			</main>
+		</div>
+	}
+}
+
+templ EmptyState() {
+	<div class="flex-1 flex items-center justify-center">
+		<div class="text-center max-w-md">
+			<i class="ph-duotone ph-robot text-6xl neon-green mb-4 block"></i>
+			<h2 class="text-xl font-bold mb-2">No Active Sessions</h2>
+			<p class="text-neutral-400 mb-6">
+				Start an agent team to see live orchestration here.
+			</p>
+			<div class="glass rounded-lg p-4 text-left text-sm">
+				<p class="text-neutral-300 font-bold mb-2">Quick start:</p>
+				<code class="block text-xs neon-green mb-1">
+					# Post an event to start a session
+				</code>
+				<code class="block text-xs text-neutral-400">
+					{ `curl -X POST http://localhost:8400/api/events \` }
+				</code>
+				<code class="block text-xs text-neutral-400">
+					{ `  -H "Content-Type: application/json" \` }
+				</code>
+				<code class="block text-xs text-neutral-400">
+					{ `  -d '{"session_id":"test","event_type":"session_start",...}'` }
+				</code>
+			</div>
+		</div>
+	</div>
+}
+
+templ SessionPage(sess *models.Session) {
+	@Layout(sess.Name) {
+		<div class="flex h-full" x-data="{ leftW: 320, rightW: 288 }">
+			<!-- Left: Agent Tree + Costs -->
+			<aside class="border-r border-neutral-50/5 bg-neutral-50/3 flex flex-col h-full flex-shrink-0" :style="'width:' + leftW + 'px'">
+				<div class="p-3 border-b border-neutral-50/5">
+					<a href="/" class="text-xs text-neutral-500 hover:text-neutral-300 flex items-center gap-1">
+						<i class="ph-bold ph-arrow-left"></i> Sessions
+					</a>
+					<h1 class="text-base font-bold mt-1 flex items-center gap-2">
+						<i class="ph-bold ph-lightning neon-green"></i>
+						{ sess.Name }
+					</h1>
+					<div class="flex items-center gap-3 text-xs text-neutral-400 mt-1">
+						<span>
+							<i class="ph-bold ph-timer"></i>
+							{ formatDuration(sess.ElapsedMs) }
+						</span>
+						<span>
+							<i class="ph-bold ph-coins"></i>
+							{ fmt.Sprintf("$%.3f", sess.TotalCost) }
+						</span>
+						<span class={ "px-1.5 py-0.5 rounded text-xs " + sessionStatusClass(sess.Status) }>
+							{ sess.Status }
+						</span>
+					</div>
+				</div>
+
+				<!-- Agent Tree -->
+				<div
+					class="flex-1 overflow-y-auto scrollbar-thin p-3"
+					id="agent-tree"
+					hx-get={ fmt.Sprintf("/htmx/session/%s/agents", sess.ID) }
+					hx-trigger="every 3s"
+					hx-swap="innerHTML"
+				>
+					@AgentTree(sess)
+				</div>
+
+				<!-- Cost Summary -->
+				<div
+					class="border-t border-neutral-50/5 p-3"
+					id="costs"
+					hx-get={ fmt.Sprintf("/htmx/session/%s/costs", sess.ID) }
+					hx-trigger="every 5s"
+					hx-swap="innerHTML"
+				>
+					@CostTracker(sess)
+				</div>
+			</aside>
+
+			<!-- Left Resize Handle -->
+			<div
+				class="w-1 cursor-col-resize hover:bg-cyan-500/30 active:bg-cyan-500/50 transition-colors flex-shrink-0"
+				@mousedown.prevent="
+					const startX = $event.clientX;
+					const startW = leftW;
+					const onMove = (e) => { leftW = Math.max(200, Math.min(500, startW + e.clientX - startX)); };
+					const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+					document.addEventListener('mousemove', onMove);
+					document.addEventListener('mouseup', onUp);
+				"
+			></div>
+
+			<!-- Center: Conversation Stream -->
+			<main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+				<div class="p-3 border-b border-neutral-50/5 flex items-center justify-between">
+					<h2 class="text-sm font-bold">Conversation Stream</h2>
+					<div class="flex items-center gap-2">
+						if sess.TillDone != nil {
+							<span class="text-xs neon-green">
+								TillDone: { fmt.Sprintf("[%d/%d]", sess.TillDone.Completed, sess.TillDone.Total) }
+							</span>
+						}
+					</div>
+				</div>
+				<div
+					class="flex-1 overflow-y-auto scrollbar-thin p-4"
+					id="conversation"
+					hx-get={ fmt.Sprintf("/htmx/session/%s/conversation", sess.ID) }
+					hx-trigger="every 2s"
+					hx-swap="innerHTML scroll:bottom"
+				>
+					@ConversationStream(sess)
+				</div>
+				<!-- Chat Input -->
+				<div class="border-t border-neutral-50/5 p-3" x-data="{ msg: '' }">
+					<form
+						class="flex gap-2"
+						hx-post={ fmt.Sprintf("/api/sessions/%s/message", sess.ID) }
+						hx-swap="none"
+						@submit="setTimeout(() => msg = '', 100)"
+					>
+						<input
+							type="text"
+							name="content"
+							x-model="msg"
+							placeholder="Message the orchestrator..."
+							class="flex-1 bg-neutral-50/5 border border-neutral-50/10 rounded-md px-3 py-2 text-sm text-neutral-200 placeholder-neutral-600 focus:outline-none focus:border-cyan-500/50"
+							autocomplete="off"
+						/>
+						<button
+							type="submit"
+							class="px-3 py-2 bg-cyan-500/20 text-cyan-400 rounded-md text-sm hover:bg-cyan-500/30 transition-colors"
+							:disabled="!msg.trim()"
+						>
+							<i class="ph-bold ph-paper-plane-tilt"></i>
+						</button>
+					</form>
+				</div>
+			</main>
+
+			<!-- Right Resize Handle -->
+			<div
+				class="w-1 cursor-col-resize hover:bg-cyan-500/30 active:bg-cyan-500/50 transition-colors flex-shrink-0"
+				@mousedown.prevent="
+					const startX = $event.clientX;
+					const startW = rightW;
+					const onMove = (e) => { rightW = Math.max(200, Math.min(500, startW - (e.clientX - startX))); };
+					const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+					document.addEventListener('mousemove', onMove);
+					document.addEventListener('mouseup', onUp);
+				"
+			></div>
+
+			<!-- Right: TillDone Panel -->
+			<aside class="border-l border-neutral-50/5 bg-neutral-50/3 flex flex-col h-full flex-shrink-0" :style="'width:' + rightW + 'px'">
+				<div class="p-3 border-b border-neutral-50/5">
+					<h2 class="text-sm font-bold flex items-center gap-2">
+						<i class="ph-bold ph-check-square neon-green"></i>
+						TillDone
+					</h2>
+				</div>
+				<div
+					class="flex-1 overflow-y-auto scrollbar-thin p-3"
+					id="tilldone"
+					hx-get={ fmt.Sprintf("/htmx/session/%s/tilldone", sess.ID) }
+					hx-trigger="every 3s"
+					hx-swap="innerHTML"
+				>
+					if sess.TillDone != nil {
+						@TillDonePanel(sess.TillDone)
+					} else {
+						<p class="text-xs text-neutral-500">Waiting for TillDone list...</p>
+					}
+				</div>
+
+				<!-- Task Prompt -->
+				<div class="border-t border-neutral-50/5 p-3">
+					<p class="text-xs text-neutral-500 font-bold mb-1">Task</p>
+					<p class="text-xs text-neutral-400">{ sess.TaskPrompt }</p>
+				</div>
+			</aside>
+		</div>
+	}
+}
+
+func sessionStatusClass(status string) string {
+	switch status {
+	case "active":
+		return "bg-green-500/20 text-green-400"
+	case "waiting":
+		return "bg-yellow-500/20 text-yellow-400"
+	case "paused":
+		return "bg-amber-500/20 text-amber-400"
+	case "completed":
+		return "bg-blue-500/20 text-blue-400"
+	case "error":
+		return "bg-red-500/20 text-red-400"
+	default:
+		return "bg-neutral-500/20 text-neutral-400"
+	}
+}
+
+func formatDuration(ms int64) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%dms", ms)
+	}
+	secs := ms / 1000
+	if secs < 60 {
+		return fmt.Sprintf("%ds", secs)
+	}
+	mins := secs / 60
+	secs = secs % 60
+	return fmt.Sprintf("%dm %ds", mins, secs)
+}

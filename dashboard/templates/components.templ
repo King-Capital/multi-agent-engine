@@ -1,0 +1,454 @@
+package templates
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+	"github.com/rodaddy/multi-agent-dashboard/internal/models"
+)
+
+// --- Session List ---
+
+templ SessionList(sessions []*models.Session) {
+	@SessionListItems(sessions)
+}
+
+templ SessionListItems(sessions []*models.Session) {
+	if len(sessions) == 0 {
+		<p class="text-xs text-neutral-500 p-2">No sessions yet.</p>
+	}
+	for _, sess := range sessions {
+			<a
+				href={ templ.SafeURL(fmt.Sprintf("/session/%s", sess.ID)) }
+				class="block p-2.5 rounded-md mb-1 hover:bg-neutral-50/5 transition-colors cursor-pointer"
+				data-status={ sess.Status }
+				x-show={ "filters.size === 0 || filters.has('" + sess.Status + "')" }
+				x-transition
+			>
+				<!-- Session name with chain type badge -->
+				<div class="flex items-center gap-1.5 mb-0.5">
+					<span class={ "w-2 h-2 rounded-full flex-shrink-0 " + sessionDotClass(sess.Status) }></span>
+					<span class="text-sm font-bold truncate">{ sess.Name }</span>
+				</div>
+				<!-- Chain + task info -->
+				if sess.TeamConfig != "" {
+					<div class="ml-3.5 mb-0.5">
+						<span class="text-xs px-1 py-0.25 rounded bg-neutral-50/5 text-neutral-400">
+							{ sess.TeamConfig }
+						</span>
+					</div>
+				}
+				if sess.TaskPrompt != "" {
+					<p class="text-xs text-neutral-500 ml-3.5 truncate" title={ sess.TaskPrompt }>
+						{ truncateText(sess.TaskPrompt, 60) }
+					</p>
+				}
+				<!-- Stats row -->
+				<div class="flex items-center gap-2 text-xs text-neutral-600 mt-1 ml-3.5">
+					<span title="Agents">
+						<i class="ph-bold ph-users"></i>
+						{ fmt.Sprintf("%d", len(sess.Agents)) }
+					</span>
+					<span title="Cost">
+						<i class="ph-bold ph-coins"></i>
+						{ fmt.Sprintf("$%.2f", sess.TotalCost) }
+					</span>
+					<span title="Duration">
+						<i class="ph-bold ph-timer"></i>
+						{ formatDuration(sess.ElapsedMs) }
+					</span>
+					<span class="text-neutral-700">
+						{ sess.ID }
+					</span>
+				</div>
+			</a>
+	}
+}
+
+// --- Agent Tree ---
+
+templ AgentTree(sess *models.Session) {
+	if len(sess.Agents) == 0 {
+		<p class="text-xs text-neutral-500">Waiting for agents to spawn...</p>
+	} else {
+		for _, agent := range getRootAgents(sess) {
+			@AgentNode(agent, sess, 0)
+		}
+	}
+}
+
+templ AgentNode(agent *models.Agent, sess *models.Session, depth int) {
+	<div class={ agentNodeClass(depth) }>
+		<div class="flex items-center gap-1.5 py-1">
+			<!-- Role icon -->
+			<span class={ "text-sm " + roleIconColor(agent) }>
+				{ roleIcon(agent.Role) }
+			</span>
+			<!-- Status indicator -->
+			<span class={ "w-1.5 h-1.5 rounded-full " + statusDotClass(agent.Status) }></span>
+			<!-- Name -->
+			<span class="text-xs font-bold truncate" style={ "color:" + agentColor(agent) }>
+				{ agent.Name }
+			</span>
+		</div>
+		<div class="flex items-center gap-2 text-xs text-neutral-500 ml-5">
+			<span title="Cost">
+				<i class="ph-bold ph-coins"></i>
+				{ fmt.Sprintf("$%.3f", agent.CostUSD) }
+			</span>
+			<span title="Context">
+				<i class="ph-bold ph-brain"></i>
+				{ formatTokens(agent.ContextTokens) }
+			</span>
+			if agent.Model != "" {
+				<span class="text-neutral-600 truncate max-w-20" title={ agent.Model }>
+					{ shortModel(agent.Model) }
+				</span>
+			}
+		</div>
+		<!-- Children -->
+		for _, child := range getChildren(sess, agent.ID) {
+			@AgentNode(child, sess, depth+1)
+		}
+	</div>
+}
+
+// --- Conversation Stream ---
+
+templ ConversationStream(sess *models.Session) {
+	for _, evt := range sess.Events {
+		switch evt.EventType {
+			case models.EventMessage:
+				@MessageBubble(evt, sess)
+			case models.EventToolCall:
+				@ToolCallEntry(evt, sess)
+			case models.EventDomainBlock:
+				@DomainBlockEntry(evt)
+			case models.EventSelfHeal:
+				@SelfHealEntry(evt, sess)
+			case models.EventError:
+				@ErrorEntry(evt, sess)
+		}
+	}
+}
+
+templ MessageBubble(evt models.Event, sess *models.Session) {
+	{{ agent := sess.Agents[evt.AgentID] }}
+	{{ agentName := evt.AgentID }}
+	{{ color := "#94a3b8" }}
+	if agent != nil {
+		{{ agentName = agent.Name }}
+		{{ color = agentColor(agent) }}
+	}
+	<div class="mb-3">
+		<div class="flex items-center gap-2 mb-0.5">
+			<span class="text-xs font-bold" style={ "color:" + color }>
+				{ roleLabel(agent) }
+			</span>
+			<span class="text-xs font-bold" style={ "color:" + color }>
+				{ agentName }
+			</span>
+			<span class="text-xs text-neutral-600">
+				{ evt.Timestamp.Format("15:04:05") }
+			</span>
+		</div>
+		<div class="glass rounded-md p-2.5 text-sm text-neutral-300 ml-4">
+			{ evt.Data.Content }
+		</div>
+	</div>
+}
+
+templ ToolCallEntry(evt models.Event, sess *models.Session) {
+	{{ agent := sess.Agents[evt.AgentID] }}
+	{{ color := "#94a3b8" }}
+	if agent != nil {
+		{{ color = agentColor(agent) }}
+	}
+	<div class="mb-1.5 ml-4 flex items-center gap-1.5 text-xs text-neutral-500">
+		<span class={ toolStatusIcon(evt.Data.ToolStatus) }></span>
+		<span style={ "color:" + color }>
+			if agent != nil {
+				{ agent.Name }
+			} else {
+				{ evt.AgentID }
+			}
+		</span>
+		<span class="text-neutral-600">{ evt.Data.Tool }</span>
+		if evt.Data.FilePath != "" {
+			<span class="text-neutral-500 truncate max-w-60">{ evt.Data.FilePath }</span>
+		}
+	</div>
+}
+
+templ DomainBlockEntry(evt models.Event) {
+	<div class="mb-2 ml-4 glass rounded-md p-2 border-l-2 border-red-500/50">
+		<div class="flex items-center gap-1.5 text-xs">
+			<i class="ph-bold ph-x-circle text-red-400"></i>
+			<span class="text-red-400 font-bold">Domain Block</span>
+		</div>
+		<p class="text-xs text-neutral-400 mt-0.5">
+			{ evt.Data.BlockedAction } on { evt.Data.BlockedPath } -- { evt.Data.BlockReason }
+		</p>
+	</div>
+}
+
+templ SelfHealEntry(evt models.Event, sess *models.Session) {
+	<div class="mb-2 ml-4 glass rounded-md p-2 border-l-2 border-yellow-500/50">
+		<div class="flex items-center gap-1.5 text-xs">
+			<i class="ph-bold ph-wrench neon-yellow"></i>
+			<span class="neon-yellow font-bold">Self-Heal</span>
+		</div>
+		<p class="text-xs text-neutral-400 mt-0.5">
+			Worker { evt.Data.FailedWorker } failed. Lead taking over: { evt.Data.HealAction }
+		</p>
+	</div>
+}
+
+templ ErrorEntry(evt models.Event, sess *models.Session) {
+	<div class="mb-2 ml-4 glass rounded-md p-2 border-l-2 border-red-500/50">
+		<div class="flex items-center gap-1.5 text-xs">
+			<i class="ph-bold ph-warning-circle text-red-400"></i>
+			<span class="text-red-400 font-bold">Error</span>
+			<span class="text-neutral-500">{ evt.AgentID }</span>
+		</div>
+		<p class="text-xs text-red-300 mt-0.5">{ evt.Data.ErrorMsg }</p>
+	</div>
+}
+
+// --- TillDone Panel ---
+
+templ TillDonePanel(td *models.TillDoneState) {
+	<div>
+		<div class="flex items-center justify-between mb-2">
+			<span class="text-xs font-bold truncate">{ td.Title }</span>
+			<span class="text-xs neon-green">
+				{ fmt.Sprintf("[%d/%d]", td.Completed, td.Total) }
+			</span>
+		</div>
+		<!-- Progress bar -->
+		<div class="w-full bg-neutral-50/5 rounded-full h-1.5 mb-3">
+			<div
+				class="bg-green-500 h-1.5 rounded-full transition-all duration-500"
+				style={ fmt.Sprintf("width: %d%%", progressPct(td.Completed, td.Total)) }
+			></div>
+		</div>
+		for _, item := range td.Items {
+			<div class="flex items-start gap-2 py-1 text-xs">
+				if item.Completed {
+					<i class="ph-bold ph-check-circle text-green-400 mt-0.5"></i>
+				} else if item.Active {
+					<i class="ph-bold ph-circle-notch text-yellow-400 mt-0.5 pulse"></i>
+				} else {
+					<i class="ph-bold ph-circle text-neutral-600 mt-0.5"></i>
+				}
+				<span class={ tillDoneItemClass(item) }>
+					{ item.Description }
+				</span>
+			</div>
+		}
+	</div>
+}
+
+// --- Cost Tracker ---
+
+templ CostTracker(sess *models.Session) {
+	<div>
+		<div class="flex items-center justify-between mb-1.5">
+			<span class="text-xs font-bold text-neutral-400">Total Cost</span>
+			<span class="text-sm font-bold neon-green">
+				{ fmt.Sprintf("$%.3f", sess.TotalCost) }
+			</span>
+		</div>
+		<div class="flex items-center justify-between text-xs text-neutral-500">
+			<span>Tokens</span>
+			<span>{ formatTokens(sess.TotalTokens) }</span>
+		</div>
+		<div class="flex items-center justify-between text-xs text-neutral-500">
+			<span>Agents</span>
+			<span>{ fmt.Sprintf("%d", len(sess.Agents)) }</span>
+		</div>
+	</div>
+}
+
+// --- Helper functions ---
+
+func sessionDotClass(status string) string {
+	switch status {
+	case "active":
+		return "bg-green-400 pulse"
+	case "waiting":
+		return "bg-yellow-400 pulse"
+	case "paused":
+		return "bg-amber-400"
+	case "completed":
+		return "bg-blue-400"
+	case "error":
+		return "bg-red-400"
+	default:
+		return "bg-neutral-500"
+	}
+}
+
+func statusDotClass(status models.AgentStatus) string {
+	switch status {
+	case models.StatusRunning:
+		return "bg-green-400 pulse"
+	case models.StatusDone:
+		return "bg-blue-400"
+	case models.StatusError:
+		return "bg-red-400"
+	case models.StatusBlocked:
+		return "bg-yellow-400"
+	default:
+		return "bg-neutral-500"
+	}
+}
+
+func roleIcon(role models.AgentRole) string {
+	switch role {
+	case models.RoleOrchestrator:
+		return "O"
+	case models.RoleLead:
+		return "L"
+	case models.RoleWorker:
+		return "W"
+	default:
+		return "?"
+	}
+}
+
+func roleLabel(agent *models.Agent) string {
+	if agent == nil {
+		return ""
+	}
+	switch agent.Role {
+	case models.RoleOrchestrator:
+		return "O"
+	case models.RoleLead:
+		return "L"
+	case models.RoleWorker:
+		return "W"
+	default:
+		return ""
+	}
+}
+
+func roleIconColor(agent *models.Agent) string {
+	if agent.TeamColor != "" {
+		return ""
+	}
+	switch agent.Role {
+	case models.RoleOrchestrator:
+		return "neon-green"
+	case models.RoleLead:
+		return "neon-yellow"
+	default:
+		return "text-neutral-400"
+	}
+}
+
+func agentColor(agent *models.Agent) string {
+	if agent == nil {
+		return "#94a3b8"
+	}
+	if agent.TeamColor != "" {
+		return agent.TeamColor
+	}
+	switch agent.Role {
+	case models.RoleOrchestrator:
+		return "#36f9f6"
+	case models.RoleLead:
+		return "#ffd93d"
+	default:
+		return "#94a3b8"
+	}
+}
+
+func agentNodeClass(depth int) string {
+	if depth == 0 {
+		return "mb-2"
+	}
+	return "agent-line mb-1"
+}
+
+func formatTokens(tokens int64) string {
+	if tokens >= 1_000_000 {
+		return fmt.Sprintf("%.1fM", float64(tokens)/1_000_000)
+	}
+	if tokens >= 1_000 {
+		return fmt.Sprintf("%dK", tokens/1_000)
+	}
+	return fmt.Sprintf("%d", tokens)
+}
+
+func shortModel(model string) string {
+	parts := strings.Split(model, "/")
+	m := parts[len(parts)-1]
+	if len(m) > 12 {
+		return m[:12]
+	}
+	return m
+}
+
+func toolStatusIcon(status string) string {
+	switch status {
+	case "success":
+		return "ph-bold ph-check text-green-500"
+	case "error":
+		return "ph-bold ph-x text-red-500"
+	case "blocked":
+		return "ph-bold ph-x-circle text-red-400"
+	default:
+		return "ph-bold ph-dots-three text-neutral-500"
+	}
+}
+
+func tillDoneItemClass(item models.TillDoneItem) string {
+	if item.Completed {
+		return "text-neutral-500 line-through"
+	}
+	if item.Active {
+		return "text-neutral-200"
+	}
+	return "text-neutral-400"
+}
+
+func progressPct(completed, total int) int {
+	if total == 0 {
+		return 0
+	}
+	return (completed * 100) / total
+}
+
+func truncateText(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
+}
+
+func getRootAgents(sess *models.Session) []*models.Agent {
+	var roots []*models.Agent
+	for _, a := range sess.Agents {
+		if a.ParentID == "" {
+			roots = append(roots, a)
+		}
+	}
+	sort.Slice(roots, func(i, j int) bool {
+		return roots[i].StartedAt.Before(roots[j].StartedAt)
+	})
+	return roots
+}
+
+func getChildren(sess *models.Session, parentID string) []*models.Agent {
+	var children []*models.Agent
+	for _, a := range sess.Agents {
+		if a.ParentID == parentID {
+			children = append(children, a)
+		}
+	}
+	sort.Slice(children, func(i, j int) bool {
+		return children[i].StartedAt.Before(children[j].StartedAt)
+	})
+	return children
+}

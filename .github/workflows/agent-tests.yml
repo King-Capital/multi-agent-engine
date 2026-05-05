@@ -1,0 +1,43 @@
+name: Agent Engine Tests
+
+on:
+  push:
+    paths:
+      - 'platforms/multi-agent/engine/**'
+      - 'platforms/multi-agent/agents/**'
+      - 'platforms/multi-agent/configs/**'
+  pull_request:
+    paths:
+      - 'platforms/multi-agent/engine/**'
+      - 'platforms/multi-agent/agents/**'
+      - 'platforms/multi-agent/configs/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: extractions/setup-just@v2
+
+      - name: Install dependencies
+        working-directory: platforms/multi-agent/engine
+        run: bun install
+
+      - name: Run security + integration tests
+        working-directory: platforms/multi-agent
+        run: just test
+
+      - name: Verify all configs load
+        working-directory: platforms/multi-agent
+        run: |
+          just teams > /dev/null
+          just chains > /dev/null
+          just prompts > /dev/null
+          just adapters

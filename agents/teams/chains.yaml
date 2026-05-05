@@ -1,0 +1,150 @@
+chains:
+  plan-build-review:
+    description: "Full development workflow: plan, implement, validate"
+    steps:
+      - team: Planning
+        till_done:
+          - "Implementation plan produced with files, risks, and steps"
+          - "All relevant files read and understood"
+      - team: Engineering
+        till_done:
+          - "All code changes implemented per plan"
+          - "Tests pass"
+          - "Build succeeds"
+      - team: Validation
+        till_done:
+          - "Code reviewed — grade assigned"
+          - "Security reviewed — no P0/P1 vulnerabilities"
+          - "All corrections applied or escalated"
+
+  scout-then-plan:
+    description: "Explore first, then produce a plan"
+    steps:
+      - agent: Scout
+        till_done:
+          - "Codebase mapped"
+          - "Key files identified"
+          - "Dependencies documented"
+      - team: Planning
+        till_done:
+          - "Plan produced based on scout findings"
+
+  build-verify:
+    description: "Builder-verifier loop with 3-attempt escalation"
+    steps:
+      - team: Engineering
+        till_done:
+          - "Code changes implemented"
+      - team: Validation
+        till_done:
+          - "Code reviewed and graded"
+        on_feedback:
+          retry_team: Engineering
+          max_attempts: 3
+          escalate_to: user
+
+  parallel-build:
+    description: "Same task, multiple model families, best result wins"
+    parallel:
+      - team: Engineering
+      - team: Engineering B
+    then:
+      - team: Validation
+        till_done:
+          - "Both implementations reviewed"
+          - "Best implementation selected"
+          - "Winner verified"
+
+  review-only:
+    description: "Code review and security check on existing changes"
+    steps:
+      - team: Validation
+        till_done:
+          - "Code reviewed"
+          - "Security checked"
+          - "Grade assigned"
+
+  full-sdlc:
+    description: "Complete SDLC: scout, plan, build in parallel, validate, fix, re-validate"
+    steps:
+      - agent: Scout
+        till_done:
+          - "Codebase explored and mapped"
+      - team: Planning
+        till_done:
+          - "Implementation plan with files and risks"
+      - parallel:
+          - team: Engineering
+          - team: Engineering B
+      - parallel:
+          - team: Validation
+          - team: Validation B
+        till_done:
+          - "Both builds reviewed by both validation teams"
+          - "Best build selected"
+          - "All P0/P1 issues resolved"
+
+  # --- Swarm Chains ---
+
+  swarm-review:
+    description: "Full review swarm: red team + blue team in parallel, orchestrator synthesizes"
+    steps:
+      - parallel:
+          - team: Red Team
+          - team: Blue Team
+        till_done:
+          - "Red team adversarial + security review complete"
+          - "Blue team correctness + quality review complete"
+          - "All findings graded P0-P3"
+          - "Orchestrator synthesizes conflicting findings"
+
+  red-blue:
+    description: "Red team attacks, blue team defends — competing perspectives"
+    steps:
+      - team: Red Team
+        till_done:
+          - "Attack surface mapped"
+          - "Adversarial findings with exploit paths"
+          - "Security vulnerabilities with CWE codes"
+      - team: Blue Team
+        till_done:
+          - "Red team findings validated or disputed"
+          - "Correctness claims verified deterministically"
+          - "Quality assessment with maintainability score"
+          - "Final synthesis: which red team findings are real"
+
+  scout-swarm:
+    description: "Scout first, then full swarm review on flagged areas only"
+    steps:
+      - agent: Scout
+        till_done:
+          - "Codebase mapped"
+          - "Risk areas identified"
+          - "Files prioritized for review"
+      - parallel:
+          - team: Red Team
+          - team: Blue Team
+        till_done:
+          - "Flagged files reviewed from both perspectives"
+          - "Findings synthesized"
+
+  build-then-swarm:
+    description: "Build with engineering, then swarm review the output"
+    steps:
+      - team: Planning
+        till_done:
+          - "Implementation plan produced"
+      - team: Engineering
+        till_done:
+          - "Code changes implemented"
+          - "Tests pass"
+      - parallel:
+          - team: Red Team
+          - team: Blue Team
+        till_done:
+          - "Built code reviewed from both perspectives"
+          - "All P0/P1 issues flagged"
+        on_feedback:
+          retry_team: Engineering
+          max_attempts: 3
+          escalate_to: user

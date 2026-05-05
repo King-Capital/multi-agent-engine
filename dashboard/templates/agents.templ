@@ -1,0 +1,376 @@
+package templates
+
+import (
+	"fmt"
+	"strings"
+)
+
+type AgentInfo struct {
+	Name      string
+	Slug      string
+	Role      string
+	Model     string
+	TeamName  string
+	TeamColor string
+	Tools     []string
+	Skills    []SkillInfo
+	Domain    DomainInfo
+	Expertise string
+}
+
+type SkillInfo struct {
+	Path    string
+	Name    string
+	UseWhen string
+	Content string
+}
+
+type DomainInfo struct {
+	Read  []string
+	Write []string
+}
+
+templ AgentsPage(agents []AgentInfo, selected *AgentInfo) {
+	@Layout("Agents") {
+		<div class="flex h-full" x-data="{ sidebarWidth: 288 }">
+			<!-- Agent List -->
+			<aside class="border-r border-neutral-50/5 bg-neutral-50/3 flex flex-col h-full flex-shrink-0" :style="'width:' + sidebarWidth + 'px'">
+				<div class="p-4 border-b border-neutral-50/5">
+					<a href="/" class="text-xs text-neutral-500 hover:text-neutral-300 flex items-center gap-1 mb-2">
+						<i class="ph-bold ph-arrow-left"></i> Dashboard
+					</a>
+					<h1 class="text-lg font-bold flex items-center gap-2">
+						<i class="ph-bold ph-robot text-xl neon-green"></i>
+						Agent Registry
+					</h1>
+					<p class="text-xs text-neutral-400 mt-1">{ fmt.Sprintf("%d agents", len(agents)) }</p>
+				</div>
+				<div class="flex-1 overflow-y-auto scrollbar-thin p-2">
+					for _, agent := range agents {
+						<a
+							href={ templ.SafeURL(fmt.Sprintf("/agents/%s", agent.Slug)) }
+							class={ "block p-2.5 rounded-md mb-1 transition-colors cursor-pointer " + agentSelectedClass(selected, agent.Slug) }
+						>
+							<div class="flex items-center gap-2">
+								<span class={ "text-xs font-bold px-1.5 py-0.5 rounded " + agentRoleBadge(agent.Role) }>
+									{ strings.ToUpper(agent.Role[:1]) }
+								</span>
+								<span class="text-sm font-bold truncate">{ agent.Name }</span>
+							</div>
+							<div class="flex items-center gap-2 text-xs text-neutral-500 mt-0.5 ml-7">
+								<span>{ agent.Model }</span>
+								<span>{ fmt.Sprintf("%d skills", len(agent.Skills)) }</span>
+							</div>
+						</a>
+					}
+				</div>
+			</aside>
+
+			<!-- Resize Handle -->
+			<div
+				class="w-1 cursor-col-resize hover:bg-cyan-500/30 active:bg-cyan-500/50 transition-colors flex-shrink-0"
+				@mousedown.prevent="
+					const startX = $event.clientX;
+					const startW = sidebarWidth;
+					const onMove = (e) => { sidebarWidth = Math.max(200, Math.min(500, startW + e.clientX - startX)); };
+					const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); };
+					document.addEventListener('mousemove', onMove);
+					document.addEventListener('mouseup', onUp);
+				"
+			></div>
+
+			<!-- Agent Detail -->
+			<main class="flex-1 overflow-y-auto scrollbar-thin min-w-0">
+				if selected != nil {
+					@AgentDetail(selected)
+				} else {
+					<div class="flex items-center justify-center h-full">
+						<p class="text-neutral-500">Select an agent to view details.</p>
+					</div>
+				}
+			</main>
+		</div>
+	}
+}
+
+templ AgentDetail(agent *AgentInfo) {
+	<div class="max-w-3xl mx-auto p-6" x-data={ agentEditState(agent) }>
+		<!-- Header -->
+		<div class="flex items-center gap-3 mb-6">
+			<span class={ "text-lg font-bold px-2.5 py-1 rounded " + agentRoleBadge(agent.Role) }>
+				{ strings.ToUpper(agent.Role[:1]) }
+			</span>
+			<div class="flex-1">
+				<div class="flex items-center justify-between">
+					<h1 class="text-xl font-bold">{ agent.Name }</h1>
+					<div class="flex items-center gap-2">
+						<button
+							class="text-xs px-2.5 py-1 rounded transition-colors bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25"
+							@click="editing = !editing"
+							x-text="editing ? 'Cancel' : 'Edit'"
+						></button>
+						<button
+							x-show="editing"
+							x-cloak
+							class="text-xs px-2.5 py-1 rounded transition-colors bg-green-500/15 text-green-400 hover:bg-green-500/25"
+							@click="saveAgent()"
+						>Save</button>
+						<button
+							class="text-xs px-2.5 py-1 rounded transition-colors bg-purple-500/15 text-purple-400 hover:bg-purple-500/25"
+							@click="aiAssist()"
+							:disabled="aiLoading"
+						>
+							<span x-show="!aiLoading"><i class="ph-bold ph-sparkle"></i> AI Assist</span>
+							<span x-show="aiLoading" x-cloak><i class="ph-bold ph-circle-notch pulse"></i> Thinking...</span>
+						</button>
+					</div>
+				</div>
+				<div class="flex items-center gap-3 text-sm text-neutral-400 mt-1">
+					<template x-if="!editing">
+						<span>Model: <span class="text-neutral-300">{ agent.Model }</span></span>
+					</template>
+					<template x-if="editing">
+						<label class="flex items-center gap-1.5">
+							<span class="text-xs text-neutral-500">Model:</span>
+							<select x-model="form.model" class="text-xs bg-neutral-50/5 border border-neutral-50/10 rounded px-2 py-1 text-neutral-300">
+								<option value="quality">quality (opus)</option>
+								<option value="main">main (sonnet)</option>
+								<option value="fast">fast (sonnet low)</option>
+								<option value="pro">pro (gemini 3.1)</option>
+								<option value="free">free (flash)</option>
+							</select>
+						</label>
+					</template>
+					if agent.TeamName != "" {
+						<span>Team: <span style={ "color:" + agent.TeamColor }>{ agent.TeamName }</span></span>
+					}
+				</div>
+			</div>
+		</div>
+
+		<!-- AI Assist Response -->
+		<div x-show="aiResponse" x-cloak class="glass rounded-lg p-4 mb-4 border-l-2 border-purple-500/50">
+			<div class="flex items-center justify-between mb-2">
+				<h3 class="text-sm font-bold flex items-center gap-2 text-purple-400">
+					<i class="ph-bold ph-sparkle"></i> AI Suggestions
+				</h3>
+				<button class="text-xs text-neutral-500 hover:text-neutral-300" @click="aiResponse = ''">dismiss</button>
+			</div>
+			<pre class="text-xs text-neutral-300 whitespace-pre-wrap" x-text="aiResponse"></pre>
+			<button
+				class="mt-2 text-xs px-2 py-1 rounded bg-purple-500/15 text-purple-400 hover:bg-purple-500/25"
+				@click="applyAiSuggestion()"
+				x-show="aiResponse"
+			>Apply to system prompt</button>
+		</div>
+
+		<!-- Tools -->
+		<div class="glass rounded-lg p-4 mb-4">
+			<h2 class="text-sm font-bold mb-2 flex items-center gap-2">
+				<i class="ph-bold ph-wrench neon-green"></i> Tools
+			</h2>
+			<template x-if="!editing">
+				<div class="flex flex-wrap gap-1.5">
+					for _, tool := range agent.Tools {
+						<span class={ "text-xs px-2 py-0.5 rounded " + toolBadgeClass(tool) }>
+							{ tool }
+						</span>
+					}
+				</div>
+			</template>
+			<template x-if="editing">
+				<div class="flex flex-wrap gap-1.5">
+					for _, tool := range []string{"delegate", "read", "write", "edit", "bash", "grep", "find", "glob"} {
+						<label class={ "text-xs px-2 py-0.5 rounded cursor-pointer transition-colors " + toolBadgeClass(tool) }>
+							<input type="checkbox" class="mr-1" :checked={ "form.tools.includes('" + tool + "')" } @change={ "toggleTool('" + tool + "')" }/>
+							{ tool }
+						</label>
+					}
+				</div>
+			</template>
+		</div>
+
+		<!-- Domain -->
+		<div class="glass rounded-lg p-4 mb-4">
+			<h2 class="text-sm font-bold mb-2 flex items-center gap-2">
+				<i class="ph-bold ph-lock neon-yellow"></i> Domain Restrictions
+			</h2>
+			<template x-if="!editing">
+				<div class="grid grid-cols-2 gap-3 text-xs">
+					<div>
+						<p class="text-neutral-500 font-bold mb-1">Read</p>
+						for _, p := range agent.Domain.Read {
+							<p class="text-neutral-300">{ p }</p>
+						}
+					</div>
+					<div>
+						<p class="text-neutral-500 font-bold mb-1">Write</p>
+						for _, p := range agent.Domain.Write {
+							<p class="text-neutral-300">{ p }</p>
+						}
+					</div>
+				</div>
+			</template>
+			<template x-if="editing">
+				<div class="grid grid-cols-2 gap-3 text-xs">
+					<div>
+						<p class="text-neutral-500 font-bold mb-1">Read paths</p>
+						<input type="text" x-model="form.domainRead" class="w-full bg-neutral-50/5 border border-neutral-50/10 rounded px-2 py-1 text-neutral-300 text-xs"/>
+					</div>
+					<div>
+						<p class="text-neutral-500 font-bold mb-1">Write paths</p>
+						<input type="text" x-model="form.domainWrite" class="w-full bg-neutral-50/5 border border-neutral-50/10 rounded px-2 py-1 text-neutral-300 text-xs"/>
+					</div>
+				</div>
+			</template>
+		</div>
+
+		<!-- System Prompt (edit mode) -->
+		<template x-if="editing">
+			<div class="glass rounded-lg p-4 mb-4">
+				<h2 class="text-sm font-bold mb-2 flex items-center gap-2">
+					<i class="ph-bold ph-code neon-green"></i> System Prompt
+				</h2>
+				<textarea
+					x-model="form.systemPrompt"
+					class="w-full h-64 bg-neutral-50/5 border border-neutral-50/10 rounded p-3 text-xs text-neutral-300 font-mono resize-y scrollbar-thin"
+					spellcheck="false"
+				></textarea>
+			</div>
+		</template>
+
+		<!-- Skills -->
+		<div class="glass rounded-lg p-4 mb-4">
+			<h2 class="text-sm font-bold mb-3 flex items-center gap-2">
+				<i class="ph-bold ph-lightning neon-green"></i>
+				Skills ({ fmt.Sprintf("%d", len(agent.Skills)) })
+			</h2>
+			for _, skill := range agent.Skills {
+				<details class="mb-2 border border-neutral-50/5 rounded-md bg-neutral-50/3 group">
+					<summary class="flex items-center justify-between p-3 cursor-pointer hover:bg-neutral-50/5 transition-colors">
+						<div>
+							<span class="text-sm font-bold text-neutral-200">{ skill.Name }</span>
+							<p class="text-xs text-neutral-500 mt-0.5">{ skill.UseWhen }</p>
+						</div>
+						<i class="ph-bold ph-caret-down text-neutral-500 transition-transform group-open:rotate-180"></i>
+					</summary>
+					<div class="px-3 pb-3 text-xs text-neutral-400 border-t border-neutral-50/5 pt-2">
+						<pre class="whitespace-pre-wrap">{ skill.Content }</pre>
+					</div>
+				</details>
+			}
+		</div>
+
+		<!-- Expertise / Mental Model -->
+		<div class="glass rounded-lg p-4">
+			<h2 class="text-sm font-bold mb-2 flex items-center gap-2">
+				<i class="ph-bold ph-brain neon-green"></i> Mental Model
+			</h2>
+			if agent.Expertise != "" && len(agent.Expertise) > 80 {
+				<pre class="text-xs text-neutral-400 whitespace-pre-wrap">{ agent.Expertise }</pre>
+			} else {
+				<p class="text-xs text-neutral-500 italic">No expertise accumulated yet. This grows automatically as the agent works.</p>
+			}
+		</div>
+	</div>
+}
+
+func agentEditState(agent *AgentInfo) string {
+	tools := "["
+	for i, t := range agent.Tools {
+		if i > 0 { tools += "," }
+		tools += "'" + t + "'"
+	}
+	tools += "]"
+
+	domainRead := ""
+	for i, p := range agent.Domain.Read {
+		if i > 0 { domainRead += ", " }
+		domainRead += p
+	}
+	domainWrite := ""
+	for i, p := range agent.Domain.Write {
+		if i > 0 { domainWrite += ", " }
+		domainWrite += p
+	}
+
+	return fmt.Sprintf(`{
+		editing: false,
+		aiLoading: false,
+		aiResponse: '',
+		form: {
+			model: '%s',
+			tools: %s,
+			domainRead: '%s',
+			domainWrite: '%s',
+			systemPrompt: ''
+		},
+		init() {
+			fetch('/api/agents/%s/prompt').then(r => r.text()).then(t => this.form.systemPrompt = t);
+		},
+		toggleTool(t) {
+			const i = this.form.tools.indexOf(t);
+			if (i >= 0) this.form.tools.splice(i, 1);
+			else this.form.tools.push(t);
+		},
+		async saveAgent() {
+			const res = await fetch('/api/agents/%s', {
+				method: 'PUT',
+				headers: {'Content-Type': 'application/json'},
+				body: JSON.stringify(this.form)
+			});
+			if (res.ok) { this.editing = false; location.reload(); }
+			else alert('Save failed: ' + await res.text());
+		},
+		async aiAssist() {
+			this.aiLoading = true;
+			try {
+				const res = await fetch('/api/agents/%s/ai-assist', {
+					method: 'POST',
+					headers: {'Content-Type': 'application/json'},
+					body: JSON.stringify({ prompt: this.form.systemPrompt, model: this.form.model, tools: this.form.tools })
+				});
+				this.aiResponse = await res.text();
+			} catch(e) { this.aiResponse = 'Error: ' + e.message; }
+			this.aiLoading = false;
+		},
+		applyAiSuggestion() {
+			this.form.systemPrompt = this.aiResponse;
+			this.aiResponse = '';
+			this.editing = true;
+		}
+	}`, agent.Model, tools, domainRead, domainWrite, agent.Slug, agent.Slug, agent.Slug)
+}
+
+func agentSelectedClass(selected *AgentInfo, slug string) string {
+	if selected != nil && selected.Slug == slug {
+		return "bg-neutral-50/10"
+	}
+	return "hover:bg-neutral-50/5"
+}
+
+func agentRoleBadge(role string) string {
+	switch role {
+	case "orchestrator":
+		return "bg-cyan-500/20 text-cyan-400"
+	case "lead":
+		return "bg-yellow-500/20 text-yellow-400"
+	case "worker":
+		return "bg-neutral-500/20 text-neutral-400"
+	default:
+		return "bg-neutral-500/20 text-neutral-400"
+	}
+}
+
+func toolBadgeClass(tool string) string {
+	switch tool {
+	case "delegate":
+		return "bg-cyan-500/15 text-cyan-400"
+	case "write", "edit":
+		return "bg-red-500/15 text-red-400"
+	case "bash":
+		return "bg-yellow-500/15 text-yellow-400"
+	default:
+		return "bg-neutral-50/10 text-neutral-400"
+	}
+}

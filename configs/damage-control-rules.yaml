@@ -1,0 +1,119 @@
+bashPatterns:
+  - pattern: '\brm\s+(-rf|--force|-r\s+-f|-f\s+-r)'
+    reason: "Destructive recursive file deletion"
+    action: block
+  - pattern: 'git\s+push\s+--force'
+    reason: "Force push destroys remote history"
+    action: ask
+  - pattern: 'git\s+push\s+.*(-f\b|--force-with-lease)'
+    reason: "Force push variant"
+    action: ask
+  - pattern: 'git\s+reset\s+--hard'
+    reason: "Hard reset discards uncommitted changes"
+    action: ask
+  - pattern: 'git\s+clean\s+-[a-z]*f'
+    reason: "Git clean removes untracked files"
+    action: ask
+  - pattern: 'git\s+checkout\s+--?\s'
+    reason: "Checkout discard overwrites working tree"
+    action: ask
+  - pattern: 'DROP\s+(TABLE|DATABASE|INDEX|SCHEMA)'
+    reason: "Destructive database operation"
+    action: block
+  - pattern: 'TRUNCATE\s+TABLE'
+    reason: "Destructive table truncation"
+    action: block
+  - pattern: 'DELETE\s+FROM\s+\w+\s*;?\s*$'
+    reason: "DELETE without WHERE clause"
+    action: block
+  - pattern: 'chmod\s+777'
+    reason: "World-writable permissions"
+    action: block
+  - pattern: 'curl\s.*\|\s*(bash|sh|zsh)'
+    reason: "Piping remote script to shell"
+    action: block
+  - pattern: '(npm|pip|pip3)\s+install'
+    reason: "Use bun/uv instead of npm/pip"
+    action: block
+  - pattern: 'sudo\s+'
+    reason: "Elevated privileges require confirmation"
+    action: ask
+  - pattern: 'systemctl\s+(stop|restart|disable)'
+    reason: "Service control requires confirmation"
+    action: ask
+  - pattern: 'docker\s+(rm|rmi|system\s+prune)'
+    reason: "Docker cleanup requires confirmation"
+    action: ask
+  - pattern: 'kill\s+-9'
+    reason: "Force kill process"
+    action: ask
+  - pattern: '>\s*/dev/null\s+2>&1'
+    reason: "Silencing all output hides errors"
+    action: warn
+  - pattern: 'eval\s+'
+    reason: "Dynamic code execution"
+    action: block
+  - pattern: '(export|set)\s+\w+=.*\b(key|token|secret|password)\b'
+    reason: "Setting credentials in environment"
+    action: block
+
+zeroAccessPaths:
+  - ".env"
+  - ".env.*"
+  - "~/.ssh/"
+  - "~/.ssh/*"
+  - "*credentials*"
+  - "*.pem"
+  - "*.key"
+  - ".claude/settings.json"
+  - ".claude/settings.local.json"
+  - ".mcp.json"
+  - "**/.git/config"
+  - "**/secrets/**"
+  - "**/vault/**"
+
+readOnlyPaths:
+  - "CLAUDE.md"
+  - ".claude/**"
+  - "package-lock.json"
+  - "bun.lockb"
+  - "go.sum"
+  - "LICENSE"
+  - "*.lock"
+
+noDeletePaths:
+  - ".git/"
+  - ".git/**"
+  - "LICENSE"
+  - "CLAUDE.md"
+  - "docs/**/*.md"
+  - "*.md"
+  - "agents/personas/**"
+  - "agents/skills/**"
+  - "agents/teams/**"
+  - "configs/**"
+
+domainTemplates:
+  frontend:
+    read: ["**/*"]
+    write: ["src/frontend/**", "src/components/**", "public/**"]
+    update: ["src/frontend/**", "src/components/**", "public/**"]
+    delete: []
+
+  backend:
+    read: ["**/*"]
+    write: ["src/backend/**", "src/api/**", "src/middleware/**"]
+    update: ["src/backend/**", "src/api/**", "src/middleware/**"]
+    delete: []
+
+  infra:
+    read: ["**/*"]
+    write: ["infra/**", "deploy/**", "docker/**", ".github/**"]
+    update: ["infra/**", "deploy/**", "docker/**", ".github/**"]
+    delete: []
+
+  full:
+    read: ["**/*"]
+    write: ["**/*"]
+    update: ["**/*"]
+    delete: ["**/*"]
