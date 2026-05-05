@@ -1,0 +1,12 @@
+{
+  "name": "multi-agent-engine",
+  "approval_mode": "suggest",
+  "sandbox": "relaxed",
+  "model": "o4-mini",
+  "instructions": [
+    "Use bun, not npm/yarn.",
+    "Use templ generate before go build for dashboard.",
+    "Run just test before committing.",
+    "Read CLAUDE.md for full project conventions."
+  ]
+}

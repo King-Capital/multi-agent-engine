@@ -91,6 +91,7 @@ export interface SessionState {
   name: string;
   chain: string;
   task: string;
+  workingDir: string;
   status: "active" | "completed" | "error";
   agents: Map<string, AgentState>;
   tillDone: TillDoneItem[];
@@ -146,6 +147,7 @@ export interface DelegateOptions {
   thinking: ThinkingLevel;
   tools: string[];
   domain: DomainConfig;
+  workingDir: string;
   sessionDir: string;
   parentId?: string;
   teamName: string;

@@ -11,10 +11,10 @@ import {
 import { EventEmitter } from "./event-emitter";
 import {
   registerPersonaHash,
-  verifyPersonaIntegrity,
   sanitizeAgentInput,
   validateAgentOutput,
 } from "./security";
+import { delegateWithHealing } from "./self-healing";
 import type {
   PlatformAdapter,
   DelegateResult,
@@ -57,6 +57,7 @@ export class Orchestrator {
     args?: string[];
     adapter?: string;
     sessionName?: string;
+    workingDir?: string;
   }): Promise<SessionState> {
     const sessionId = randomUUID().slice(0, 8);
     let chainName: string;
@@ -79,6 +80,7 @@ export class Orchestrator {
       name: sessionName,
       chain: chainName,
       task: taskBody,
+      workingDir: opts.workingDir ?? process.cwd(),
       status: "active",
       agents: new Map(),
       tillDone: this.buildTillDone(chain),
@@ -213,40 +215,36 @@ export class Orchestrator {
 
     const sanitizedLeadPrompt = sanitizeAgentInput(leadPrompt);
 
-    const result = await adapter.delegate({
+    const delegateOpts = {
       persona: leadPersona,
       systemPrompt: buildSystemPrompt(leadPersona),
       userPrompt: sanitizedLeadPrompt,
       model: resolveModel(teamConfig.lead.model),
-      thinking: "high",
+      thinking: "high" as const,
       tools: leadPersona.tools,
       domain: leadPersona.domain,
+      workingDir: session.workingDir,
       sessionDir: `data/sessions/${session.id}`,
       parentId: "orch-1",
       teamName: teamConfig["team-name"],
       teamColor: teamConfig["team-color"],
+    };
+
+    const result = await delegateWithHealing({
+      adapter,
+      opts: delegateOpts,
+      sessionId: session.id,
+      agentRole: "lead",
+      onEvent: (type, data) => this.emitter.emit({
+        session_id: session.id,
+        agent_id: `${step.team}-lead`,
+        event_type: type,
+        timestamp: new Date().toISOString(),
+        data,
+      }),
     });
 
-    const outputViolations = validateAgentOutput(result.output);
-    if (outputViolations.length > 0) {
-      console.warn(
-        `[orchestrator] WARNING: Output from ${leadPersona.name} contains sensitive data: ` +
-        outputViolations.map((v) => v.reason).join(", ")
-      );
-      for (const v of outputViolations) {
-        result.output = result.output.replace(
-          /(?:api[_-]?key|token|secret|password)\s*[:=]\s*["']?[A-Za-z0-9+/=_-]{20,}/gi,
-          "[REDACTED]"
-        );
-        result.output = result.output.replace(
-          /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC )?PRIVATE KEY-----/g,
-          "[REDACTED]"
-        );
-        result.output = result.output.replace(/ghp_[A-Za-z0-9_]{36}/g, "[REDACTED]");
-        result.output = result.output.replace(/sk-[A-Za-z0-9]{48}/g, "[REDACTED]");
-        result.output = result.output.replace(/sk-ant-[A-Za-z0-9-]{95}/g, "[REDACTED]");
-      }
-    }
+    this.redactSensitiveOutput(result, leadPersona.name);
 
     session.totalCost += result.costUsd;
     session.totalTokens += result.tokensUsed;
@@ -340,40 +338,36 @@ export class Orchestrator {
     const sanitizedPrompt = sanitizeAgentInput(prompt);
 
     const isScout = step.agent?.toLowerCase() === "scout";
-    const result = await adapter.delegate({
+    const delegateOpts = {
       persona,
       systemPrompt: buildSystemPrompt(persona),
       userPrompt: sanitizedPrompt,
       model: resolveModel(agentConfig.model),
-      thinking: isScout ? "low" : "medium",
+      thinking: (isScout ? "low" : "medium") as "low" | "medium",
       tools: persona.tools,
       domain: persona.domain,
+      workingDir: session.workingDir,
       sessionDir: `data/sessions/${session.id}`,
       parentId: "orch-1",
       teamName,
       teamColor,
+    };
+
+    const result = await delegateWithHealing({
+      adapter,
+      opts: delegateOpts,
+      sessionId: session.id,
+      agentRole: isScout ? "scout" : "worker",
+      onEvent: (type, data) => this.emitter.emit({
+        session_id: session.id,
+        agent_id: step.agent!,
+        event_type: type,
+        timestamp: new Date().toISOString(),
+        data,
+      }),
     });
 
-    const outputViolations = validateAgentOutput(result.output);
-    if (outputViolations.length > 0) {
-      console.warn(
-        `[orchestrator] WARNING: Output from ${agentConfig.name} contains sensitive data: ` +
-        outputViolations.map((v) => v.reason).join(", ")
-      );
-      for (const v of outputViolations) {
-        result.output = result.output.replace(
-          /(?:api[_-]?key|token|secret|password)\s*[:=]\s*["']?[A-Za-z0-9+/=_-]{20,}/gi,
-          "[REDACTED]"
-        );
-        result.output = result.output.replace(
-          /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC )?PRIVATE KEY-----/g,
-          "[REDACTED]"
-        );
-        result.output = result.output.replace(/ghp_[A-Za-z0-9_]{36}/g, "[REDACTED]");
-        result.output = result.output.replace(/sk-[A-Za-z0-9]{48}/g, "[REDACTED]");
-        result.output = result.output.replace(/sk-ant-[A-Za-z0-9-]{95}/g, "[REDACTED]");
-      }
-    }
+    this.redactSensitiveOutput(result, agentConfig.name);
 
     session.totalCost += result.costUsd;
     session.totalTokens += result.tokensUsed;
@@ -492,6 +486,18 @@ export class Orchestrator {
       result = result.replaceAll(`$${i + 1}`, args[i]);
     }
     return result;
+  }
+
+  private redactSensitiveOutput(result: DelegateResult, agentName: string): void {
+    const violations = validateAgentOutput(result.output);
+    if (violations.length === 0) return;
+    console.warn(`[orchestrator] WARNING: Output from ${agentName} contains sensitive data: ${violations.map((v) => v.reason).join(", ")}`);
+    result.output = result.output
+      .replace(/(?:api[_-]?key|token|secret|password)\s*[:=]\s*["']?[A-Za-z0-9+/=_-]{20,}/gi, "[REDACTED]")
+      .replace(/-----BEGIN (?:RSA |EC )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC )?PRIVATE KEY-----/g, "[REDACTED]")
+      .replace(/ghp_[A-Za-z0-9_]{36}/g, "[REDACTED]")
+      .replace(/sk-[A-Za-z0-9]{48}/g, "[REDACTED]")
+      .replace(/sk-ant-[A-Za-z0-9-]{95}/g, "[REDACTED]");
   }
 
   private getAdapter(name?: string): PlatformAdapter {
