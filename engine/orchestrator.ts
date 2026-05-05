@@ -60,7 +60,7 @@ export class Orchestrator {
     sessionName?: string;
     workingDir?: string;
   }): Promise<SessionState> {
-    const sessionId = randomUUID().slice(0, 8);
+    const sessionId = randomUUID();
     let chainName: string;
     let taskBody: string;
 
