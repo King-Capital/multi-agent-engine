@@ -1,0 +1,87 @@
+# Claude Code Native Agent Teams Configuration
+# Requires: CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+#
+# Extracted from IndyDevDan's CC Multi-Agent Orchestration video (2026-05-05)
+# https://www.youtube.com/watch?v=RpUTF_U4kiw
+
+# Environment variables required for CC agent teams
+env:
+  CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: "1"
+  CLAUDECODE: "1"
+
+# Shell aliases for quick launch
+aliases:
+  # Opus orchestrator with agent teams + skip permissions
+  cldyo: "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --dangerously-skip-permissions --model opus"
+  # Sonnet worker (cheaper, for bulk tasks)
+  cldys: "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --dangerously-skip-permissions --model sonnet"
+
+# CC agent spawn flags reference
+# Used by claude-code adapter when spawning sub-agents via CC native teams
+agentFlags:
+  # Required
+  - flag: "--agent-id"
+    description: "Unique identifier for the agent"
+    example: "sbx-agent-1"
+  - flag: "--agent-name"
+    description: "Display name (shown in tmux status)"
+    example: "Scout"
+  - flag: "--team-name"
+    description: "Team grouping for mailbox routing"
+    example: "core-dev"
+  - flag: "--parent-session-id"
+    description: "Links sub-agent to lead's session"
+    example: "<uuid from lead session>"
+
+  # Optional
+  - flag: "--agent-color"
+    description: "Visual identification in tmux"
+    values: [blue, yellow, green, red, magenta, cyan]
+  - flag: "--agent-type"
+    description: "Role type for the agent"
+    values: [general-purpose, code-reviewer, explorer, builder]
+  - flag: "--model"
+    description: "Model override for this agent"
+    values: [opus, sonnet, haiku]
+  - flag: "--dangerously-skip-permissions"
+    description: "Bypass permission prompts (sandbox/trusted only)"
+
+# CC native team tools (available when AGENT_TEAMS=1)
+nativeTools:
+  - name: TeamCreate
+    description: "Create a new agent team with named mailboxes"
+  - name: TaskCreate
+    description: "Create a task assigned to an agent"
+  - name: TaskUpdate
+    description: "Update task status (pending → in_progress → completed)"
+  - name: TaskList
+    description: "List all tasks and their status"
+  - name: TaskGet
+    description: "Get details of a specific task"
+  - name: SendMessage
+    description: "Send result to team lead's mailbox"
+  - name: TeamDelete
+    description: "Delete team and all agents (forces fresh context)"
+
+# Team mailbox location
+mailbox:
+  path: "~/.claude/teams/{team-name}/inboxes/"
+  leadFile: "team-lead.json"
+  description: "Sub-agents post JSON results here, lead reads and synthesizes"
+
+# Model strategy (from Dan's approach)
+modelStrategy:
+  orchestrator: opus      # Plans, delegates, synthesizes
+  complexWork: opus       # Multi-step operations, sandbox reboots
+  bulkExploration: haiku  # Cheap mass exploration (8 agents at once)
+  codeReview: sonnet      # Balance of speed and quality
+
+# Lifecycle
+lifecycle:
+  - TeamCreate
+  - TaskCreate (xN)
+  - agent_spawn (parallel)
+  - agent_work (independent)
+  - SendMessage (results → lead mailbox)
+  - lead_synthesize (read mailbox, compile report)
+  - TeamDelete (cleanup, force fresh context)
