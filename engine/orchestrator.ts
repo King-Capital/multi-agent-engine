@@ -57,6 +57,7 @@ export class Orchestrator {
     args?: string[];
     adapter?: string;
     sessionName?: string;
+    workingDir?: string;
   }): Promise<SessionState> {
     const sessionId = randomUUID().slice(0, 8);
     let chainName: string;
@@ -79,6 +80,7 @@ export class Orchestrator {
       name: sessionName,
       chain: chainName,
       task: taskBody,
+      workingDir: opts.workingDir ?? process.cwd(),
       status: "active",
       agents: new Map(),
       tillDone: this.buildTillDone(chain),
@@ -221,6 +223,7 @@ export class Orchestrator {
       thinking: "high",
       tools: leadPersona.tools,
       domain: leadPersona.domain,
+      workingDir: session.workingDir,
       sessionDir: `data/sessions/${session.id}`,
       parentId: "orch-1",
       teamName: teamConfig["team-name"],
@@ -348,6 +351,7 @@ export class Orchestrator {
       thinking: isScout ? "low" : "medium",
       tools: persona.tools,
       domain: persona.domain,
+      workingDir: session.workingDir,
       sessionDir: `data/sessions/${session.id}`,
       parentId: "orch-1",
       teamName,

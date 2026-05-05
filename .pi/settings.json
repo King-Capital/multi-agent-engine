@@ -1,0 +1,7 @@
+{
+  "name": "multi-agent-engine",
+  "description": "Multi-agent orchestration engine with Go dashboard",
+  "tools": ["bun", "go", "templ", "just"],
+  "test_command": "just test",
+  "build_command": "just build"
+}

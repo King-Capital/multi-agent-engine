@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun *)",
+      "Bash(bunx *)",
+      "Bash(just *)",
+      "Bash(go build *)",
+      "Bash(go run *)",
+      "Bash(go test *)",
+      "Bash(templ generate *)",
+      "Bash(cat agents/*)",
+      "Bash(cat configs/*)",
+      "Bash(cat prompts/*)",
+      "Bash(ls *)"
+    ]
+  }
+}

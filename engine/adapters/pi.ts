@@ -1,4 +1,5 @@
 import { $ } from "bun";
+import { mkdirSync } from "fs";
 import type { PlatformAdapter, DelegateOptions, DelegateResult } from "../types";
 
 export class PiAdapter implements PlatformAdapter {
@@ -16,6 +17,8 @@ export class PiAdapter implements PlatformAdapter {
   async delegate(opts: DelegateOptions): Promise<DelegateResult> {
     const agentId = `pi-${opts.persona.name.toLowerCase().replace(/\s+/g, "-")}`;
 
+    mkdirSync(opts.sessionDir, { recursive: true });
+
     const toolsFlag = opts.tools.filter((t) => t !== "delegate").join(",");
 
     const args = [
@@ -30,16 +33,16 @@ export class PiAdapter implements PlatformAdapter {
       args.push("--tools", toolsFlag);
     }
 
-    console.log(`[pi] Spawning ${opts.persona.name} (${opts.model})`);
+    console.log(`[pi] Spawning ${opts.persona.name} (${opts.model}) in ${opts.workingDir}`);
 
-    const timeout = opts.timeoutMs ?? 300_000; // 5 min default
+    const timeout = opts.timeoutMs ?? 300_000;
 
     try {
       const proc = Bun.spawn(args, {
         stdin: new Response(opts.userPrompt).body!,
         stdout: "pipe",
         stderr: "pipe",
-        cwd: opts.sessionDir,
+        cwd: opts.workingDir,
       });
 
       const timer = setTimeout(() => proc.kill(), timeout);
@@ -64,13 +67,26 @@ export class PiAdapter implements PlatformAdapter {
       }
 
       if (exitCode !== 0) {
-        console.error(`[pi] ${opts.persona.name} failed: ${stderr}`);
+        console.error(`[pi] ${opts.persona.name} exited ${exitCode}: ${stderr.slice(0, 500)}`);
         return {
           agentId,
           agentName: opts.persona.name,
           output: `ERROR: ${stderr}`,
           grade: "FAILED",
           findings: [stderr],
+          costUsd: 0,
+          tokensUsed: 0,
+        };
+      }
+
+      if (!output.trim()) {
+        console.warn(`[pi] ${opts.persona.name} returned empty output`);
+        return {
+          agentId,
+          agentName: opts.persona.name,
+          output: "ERROR: Empty output from agent",
+          grade: "FAILED",
+          findings: ["empty_output"],
           costUsd: 0,
           tokensUsed: 0,
         };

@@ -37,6 +37,7 @@ Examples:
 const command = args[0];
 const dashboardUrl = getFlag(args, "--dashboard") ?? "http://localhost:8400";
 const adapterName = getFlag(args, "--adapter");
+const workingDir = getFlag(args, "--cwd") ?? process.cwd();
 const dryRun = args.includes("--dry-run");
 
 const orch = new Orchestrator(dashboardUrl);
@@ -79,6 +80,7 @@ switch (command) {
       task: promptArgs.join(" "),
       args: promptArgs,
       adapter: dryRun ? "echo" : adapterName,
+      workingDir,
     });
     console.log(`\nSession ${session.id} ${session.status}. Cost: $${session.totalCost.toFixed(3)}`);
     break;
@@ -95,6 +97,7 @@ switch (command) {
       chain: chainName,
       task,
       adapter: dryRun ? "echo" : adapterName,
+      workingDir,
     });
     console.log(`\nSession ${session.id} ${session.status}. Cost: $${session.totalCost.toFixed(3)}`);
     break;
@@ -109,6 +112,7 @@ switch (command) {
     const session = await orch.run({
       task,
       adapter: dryRun ? "echo" : adapterName,
+      workingDir,
     });
     console.log(`\nSession ${session.id} ${session.status}. Cost: $${session.totalCost.toFixed(3)}`);
     break;
