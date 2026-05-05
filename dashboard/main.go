@@ -2,14 +2,17 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -42,6 +45,7 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(corsMiddleware)
+	r.Use(maxBodySize)
 
 	r.Get("/", handleDashboard)
 	r.Get("/session/{sessionID}", handleSession)
@@ -70,8 +74,26 @@ func main() {
 	r.Get("/htmx/session/{sessionID}/tilldone", handleHTMXTillDone)
 	r.Get("/htmx/session/{sessionID}/costs", handleHTMXCosts)
 
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      r,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
+		log.Println("Shutting down...")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(ctx)
+	}()
+
 	log.Printf("Dashboard running at http://localhost:%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, r))
+	log.Fatal(srv.ListenAndServe())
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -83,6 +105,13 @@ func corsMiddleware(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func maxBodySize(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB
 		next.ServeHTTP(w, r)
 	})
 }

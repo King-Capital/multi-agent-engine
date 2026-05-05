@@ -148,7 +148,11 @@ async function scaffoldAgent(args: string[]) {
     process.exit(1);
   }
 
-  const slug = name.toLowerCase().replace(/\s+/g, "-");
+  const slug = name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/^-+|-+$/g, "");
+  if (!slug) {
+    console.error("Invalid agent name");
+    process.exit(1);
+  }
 
   const skillsForRole = {
     orchestrator: [
