@@ -1,0 +1,3 @@
+ai-agents.rodaddy.live {
+    reverse_proxy <CT_LAN_IP>:3000
+}

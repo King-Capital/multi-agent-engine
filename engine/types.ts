@@ -139,6 +139,17 @@ export interface PlatformAdapter {
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
+export interface StreamEvent {
+  type: "tool_call" | "tool_result" | "assistant_text" | "cost";
+  tool?: string;
+  filePath?: string;
+  status?: string;
+  content?: string;
+  costUsd?: number;
+  tokensUsed?: number;
+  cacheReadTokens?: number;
+}
+
 export interface DelegateOptions {
   persona: PersonaConfig;
   systemPrompt: string;
@@ -153,4 +164,5 @@ export interface DelegateOptions {
   teamName: string;
   teamColor: string;
   timeoutMs?: number;
+  onStreamEvent?: (event: StreamEvent) => void;
 }

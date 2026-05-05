@@ -34,7 +34,7 @@ multi-agent-engine/
     orchestrator.ts  # Core orchestration logic
     config.ts        # Config loader (YAML parsing)
     types.ts         # All TypeScript types
-    security.ts      # Domain sandboxing, path validation
+    security.ts      # Security checks (advisory only, not enforced by adapters)
     event-emitter.ts # SSE event system
     adapters/        # Platform adapters (claude-code, codex, pi, echo)
   prompts/           # Reusable prompt workflows (plan-build-review, scout, etc.)
@@ -72,6 +72,6 @@ Edit `agents/teams/chains.yaml`. Each chain has:
 
 - `engine/orchestrator.ts` -- core loop: parse chain, delegate to teams, check till_done
 - `engine/types.ts` -- all interfaces (PersonaConfig, TeamConfig, Chain, SessionState, etc.)
-- `engine/security.ts` -- domain sandboxing, path traversal prevention, command injection checks
+- `engine/security.ts` -- security checks (advisory only; not enforced by adapters — see comment block in file)
 - `configs/model-routing.yaml` -- model tiers, aliases, cross-model pairs, budget limits
 - `agents/teams/teams.yaml` -- team structure with all agents and their assignments

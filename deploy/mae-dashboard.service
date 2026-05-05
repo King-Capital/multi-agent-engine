@@ -1,0 +1,20 @@
+[Unit]
+Description=MAE Dashboard
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=mae
+Group=mae
+WorkingDirectory=/opt/mae/dashboard
+ExecStart=/opt/mae/dashboard/mae-dashboard
+Environment=DATABASE_URL=postgres://mae:mae@localhost:5432/mae?sslmode=disable
+Environment=PORT=3000
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

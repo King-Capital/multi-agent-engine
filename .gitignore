@@ -1,8 +1,15 @@
 node_modules/
 dist/
+bun.lockb
 *.log
-dashboard/dashboard-bin
-dashboard/**/*_templ.go
-data/sessions/
 .env
 .DS_Store
+
+# Dashboard
+dashboard/dashboard-bin
+dashboard/mae-dashboard
+dashboard/**/*_templ.go
+dashboard/data/
+
+# Session data
+data/sessions/

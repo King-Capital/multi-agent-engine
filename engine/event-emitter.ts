@@ -4,6 +4,7 @@ export class EventEmitter {
   private dashboardUrl: string;
   private buffer: SessionEvent[] = [];
   private flushing = false;
+  private pgAgentIds: Map<string, number> = new Map(); // engine agentId -> PG agent id
 
   constructor(dashboardUrl?: string) {
     this.dashboardUrl = dashboardUrl ?? "http://localhost:8400";
@@ -171,6 +172,7 @@ export class EventEmitter {
   }
 
   sessionEnd(sessionId: string) {
+    this.pgUpdateSession(sessionId, { status: "completed" });
     return this.emit({
       session_id: sessionId,
       agent_id: "orchestrator",
@@ -178,5 +180,101 @@ export class EventEmitter {
       timestamp: new Date().toISOString(),
       data: {},
     });
+  }
+
+  // --- PG-backed persistence (best-effort, non-blocking) ---
+
+  async pgCreateSession(opts: {
+    id: string;
+    name: string;
+    platform?: string;
+    userId?: number;
+    team?: string;
+    chain?: string;
+    config?: Record<string, unknown>;
+  }): Promise<void> {
+    try {
+      await fetch(`${this.dashboardUrl}/api/pg/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: opts.id,
+          name: opts.name,
+          platform: opts.platform ?? "multi-agent-engine",
+          user_id: opts.userId,
+          team: opts.team,
+          chain: opts.chain,
+          config: opts.config,
+        }),
+      });
+    } catch {
+      console.error(`[event-emitter] Failed to create PG session: ${opts.id}`);
+    }
+  }
+
+  async pgUpdateSession(sessionId: string, updates: { name?: string; status?: string }): Promise<void> {
+    try {
+      await fetch(`${this.dashboardUrl}/api/pg/sessions/${sessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+    } catch {
+      console.error(`[event-emitter] Failed to update PG session: ${sessionId}`);
+    }
+  }
+
+  async pgCreateAgent(opts: {
+    sessionId: string;
+    agentId: string;
+    role: string;
+    persona?: string;
+    adapter?: string;
+    prompt?: string;
+    config?: Record<string, unknown>;
+  }): Promise<void> {
+    try {
+      const res = await fetch(`${this.dashboardUrl}/api/pg/sessions/${opts.sessionId}/agents`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: opts.sessionId,
+          agent_id: opts.agentId,
+          role: opts.role,
+          persona: opts.persona,
+          adapter: opts.adapter,
+          status: "running",
+          prompt: opts.prompt,
+          config: opts.config,
+        }),
+      });
+      if (res.ok) {
+        const agent = (await res.json()) as { id?: number };
+        if (agent?.id) {
+          this.pgAgentIds.set(opts.agentId, agent.id);
+        }
+      }
+    } catch {
+      console.error(`[event-emitter] Failed to create PG agent: ${opts.agentId}`);
+    }
+  }
+
+  async pgUpdateAgent(agentId: string, updates: {
+    status?: string;
+    config?: Record<string, unknown>;
+    result?: Record<string, unknown>;
+    cost_usd?: number;
+  }): Promise<void> {
+    const pgId = this.pgAgentIds.get(agentId);
+    if (!pgId) return;
+    try {
+      await fetch(`${this.dashboardUrl}/api/pg/agents/${pgId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+    } catch {
+      console.error(`[event-emitter] Failed to update PG agent: ${agentId}`);
+    }
   }
 }

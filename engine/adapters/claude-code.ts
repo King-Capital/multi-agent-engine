@@ -1,6 +1,5 @@
-import { $ } from "bun";
 import { mkdirSync } from "fs";
-import type { PlatformAdapter, DelegateOptions, DelegateResult } from "../types";
+import type { PlatformAdapter, DelegateOptions, DelegateResult, StreamEvent } from "../types";
 
 export class ClaudeCodeAdapter implements PlatformAdapter {
   name = "claude-code";
@@ -24,7 +23,7 @@ export class ClaudeCodeAdapter implements PlatformAdapter {
 
   async isAvailable(): Promise<boolean> {
     try {
-      const result = await $`which claude`.text();
+      const result = await Bun.$`which claude`.text();
       return result.trim().length > 0;
     } catch {
       return false;
@@ -50,10 +49,12 @@ export class ClaudeCodeAdapter implements PlatformAdapter {
     const args = [
       "claude",
       "--print",
+      "--verbose",
       "--model", this.resolveCliModel(opts.model),
       "--system-prompt", systemPrompt,
       "--max-turns", "25",
-      "--output-format", "text",
+      "--output-format", "stream-json",
+      "--permission-mode", "bypassPermissions",
     ];
 
     const allowedTools = opts.tools.filter((t) => t !== "delegate");
@@ -63,7 +64,7 @@ export class ClaudeCodeAdapter implements PlatformAdapter {
       args.push("--allowedTools", "none");
     }
 
-    console.log(`[claude-code] Spawning ${opts.persona.name} (${opts.model}) in ${opts.workingDir}`);
+    console.log(`[claude-code] Spawning ${opts.persona.name} (${this.resolveCliModel(opts.model)}) in ${opts.workingDir}`);
 
     const timeout = opts.timeoutMs ?? 300_000;
 
@@ -77,70 +78,142 @@ export class ClaudeCodeAdapter implements PlatformAdapter {
 
       const timer = setTimeout(() => proc.kill(), timeout);
 
-      const output = await new Response(proc.stdout).text();
-      const stderr = await new Response(proc.stderr).text();
-      const exitCode = await proc.exited;
+      let resultText = "";
+      let costUsd = 0;
+      let tokensUsed = 0;
+      let cacheReadTokens = 0;
 
+      const reader = proc.stdout.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const evt = JSON.parse(line);
+            this.processStreamEvent(evt, opts.onStreamEvent);
+
+            if (evt.type === "assistant" && evt.message?.content) {
+              for (const block of evt.message.content) {
+                if (block.type === "text" && block.text) {
+                  resultText += block.text;
+                }
+              }
+            }
+
+            if (evt.type === "result") {
+              resultText = evt.result ?? resultText;
+              costUsd = evt.total_cost_usd ?? 0;
+              const usage = evt.usage;
+              if (usage) {
+                tokensUsed = (usage.output_tokens ?? 0) + (usage.input_tokens ?? 0);
+                cacheReadTokens = usage.cache_read_input_tokens ?? 0;
+              }
+            }
+          } catch {
+            // non-JSON line, skip
+          }
+        }
+      }
+
+      // process remaining buffer
+      if (buffer.trim()) {
+        try {
+          const evt = JSON.parse(buffer);
+          this.processStreamEvent(evt, opts.onStreamEvent);
+          if (evt.type === "result") {
+            resultText = evt.result ?? resultText;
+            costUsd = evt.total_cost_usd ?? 0;
+          }
+        } catch { /* skip */ }
+      }
+
+      const exitCode = await proc.exited;
       clearTimeout(timer);
 
       if (exitCode === null || exitCode === 137 || exitCode === 143) {
         console.error(`[claude-code] ${opts.persona.name} timed out after ${timeout}ms`);
         return {
-          agentId,
-          agentName: opts.persona.name,
+          agentId, agentName: opts.persona.name,
           output: `ERROR: Agent timed out after ${timeout}ms`,
-          grade: "FAILED",
-          findings: ["timeout"],
-          costUsd: 0,
-          tokensUsed: 0,
+          grade: "FAILED", findings: ["timeout"], costUsd: 0, tokensUsed: 0,
         };
       }
 
-      if (exitCode !== 0) {
+      if (exitCode !== 0 && !resultText.trim()) {
+        const stderr = await new Response(proc.stderr).text();
         console.error(`[claude-code] ${opts.persona.name} exited ${exitCode}: ${stderr.slice(0, 500)}`);
         return {
-          agentId,
-          agentName: opts.persona.name,
-          output: `ERROR: ${stderr}`,
-          grade: "FAILED",
-          findings: [stderr],
-          costUsd: 0,
-          tokensUsed: 0,
+          agentId, agentName: opts.persona.name,
+          output: `ERROR: exit ${exitCode}: ${stderr}`,
+          grade: "FAILED", findings: [stderr], costUsd, tokensUsed,
         };
       }
 
-      if (!output.trim()) {
-        console.warn(`[claude-code] ${opts.persona.name} returned empty output`);
+      if (!resultText.trim()) {
         return {
-          agentId,
-          agentName: opts.persona.name,
+          agentId, agentName: opts.persona.name,
           output: "ERROR: Empty output from agent",
-          grade: "FAILED",
-          findings: ["empty_output"],
-          costUsd: 0,
-          tokensUsed: 0,
+          grade: "FAILED", findings: ["empty_output"], costUsd, tokensUsed,
         };
       }
+
+      // emit final cost
+      opts.onStreamEvent?.({ type: "cost", costUsd, tokensUsed, cacheReadTokens });
 
       return {
         agentId,
         agentName: opts.persona.name,
-        output,
-        grade: this.extractGrade(output),
-        findings: this.extractFindings(output),
-        costUsd: this.estimateCost(output, opts.model),
-        tokensUsed: this.estimateTokens(output),
+        output: resultText,
+        grade: this.extractGrade(resultText),
+        findings: this.extractFindings(resultText),
+        costUsd,
+        tokensUsed,
       };
     } catch (err) {
       return {
-        agentId,
-        agentName: opts.persona.name,
+        agentId, agentName: opts.persona.name,
         output: `ERROR: ${err}`,
-        grade: "FAILED",
-        findings: [`${err}`],
-        costUsd: 0,
-        tokensUsed: 0,
+        grade: "FAILED", findings: [`${err}`], costUsd: 0, tokensUsed: 0,
       };
+    }
+  }
+
+  private processStreamEvent(evt: any, callback?: (event: StreamEvent) => void): void {
+    if (!callback) return;
+
+    if (evt.type === "assistant" && evt.message?.content) {
+      for (const block of evt.message.content) {
+        if (block.type === "tool_use") {
+          const filePath = block.input?.file_path ?? block.input?.path ?? block.input?.command?.slice(0, 80) ?? "";
+          callback({
+            type: "tool_call",
+            tool: block.name,
+            filePath,
+            status: "running",
+          });
+        }
+        if (block.type === "text" && block.text) {
+          callback({ type: "assistant_text", content: block.text.slice(0, 500) });
+        }
+      }
+    }
+
+    if (evt.type === "result") {
+      callback({
+        type: "cost",
+        costUsd: evt.total_cost_usd ?? 0,
+        tokensUsed: (evt.usage?.output_tokens ?? 0) + (evt.usage?.input_tokens ?? 0),
+        cacheReadTokens: evt.usage?.cache_read_input_tokens ?? 0,
+      });
     }
   }
 
@@ -155,15 +228,5 @@ export class ClaudeCodeAdapter implements PlatformAdapter {
       if (/^\s*-\s*P[0-3]:/.test(line)) findings.push(line.trim());
     }
     return findings;
-  }
-
-  private estimateCost(output: string, model: string): number {
-    const tokens = this.estimateTokens(output);
-    const rate = model.includes("opus") ? 0.075 : model.includes("sonnet") ? 0.015 : 0.005;
-    return (tokens / 1000) * rate;
-  }
-
-  private estimateTokens(output: string): number {
-    return Math.ceil(output.length / 4);
   }
 }

@@ -95,6 +95,14 @@ export class Orchestrator {
 
     await this.emitter.sessionStart(sessionId, sessionName, chainName, opts.task);
 
+    // Persist session to PG
+    await this.emitter.pgCreateSession({
+      id: sessionId,
+      name: sessionName,
+      chain: chainName,
+      team: chainName,
+    });
+
     const teams = loadTeams();
     const orchPersona = loadPersona(teams.orchestrator.path);
     await this.emitter.agentSpawn(
@@ -107,6 +115,14 @@ export class Orchestrator {
       "Orchestration",
       teams.orchestrator.color ?? "#36f9f6"
     );
+
+    // Persist orchestrator agent to PG
+    await this.emitter.pgCreateAgent({
+      sessionId,
+      agentId: "orch-1",
+      role: "orchestrator",
+      persona: orchPersona.name,
+    });
 
     console.log(`\n[orchestrator] Session: ${sessionName}`);
     console.log(`[orchestrator] Chain: ${chainName}`);
@@ -121,6 +137,8 @@ export class Orchestrator {
     } catch (err) {
       session.status = "error";
       console.error(`[orchestrator] Session failed:`, err);
+      // Update PG session status on error
+      await this.emitter.pgUpdateSession(sessionId, { status: "failed" });
     }
 
     await this.emitter.sessionEnd(sessionId);
@@ -133,11 +151,18 @@ export class Orchestrator {
     task: string,
     adapterName?: string
   ): Promise<void> {
+    // Normalize: chains with top-level `parallel`/`then` (e.g. parallel-build)
+    // get converted to a steps array so the main loop handles both formats.
+    const steps = chain.steps ?? this.normalizeParallelChain(chain);
     let previousOutput = "";
 
-    for (let i = 0; i < chain.steps.length; i++) {
-      const step = chain.steps[i];
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
       if (!step) continue;
+
+      const stepLabel = step.team ?? step.agent ?? "parallel teams";
+      await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+        `Starting step ${i + 1}/${steps.length}: handing off to ${stepLabel}.`);
 
       if (step.parallel) {
         const results = await this.runParallelStep(session, step, task, previousOutput, adapterName);
@@ -163,6 +188,22 @@ export class Orchestrator {
       this.markTillDone(session, i);
       await this.emitter.tillDone(session.id, session.name, session.tillDone);
     }
+  }
+
+  /**
+   * Converts a chain with top-level `parallel`/`then` keys into a steps array.
+   * Example: parallel-build has `parallel: [{team: A}, {team: B}]` and `then: [{team: Validation}]`
+   * This becomes: [{ parallel: [...] }, ...thenSteps]
+   */
+  private normalizeParallelChain(chain: Chain): ChainStep[] {
+    const steps: ChainStep[] = [];
+    if (chain.parallel) {
+      steps.push({ parallel: chain.parallel });
+    }
+    if (chain.then) {
+      steps.push(...chain.then);
+    }
+    return steps;
   }
 
   private async runTeamStep(
@@ -193,6 +234,15 @@ export class Orchestrator {
       teamConfig["team-color"]
     );
 
+    // Persist lead agent to PG
+    await this.emitter.pgCreateAgent({
+      sessionId: session.id,
+      agentId: leadId,
+      role: "lead",
+      persona: teamConfig.lead.name,
+      prompt: leadPrompt.slice(0, 2000),
+    });
+
     await this.emitter.message(
       session.id,
       "orch-1",
@@ -210,7 +260,7 @@ export class Orchestrator {
 
     const sanitizedLeadPrompt = sanitizeAgentInput(leadPrompt);
 
-    const leadOpts = {
+    const leadOpts: DelegateOptions = {
       persona: leadPersona,
       systemPrompt: buildSystemPrompt(leadPersona),
       userPrompt: sanitizedLeadPrompt,
@@ -223,6 +273,13 @@ export class Orchestrator {
       parentId: "orch-1",
       teamName: teamConfig["team-name"],
       teamColor: teamConfig["team-color"],
+      onStreamEvent: (streamEvt) => {
+        if (streamEvt.type === "tool_call") {
+          this.emitter.toolCall(session.id, leadId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running");
+        } else if (streamEvt.type === "cost") {
+          this.emitter.costUpdate(session.id, leadId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
+        }
+      },
     };
 
     const leadResult = await delegateWithHealing({
@@ -244,13 +301,20 @@ export class Orchestrator {
     session.totalTokens += leadResult.tokensUsed;
 
     await this.emitter.costUpdate(session.id, leadId, leadResult.costUsd, leadResult.tokensUsed, 0);
-    await this.emitter.message(
-      session.id, leadId, teamConfig.lead.name, "Orchestrator",
-      leadResult.output.slice(0, 500) + (leadResult.output.length > 500 ? "..." : "")
-    );
+
+    // Update lead agent status in PG
+    await this.emitter.pgUpdateAgent(leadId, {
+      status: leadResult.grade === "FAILED" ? "failed" : "completed",
+      cost_usd: leadResult.costUsd,
+      result: { output: leadResult.output.slice(0, 5000), grade: leadResult.grade },
+    });
 
     // If lead failed or team has no workers, return lead result directly
     if (!teamConfig.members.length || leadResult.grade === "FAILED") {
+      const statusMsg = leadResult.grade === "FAILED"
+        ? `${teamConfig["team-name"]} lead could not complete the task.`
+        : `${teamConfig["team-name"]} completed. ${this.summarizeOutput(leadResult.output)}`;
+      await this.emitter.message(session.id, "orch-1", "Orchestrator", "user", statusMsg);
       return leadResult;
     }
 
@@ -267,6 +331,11 @@ export class Orchestrator {
 
     console.log(`[orchestrator] Lead briefed. Spawning ${activeMembers.length} worker(s): ${activeMembers.map((m) => m.name).join(", ")}`);
 
+    const spawnMsg = activeMembers.length === 1
+      ? `${teamConfig["team-name"]} lead assigned ${activeMembers[0]!.name} to handle the work.`
+      : `${teamConfig["team-name"]} lead split the work across ${activeMembers.length} workers: ${activeMembers.map((m) => m.name).join(", ")}. Running in parallel.`;
+    await this.emitter.message(session.id, "orch-1", "Orchestrator", "user", spawnMsg);
+
     const workerPromises = activeMembers.map(async (member) => {
       const workerPersona = loadPersona(member.path);
       const workerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
@@ -281,6 +350,14 @@ export class Orchestrator {
         teamConfig["team-name"],
         member.color ?? teamConfig["team-color"]
       );
+
+      // Persist worker agent to PG
+      await this.emitter.pgCreateAgent({
+        sessionId: session.id,
+        agentId: workerId,
+        role: "worker",
+        persona: member.name,
+      });
 
       const assignment = hasMultipleWorkers
         ? this.parseWorkerAssignment(leadResult.output, member.name)
@@ -337,10 +414,18 @@ export class Orchestrator {
       session.totalTokens += workerResult.tokensUsed;
 
       await this.emitter.costUpdate(session.id, workerId, workerResult.costUsd, workerResult.tokensUsed, 0);
-      await this.emitter.message(
-        session.id, workerId, member.name, teamConfig.lead.name,
-        workerResult.output.slice(0, 500) + (workerResult.output.length > 500 ? "..." : "")
-      );
+
+      // Update worker agent status in PG
+      await this.emitter.pgUpdateAgent(workerId, {
+        status: workerResult.grade === "FAILED" ? "failed" : "completed",
+        cost_usd: workerResult.costUsd,
+        result: { output: workerResult.output.slice(0, 5000), grade: workerResult.grade },
+      });
+
+      const workerStatusMsg = workerResult.grade === "FAILED"
+        ? `${member.name} ran into issues and could not complete their assignment.`
+        : `${member.name} finished. ${this.summarizeOutput(workerResult.output)}`;
+      await this.emitter.message(session.id, "orch-1", "Orchestrator", "user", workerStatusMsg);
 
       return workerResult;
     });
@@ -353,10 +438,14 @@ export class Orchestrator {
       throw new Error(`Session budget exceeded: $${session.totalCost.toFixed(2)}`);
     }
 
-    // Combine worker results
+    // Combine worker results (raw for internal chain, clean for dashboard)
     const combinedOutput = workerResults.map((r) => `[${r.agentName}]:\n${r.output}`).join("\n\n---\n\n");
     const combinedFindings = workerResults.flatMap((r) => r.findings ?? []);
     const worstGrade = this.worstGrade(workerResults.map((r) => r.grade));
+
+    const succeeded = workerResults.filter((r) => r.grade !== "FAILED").length;
+    const teamDoneMsg = `${teamConfig["team-name"]} complete. ${succeeded}/${workerResults.length} workers succeeded. Overall grade: ${worstGrade ?? "pending"}.`;
+    await this.emitter.message(session.id, "orch-1", "Orchestrator", "user", teamDoneMsg);
 
     return {
       agentId: leadId,
@@ -367,6 +456,37 @@ export class Orchestrator {
       costUsd: workerResults.reduce((sum, r) => sum + r.costUsd, 0) + leadResult.costUsd,
       tokensUsed: workerResults.reduce((sum, r) => sum + r.tokensUsed, 0) + leadResult.tokensUsed,
     };
+  }
+
+  private summarizeOutput(output: string): string {
+    const lines = output.split("\n").map((l) => l.trim()).filter(Boolean);
+    const files: string[] = [];
+    const actions: string[] = [];
+    let grade = "";
+
+    for (const line of lines) {
+      const fileMatch = line.match(/(?:FILE|Modified|Created|Edited|Fixed|Updated)[:\s]+[`']?([^\s`',]+)/i);
+      if (fileMatch?.[1]) files.push(fileMatch[1]);
+
+      const gradeMatch = line.match(/GRADE:\s*(PERFECT|VERIFIED|PARTIAL|FEEDBACK|FAILED)/i);
+      if (gradeMatch?.[1]) grade = gradeMatch[1];
+
+      if (/^[-*]\s+(?:Fixed|Added|Removed|Updated|Created|Changed)/i.test(line)) {
+        actions.push(line.replace(/^[-*]\s+/, ""));
+      }
+    }
+
+    const parts: string[] = [];
+    if (files.length > 0) parts.push(`Touched ${files.length} file(s): ${files.slice(0, 4).join(", ")}${files.length > 4 ? ` +${files.length - 4} more` : ""}.`);
+    if (actions.length > 0) parts.push(actions.slice(0, 3).join(". ") + ".");
+    if (grade) parts.push(`Grade: ${grade}.`);
+
+    if (parts.length === 0) {
+      const firstSentence = output.replace(/[#*`|]/g, "").trim().split(/[.\n]/)[0] ?? "";
+      return firstSentence.slice(0, 150) + (firstSentence.length > 150 ? "..." : ".");
+    }
+
+    return parts.join(" ");
   }
 
   private worstGrade(grades: (string | undefined)[]): "PERFECT" | "VERIFIED" | "PARTIAL" | "FEEDBACK" | "FAILED" | undefined {
@@ -446,6 +566,15 @@ export class Orchestrator {
       teamColor
     );
 
+    // Persist solo agent to PG
+    await this.emitter.pgCreateAgent({
+      sessionId: session.id,
+      agentId: step.agent!,
+      role: "worker",
+      persona: agentConfig.name,
+      prompt: prompt.slice(0, 2000),
+    });
+
     const sanitizedPrompt = sanitizeAgentInput(prompt);
 
     const isScout = step.agent?.toLowerCase() === "scout";
@@ -482,6 +611,13 @@ export class Orchestrator {
 
     session.totalCost += result.costUsd;
     session.totalTokens += result.tokensUsed;
+
+    // Update solo agent status in PG
+    await this.emitter.pgUpdateAgent(step.agent!, {
+      status: result.grade === "FAILED" ? "failed" : "completed",
+      cost_usd: result.costUsd,
+      result: { output: result.output.slice(0, 5000), grade: result.grade },
+    });
 
     const budgets = this.loadBudgets();
     if (budgets && session.totalCost > budgets.max_per_session_usd) {
@@ -594,7 +730,8 @@ export class Orchestrator {
 
   private buildTillDone(chain: Chain): TillDoneItem[] {
     const items: TillDoneItem[] = [];
-    for (const step of chain.steps) {
+    const steps = chain.steps ?? this.normalizeParallelChain(chain);
+    for (const step of steps) {
       if (step.till_done) {
         for (const desc of step.till_done) {
           items.push({ description: desc, completed: false, active: false });
@@ -611,8 +748,9 @@ export class Orchestrator {
   private markTillDone(session: SessionState, stepIndex: number): void {
     let idx = 0;
     const chain = getChain(session.chain);
-    for (let i = 0; i <= stepIndex && i < chain.steps.length; i++) {
-      const step = chain.steps[i]!;
+    const steps = chain.steps ?? this.normalizeParallelChain(chain);
+    for (let i = 0; i <= stepIndex && i < steps.length; i++) {
+      const step = steps[i]!;
       const count = step.till_done?.length ?? 1;
       for (let j = 0; j < count; j++) {
         if (idx < session.tillDone.length) {
@@ -628,11 +766,10 @@ export class Orchestrator {
   }
 
   private interpolatePrompt(body: string, args: string[]): string {
-    let result = body;
-    for (let i = 0; i < args.length; i++) {
-      result = result.replaceAll(`${i + 1}`, args[i]!);
-    }
-    return result;
+    return body.replace(/\$(\d+)/g, (match, numStr) => {
+      const idx = parseInt(numStr, 10) - 1;
+      return idx >= 0 && idx < args.length ? args[idx]! : match;
+    });
   }
 
   private redactSensitiveOutput(result: DelegateResult, agentName: string): void {
