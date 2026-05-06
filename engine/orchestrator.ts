@@ -18,6 +18,7 @@ import {
   validateAgentOutput,
 } from "./security";
 import { delegateWithHealing } from "./self-healing";
+import { isGitRepo, createWorktree, mergeWorktree, cleanupWorktree } from "./worktree";
 import type {
   PlatformAdapter,
   DelegateResult,
@@ -338,9 +339,20 @@ export class Orchestrator {
       : `${teamConfig["team-name"]} lead split the work across ${activeMembers.length} workers: ${activeMembers.map((m) => m.name).join(", ")}. Running in parallel.`;
     await this.emitter.message(session.id, "orch-1", "Orchestrator", "user", spawnMsg);
 
+    const useWorktrees = activeMembers.length > 1 && await isGitRepo(session.workingDir);
+    const worktreeIds: string[] = [];
+
     const workerPromises = activeMembers.map(async (member) => {
       const workerPersona = loadPersona(member.path);
       const workerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+
+      let workerWorkingDir = session.workingDir;
+      if (useWorktrees) {
+        const wtId = `${session.id.slice(0, 8)}-${workerId}`;
+        workerWorkingDir = await createWorktree(session.workingDir, wtId);
+        worktreeIds.push(wtId);
+        console.log(`[orchestrator] Created worktree for ${member.name}: ${workerWorkingDir}`);
+      }
 
       await this.emitter.agentSpawn(
         session.id,
@@ -390,7 +402,7 @@ export class Orchestrator {
         thinking: "medium" as const,
         tools: workerPersona.tools,
         domain: workerPersona.domain,
-        workingDir: session.workingDir,
+        workingDir: workerWorkingDir,
         sessionDir: `data/sessions/${session.id}`,
         parentId: leadId,
         teamName: teamConfig["team-name"],
@@ -433,6 +445,17 @@ export class Orchestrator {
     });
 
     const workerResults = await Promise.all(workerPromises);
+
+    // Merge worktrees back sequentially, then clean up
+    if (worktreeIds.length > 0) {
+      for (const wtId of worktreeIds) {
+        const { merged, hadChanges } = await mergeWorktree(session.workingDir, wtId);
+        if (hadChanges && !merged) {
+          console.error(`[orchestrator] Merge conflict from worktree ${wtId} -- manual resolution needed`);
+        }
+        await cleanupWorktree(session.workingDir, wtId);
+      }
+    }
 
     const budgets = this.loadBudgets();
     if (budgets && session.totalCost > budgets.max_per_session_usd) {
@@ -544,11 +567,33 @@ export class Orchestrator {
       }
     }
 
-    const promises = teams.map((t) =>
-      this.runTeamStep(session, { ...step, team: t.team }, task, previousOutput, adapterName)
-    );
+    const useWorktrees = teams.length > 1 && await isGitRepo(session.workingDir);
+    const teamWtIds: string[] = [];
 
-    return Promise.all(promises);
+    const promises = teams.map(async (t, idx) => {
+      const teamSession = useWorktrees ? { ...session } : session;
+      if (useWorktrees) {
+        const wtId = `${session.id.slice(0, 8)}-team-${idx}`;
+        teamSession.workingDir = await createWorktree(session.workingDir, wtId);
+        teamWtIds.push(wtId);
+        console.log(`[orchestrator] Created team worktree for ${t.team}: ${teamSession.workingDir}`);
+      }
+      return this.runTeamStep(teamSession, { ...step, team: t.team }, task, previousOutput, adapterName);
+    });
+
+    const results = await Promise.all(promises);
+
+    if (teamWtIds.length > 0) {
+      for (const wtId of teamWtIds) {
+        const { merged, hadChanges } = await mergeWorktree(session.workingDir, wtId);
+        if (hadChanges && !merged) {
+          console.error(`[orchestrator] Team merge conflict from worktree ${wtId} -- manual resolution needed`);
+        }
+        await cleanupWorktree(session.workingDir, wtId);
+      }
+    }
+
+    return results;
   }
 
   private async runAgentStep(
