@@ -11,6 +11,7 @@ import {
 } from "./config";
 import { EventEmitter } from "./event-emitter";
 import { isGitRepo, createWorktree, mergeWorktree, cleanupWorktree } from "./worktree";
+import { sanitizeAgentInput, validateAgentOutput } from "./security";
 import type {
   PlatformAdapter,
   DelegateResult,
@@ -207,6 +208,9 @@ export class Orchestrator {
       taskBody = opts.task;
     }
 
+    // Sanitize task input to strip prompt injection patterns (#45)
+    taskBody = sanitizeAgentInput(taskBody);
+
     const chain = getChain(chainName);
     const taskSummary = (taskBody.split("\n")[0] ?? "").replace(/^#+\s*/, "").slice(0, 50).trim();
     const sessionName = opts.sessionName ?? `${taskSummary || chainName}`;
@@ -354,6 +358,7 @@ export class Orchestrator {
     };
 
     const leadResult = await adapter.delegate(leadOpts);
+    this.redactOutput(leadResult);
     session.totalCost += leadResult.costUsd;
     session.totalTokens += leadResult.tokensUsed;
     await this.emitter.costUpdate(session.id, leadId, leadResult.costUsd, leadResult.tokensUsed, 0);
@@ -422,6 +427,7 @@ export class Orchestrator {
         },
       });
 
+      this.redactOutput(result);
       session.totalCost += result.costUsd;
       session.totalTokens += result.tokensUsed;
       await this.emitter.costUpdate(session.id, workerId, result.costUsd, result.tokensUsed, 0);
@@ -586,6 +592,7 @@ export class Orchestrator {
       },
     });
 
+    this.redactOutput(result);
     session.totalCost += result.costUsd;
     session.totalTokens += result.tokensUsed;
 
@@ -624,6 +631,29 @@ export class Orchestrator {
       }
     }
     if (idx < session.tillDone.length) session.tillDone[idx]!.active = true;
+  }
+
+  /**
+   * Redact sensitive patterns from agent output. Advisory only -- logs warnings
+   * but does not block execution. (#45)
+   */
+  private redactOutput(result: DelegateResult): void {
+    const violations = validateAgentOutput(result.output);
+    if (violations.length > 0) {
+      for (const v of violations) {
+        console.warn(`[security] Output redaction warning from ${result.agentName}: ${v.reason}`);
+      }
+      // Redact common secret patterns in-place
+      result.output = result.output
+        .replace(/ghp_[A-Za-z0-9_]{36}/g, "ghp_[REDACTED]")
+        .replace(/sk-[A-Za-z0-9]{48}/g, "sk-[REDACTED]")
+        .replace(/sk-ant-[A-Za-z0-9-]{95}/g, "sk-ant-[REDACTED]")
+        .replace(/-----BEGIN (?:RSA |EC )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC )?PRIVATE KEY-----/g, "[PRIVATE KEY REDACTED]")
+        .replace(/(?:api[_-]?key|token|secret|password)\s*[:=]\s*["']?[A-Za-z0-9+/=_-]{20,}/gi, (match) => {
+          const prefix = match.split(/[:=]/)[0];
+          return `${prefix}=[REDACTED]`;
+        });
+    }
   }
 
   private interpolatePrompt(body: string, args: string[]): string {
