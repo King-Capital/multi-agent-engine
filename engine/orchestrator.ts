@@ -34,14 +34,128 @@ import type {
   TillDoneItem,
 } from "./types";
 
+interface AgentActivity {
+  agentId: string;
+  name: string;
+  role: string;
+  lastEventAt: number;
+  toolCalls: number;
+  lastTool: string;
+  recentTools: string[];
+  warned: boolean;
+}
+
+const IDLE_WARN_MS = 90_000;
+const LOOP_THRESHOLD = 4;
+const MONITOR_INTERVAL_MS = 15_000;
+
 export class Orchestrator {
   private adapters: Map<string, PlatformAdapter> = new Map();
   private defaultAdapter: string = "";
   private emitter: EventEmitter;
   private sessions: Map<string, SessionState> = new Map();
+  private agentActivity: Map<string, AgentActivity> = new Map();
+  private monitorInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(dashboardUrl?: string, apiToken?: string) {
     this.emitter = new EventEmitter(dashboardUrl, apiToken);
+  }
+
+  private trackActivity(agentId: string, name: string, role: string): void {
+    const existing = this.agentActivity.get(agentId);
+    if (existing) {
+      existing.lastEventAt = Date.now();
+      existing.toolCalls++;
+      return;
+    }
+    this.agentActivity.set(agentId, {
+      agentId, name, role,
+      lastEventAt: Date.now(),
+      toolCalls: 0,
+      lastTool: "",
+      recentTools: [],
+      warned: false,
+    });
+  }
+
+  private trackToolCall(agentId: string, tool: string, filePath?: string): void {
+    const a = this.agentActivity.get(agentId);
+    if (a) {
+      a.lastEventAt = Date.now();
+      a.toolCalls++;
+      a.lastTool = tool;
+      a.warned = false;
+      const sig = `${tool}:${filePath ?? ""}`;
+      a.recentTools.push(sig);
+      if (a.recentTools.length > 10) a.recentTools.shift();
+    }
+  }
+
+  private detectLoop(a: AgentActivity): string | null {
+    if (a.recentTools.length < LOOP_THRESHOLD) return null;
+    const last = a.recentTools.slice(-LOOP_THRESHOLD);
+    if (last.every(t => t === last[0])) return last[0]!;
+    if (a.recentTools.length >= 6) {
+      const pair = a.recentTools.slice(-2).join("|");
+      const prevPair = a.recentTools.slice(-4, -2).join("|");
+      const prevPrevPair = a.recentTools.slice(-6, -4).join("|");
+      if (pair === prevPair && pair === prevPrevPair) return `alternating: ${pair}`;
+    }
+    return null;
+  }
+
+  private startMonitor(sessionId: string): void {
+    if (this.monitorInterval) return;
+    let tick = 0;
+    this.monitorInterval = setInterval(() => {
+      const now = Date.now();
+      tick++;
+      const isHeartbeatTick = tick % 2 === 0; // every 30s (2 * 15s interval)
+
+      for (const [id, a] of this.agentActivity) {
+        const idle = now - a.lastEventAt;
+
+        const loop = this.detectLoop(a);
+        if (loop) {
+          console.error(`[monitor] LOOP: ${a.name} (${id}) -- repeating "${loop}" ${LOOP_THRESHOLD}+ times`);
+          this.emitter.emit({
+            session_id: sessionId,
+            agent_id: id,
+            event_type: "self_heal",
+            timestamp: new Date().toISOString(),
+            data: { failed_worker: a.name, heal_action: `Loop detected: repeating "${loop}"` },
+          });
+          a.recentTools = [];
+        } else if (idle > IDLE_WARN_MS && !a.warned) {
+          console.warn(`[monitor] IDLE: ${a.name} (${id}) -- ${Math.round(idle / 1000)}s since last activity (${a.toolCalls} tool calls, last: ${a.lastTool || "none"})`);
+          a.warned = true;
+        }
+
+        if (isHeartbeatTick) {
+          const status = idle > IDLE_WARN_MS ? "idle" : "working";
+          console.log(`[heartbeat] ${a.name} (${a.role}): ${status} | ${a.toolCalls} tools | last: ${a.lastTool || "none"} | idle: ${Math.round(idle / 1000)}s`);
+          this.emitter.emit({
+            session_id: sessionId,
+            agent_id: id,
+            event_type: "message",
+            timestamp: new Date().toISOString(),
+            data: {
+              from: "monitor",
+              to: "orchestrator",
+              content: `[heartbeat] ${a.name}: ${status}, ${a.toolCalls} tool calls, last: ${a.lastTool || "none"}, idle: ${Math.round(idle / 1000)}s`,
+            },
+          });
+        }
+      }
+    }, MONITOR_INTERVAL_MS);
+  }
+
+  private stopMonitor(): void {
+    if (this.monitorInterval) {
+      clearInterval(this.monitorInterval);
+      this.monitorInterval = null;
+    }
+    this.agentActivity.clear();
   }
 
   registerAdapter(adapter: PlatformAdapter): void {
@@ -138,16 +252,18 @@ export class Orchestrator {
 
     await this.emitter.tillDone(sessionId, sessionName, session.tillDone);
 
+    this.startMonitor(sessionId);
+
     try {
       await this.runChain(session, chain, taskBody, opts.adapter);
       session.status = "completed";
     } catch (err) {
       session.status = "error";
       console.error(`[orchestrator] Session failed:`, err);
-      // Update PG session status on error
       await this.emitter.pgUpdateSession(sessionId, { status: "failed" });
     }
 
+    this.stopMonitor();
     await this.emitter.sessionEnd(sessionId);
     return session;
   }
@@ -230,6 +346,8 @@ export class Orchestrator {
 
     const leadId = `${step.team}-lead`;
 
+    this.trackActivity(leadId, teamConfig.lead.name, "lead");
+
     await this.emitter.agentSpawn(
       session.id,
       leadId,
@@ -284,6 +402,7 @@ export class Orchestrator {
       teamColor: teamConfig["team-color"],
       onStreamEvent: (streamEvt) => {
         if (streamEvt.type === "tool_call") {
+          this.trackToolCall(leadId, streamEvt.tool ?? "", streamEvt.filePath);
           this.emitter.toolCall(session.id, leadId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running");
         } else if (streamEvt.type === "cost") {
           this.emitter.costUpdate(session.id, leadId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
@@ -356,6 +475,8 @@ export class Orchestrator {
       const workerPersona = loadPersona(member.path);
       const workerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 
+      this.trackActivity(workerId, member.name, "worker");
+
       let workerWorkingDir = session.workingDir;
       if (useWorktrees) {
         const wtId = `${session.id.slice(0, 8)}-${workerId}`;
@@ -420,6 +541,14 @@ export class Orchestrator {
         parentId: leadId,
         teamName: teamConfig["team-name"],
         teamColor: member.color ?? teamConfig["team-color"],
+        onStreamEvent: (streamEvt) => {
+          if (streamEvt.type === "tool_call") {
+            this.trackToolCall(workerId, streamEvt.tool ?? "", streamEvt.filePath);
+            this.emitter.toolCall(session.id, workerId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running");
+          } else if (streamEvt.type === "cost") {
+            this.emitter.costUpdate(session.id, workerId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
+          }
+        },
       };
 
       const workerResult = await delegateWithHealing({
@@ -650,6 +779,8 @@ export class Orchestrator {
       step.till_done ? `\nTill done:\n${step.till_done.map((t) => `- [ ] ${t}`).join("\n")}` : "",
     ].join("\n");
 
+    this.trackActivity(step.agent!, agentConfig.name, "worker");
+
     await this.emitter.agentSpawn(
       session.id,
       step.agent!,
@@ -688,6 +819,14 @@ export class Orchestrator {
       parentId: "orch-1",
       teamName,
       teamColor,
+      onStreamEvent: (streamEvt: { type: string; tool?: string; filePath?: string; status?: string; costUsd?: number; tokensUsed?: number; cacheReadTokens?: number }) => {
+        if (streamEvt.type === "tool_call") {
+          this.trackToolCall(step.agent!, streamEvt.tool ?? "", streamEvt.filePath);
+          this.emitter.toolCall(session.id, step.agent!, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running");
+        } else if (streamEvt.type === "cost") {
+          this.emitter.costUpdate(session.id, step.agent!, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
+        }
+      },
     };
 
     const result = await delegateWithHealing({

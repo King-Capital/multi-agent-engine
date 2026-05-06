@@ -66,7 +66,7 @@ export class ClaudeCodeAdapter implements PlatformAdapter {
 
     console.log(`[claude-code] Spawning ${opts.persona.name} (${this.resolveCliModel(opts.model)}) in ${opts.workingDir}`);
 
-    const timeout = opts.timeoutMs ?? 300_000;
+    const timeout = opts.timeoutMs ?? 1_800_000;
 
     try {
       const proc = Bun.spawn(args, {
@@ -76,7 +76,7 @@ export class ClaudeCodeAdapter implements PlatformAdapter {
         cwd: opts.workingDir,
       });
 
-      const timer = setTimeout(() => proc.kill(), timeout);
+      const timer = timeout > 0 ? setTimeout(() => proc.kill(), timeout) : null;
 
       let resultText = "";
       let costUsd = 0;
@@ -137,7 +137,7 @@ export class ClaudeCodeAdapter implements PlatformAdapter {
       }
 
       const exitCode = await proc.exited;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
 
       if (exitCode === null || exitCode === 137 || exitCode === 143) {
         console.error(`[claude-code] ${opts.persona.name} timed out after ${timeout}ms`);
