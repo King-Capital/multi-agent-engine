@@ -493,7 +493,12 @@ export class Orchestrator {
     const teamWtIds: string[] = [];
 
     const promises = teams.map(async (t, idx) => {
-      const teamSession = useWorktrees ? { ...session } : session;
+      const teamSession: SessionState = useWorktrees ? {
+        ...session,
+        agents: new Map(session.agents),
+        tillDone: session.tillDone.map(item => ({ ...item })),
+        events: [...session.events],
+      } : session;
       if (useWorktrees) {
         const wtId = `${session.id.slice(0, 8)}-team-${idx}`;
         teamSession.workingDir = await createWorktree(session.workingDir, wtId);
