@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -321,6 +323,68 @@ func RecordEvent(ctx context.Context, e *DBEvent) error {
 		 RETURNING id, created_at`,
 		e.SessionID, e.AgentID, e.EventType, e.Payload,
 	).Scan(&e.ID, &e.CreatedAt)
+}
+
+// --- Auth Tokens ---
+
+func EnsureAuthTokens(ctx context.Context) error {
+	_, err := db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS api_token TEXT UNIQUE`)
+	if err != nil {
+		return fmt.Errorf("add api_token column: %w", err)
+	}
+
+	rows, err := db.QueryContext(ctx, `SELECT id, username FROM users WHERE api_token IS NULL`)
+	if err != nil {
+		return fmt.Errorf("query users without tokens: %w", err)
+	}
+	defer rows.Close()
+
+	type userRow struct {
+		id       int
+		username string
+	}
+	var needTokens []userRow
+	for rows.Next() {
+		var u userRow
+		rows.Scan(&u.id, &u.username)
+		needTokens = append(needTokens, u)
+	}
+	rows.Close()
+
+	for _, u := range needTokens {
+		b := make([]byte, 20)
+		if _, err := rand.Read(b); err != nil {
+			return fmt.Errorf("generate token: %w", err)
+		}
+		token := "mae_" + hex.EncodeToString(b)
+		if _, err := db.ExecContext(ctx, `UPDATE users SET api_token = $1 WHERE id = $2`, token, u.id); err != nil {
+			return fmt.Errorf("set token for %s: %w", u.username, err)
+		}
+		log.Printf("Generated API token for %s: %s", u.username, token)
+	}
+
+	return nil
+}
+
+func LoadTokenMap(ctx context.Context) (map[string]*DBUser, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, username, display_name, uid, gid, role, created_at, api_token
+		 FROM users WHERE api_token IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	m := make(map[string]*DBUser)
+	for rows.Next() {
+		var u DBUser
+		var token string
+		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.UID, &u.GID, &u.Role, &u.CreatedAt, &token); err != nil {
+			return nil, err
+		}
+		m[token] = &u
+	}
+	return m, rows.Err()
 }
 
 func GetEventsBySession(ctx context.Context, sessionID string) ([]DBEvent, error) {

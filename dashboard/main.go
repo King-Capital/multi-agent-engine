@@ -26,6 +26,12 @@ import (
 
 var store *events.Store
 var dbEnabled bool
+var startTime time.Time
+var tokenMap map[string]*DBUser
+
+type contextKey string
+
+const userContextKey contextKey = "user"
 
 func main() {
 	dataDir := os.Getenv("DASHBOARD_DATA_DIR")
@@ -39,12 +45,24 @@ func main() {
 		log.Fatalf("failed to create store: %v", err)
 	}
 
+	startTime = time.Now()
+
 	// Initialize PostgreSQL (optional -- dashboard works without it)
 	if err := InitDB(); err != nil {
 		log.Printf("WARNING: PostgreSQL unavailable, running without persistence: %v", err)
 		dbEnabled = false
 	} else {
 		dbEnabled = true
+		ctx := context.Background()
+		if err := EnsureAuthTokens(ctx); err != nil {
+			log.Printf("WARNING: failed to set up auth tokens: %v", err)
+		}
+		if m, err := LoadTokenMap(ctx); err != nil {
+			log.Printf("WARNING: failed to load token map: %v", err)
+		} else {
+			tokenMap = m
+			log.Printf("Loaded %d API tokens", len(tokenMap))
+		}
 	}
 
 	port := os.Getenv("DASHBOARD_PORT")
@@ -56,6 +74,7 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(corsMiddleware)
+	r.Use(authMiddleware)
 	r.Use(maxBodySize)
 
 	r.Get("/", handleDashboard)
@@ -70,6 +89,7 @@ func main() {
 	})
 
 	r.Route("/api", func(r chi.Router) {
+		r.Get("/health", handleHealth)
 		r.Post("/events", handlePostEvent)
 		r.Get("/sessions", handleListSessions)
 		r.Get("/sessions/{sessionID}", handleGetSession)
@@ -123,8 +143,8 @@ func main() {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -665,6 +685,72 @@ func handleHTMXCosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	templates.CostTracker(sess).Render(r.Context(), w)
+}
+
+// --- Health & Auth ---
+
+func getVersion() string {
+	data, err := os.ReadFile("../VERSION")
+	if err != nil {
+		return "unknown"
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+	dbStatus := "disabled"
+	if dbEnabled {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := db.PingContext(ctx); err != nil {
+			dbStatus = "disconnected"
+		} else {
+			dbStatus = "connected"
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":         "ok",
+		"version":        getVersion(),
+		"db":             dbStatus,
+		"uptime_seconds": int(time.Since(startTime).Seconds()),
+	})
+}
+
+func authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" || r.Method == "HEAD" || r.Method == "OPTIONS" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if len(tokenMap) == 0 {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Bearer ") {
+			w.Header().Set("Content-Type", "application/json")
+			http.Error(w, `{"error":"authorization required"}`, http.StatusUnauthorized)
+			return
+		}
+		token := strings.TrimPrefix(auth, "Bearer ")
+
+		user, ok := tokenMap[token]
+		if !ok {
+			w.Header().Set("Content-Type", "application/json")
+			http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), userContextKey, user)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func getAuthUser(r *http.Request) *DBUser {
+	u, _ := r.Context().Value(userContextKey).(*DBUser)
+	return u
 }
 
 // --- PG-backed API handlers ---
