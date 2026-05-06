@@ -2,12 +2,23 @@ import type { SessionEvent } from "./types";
 
 export class EventEmitter {
   private dashboardUrl: string;
+  private apiToken: string | undefined;
   private buffer: SessionEvent[] = [];
   private flushing = false;
   private pgAgentIds: Map<string, number> = new Map(); // engine agentId -> PG agent id
 
-  constructor(dashboardUrl?: string) {
+  constructor(dashboardUrl?: string, apiToken?: string) {
     this.dashboardUrl = dashboardUrl ?? "http://localhost:8400";
+    this.apiToken = apiToken ?? process.env.MAE_API_TOKEN;
+  }
+
+  /** Build headers with Content-Type and optional Bearer auth */
+  private authHeaders(): Record<string, string> {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (this.apiToken) {
+      headers["Authorization"] = `Bearer ${this.apiToken}`;
+    }
+    return headers;
   }
 
   async emit(event: SessionEvent): Promise<void> {
@@ -30,7 +41,7 @@ export class EventEmitter {
       try {
         await fetch(`${this.dashboardUrl}/api/events`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: this.authHeaders(),
           body: JSON.stringify(event),
         });
       } catch {
@@ -196,7 +207,7 @@ export class EventEmitter {
     try {
       await fetch(`${this.dashboardUrl}/api/pg/sessions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: this.authHeaders(),
         body: JSON.stringify({
           id: opts.id,
           name: opts.name,
@@ -216,7 +227,7 @@ export class EventEmitter {
     try {
       await fetch(`${this.dashboardUrl}/api/pg/sessions/${sessionId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: this.authHeaders(),
         body: JSON.stringify(updates),
       });
     } catch {
@@ -236,7 +247,7 @@ export class EventEmitter {
     try {
       const res = await fetch(`${this.dashboardUrl}/api/pg/sessions/${opts.sessionId}/agents`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: this.authHeaders(),
         body: JSON.stringify({
           session_id: opts.sessionId,
           agent_id: opts.agentId,
@@ -270,7 +281,7 @@ export class EventEmitter {
     try {
       await fetch(`${this.dashboardUrl}/api/pg/agents/${pgId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: this.authHeaders(),
         body: JSON.stringify(updates),
       });
     } catch {

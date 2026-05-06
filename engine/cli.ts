@@ -50,7 +50,8 @@ const dryRun = args.includes("--dry-run");
 const a2aUrl = getFlag(args, "--a2a-url") ?? process.env.MAE_A2A_URL;
 const a2aToken = getFlag(args, "--a2a-token") ?? process.env.MAE_A2A_TOKEN;
 
-const orch = new Orchestrator(dashboardUrl);
+const apiToken = getFlag(args, "--api-token") ?? process.env.MAE_API_TOKEN;
+const orch = new Orchestrator(dashboardUrl, apiToken);
 
 // Set up A2A adapter with endpoint if configured
 const a2aAdapter = new A2AAdapter();
