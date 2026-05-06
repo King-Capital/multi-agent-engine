@@ -10,7 +10,7 @@ import {
   loadModelRouting,
 } from "./config";
 import { EventEmitter } from "./event-emitter";
-import { isGitRepo, createWorktree, cleanupWorktree } from "./worktree";
+import { isGitRepo, createWorktree, mergeWorktree, cleanupWorktree } from "./worktree";
 import type {
   PlatformAdapter,
   DelegateResult,
@@ -431,8 +431,16 @@ export class Orchestrator {
 
     const workerResults = await Promise.all(workerPromises);
 
-    // Cleanup worktrees
+    // Merge & cleanup worktrees
     for (const wtId of workerWtIds) {
+      const { merged, hadChanges } = await mergeWorktree(session.workingDir, wtId);
+      if (hadChanges) {
+        if (merged) {
+          console.log(`[orchestrator] Merged worktree ${wtId} (had changes)`);
+        } else {
+          console.warn(`[orchestrator] WARN: Failed to merge worktree ${wtId} -- changes may be lost`);
+        }
+      }
       await cleanupWorktree(session.workingDir, wtId);
     }
 
@@ -485,7 +493,12 @@ export class Orchestrator {
     const teamWtIds: string[] = [];
 
     const promises = teams.map(async (t, idx) => {
-      const teamSession = useWorktrees ? { ...session } : session;
+      const teamSession: SessionState = useWorktrees ? {
+        ...session,
+        agents: new Map(session.agents),
+        tillDone: session.tillDone.map(item => ({ ...item })),
+        events: [...session.events],
+      } : session;
       if (useWorktrees) {
         const wtId = `${session.id.slice(0, 8)}-team-${idx}`;
         teamSession.workingDir = await createWorktree(session.workingDir, wtId);
@@ -498,6 +511,14 @@ export class Orchestrator {
     const results = await Promise.all(promises);
 
     for (const wtId of teamWtIds) {
+      const { merged, hadChanges } = await mergeWorktree(session.workingDir, wtId);
+      if (hadChanges) {
+        if (merged) {
+          console.log(`[orchestrator] Merged team worktree ${wtId} (had changes)`);
+        } else {
+          console.warn(`[orchestrator] WARN: Failed to merge team worktree ${wtId} -- changes may be lost`);
+        }
+      }
       await cleanupWorktree(session.workingDir, wtId);
     }
 

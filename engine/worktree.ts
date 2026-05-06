@@ -15,6 +15,9 @@ export async function createWorktree(baseDir: string, id: string): Promise<strin
   const safeId = id.replace(/[^a-zA-Z0-9._-]/g, "-");
   const wtPath = join(tmpdir(), `mae-wt-${safeId}`);
   const branch = `mae-wt-${safeId}`;
+  // Clean up stale worktree/branch from previous runs
+  await $`git -C ${baseDir} worktree remove ${wtPath} --force`.quiet().nothrow();
+  await $`git -C ${baseDir} branch -D ${branch}`.quiet().nothrow();
   await $`git -C ${baseDir} worktree add ${wtPath} -b ${branch}`.quiet();
   return wtPath;
 }
