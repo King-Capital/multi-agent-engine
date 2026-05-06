@@ -155,6 +155,8 @@ templ Layout(title string) {
 						es.addEventListener(t, refresh);
 					});
 					es.addEventListener('error', e => { if (e instanceof MessageEvent) refresh(); });
+					// Initial refresh on connect to catch sessions that started before page load
+					es.onopen = () => refresh();
 				}
 
 				renderMd();

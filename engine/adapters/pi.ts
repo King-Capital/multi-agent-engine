@@ -140,6 +140,20 @@ export class PiAdapter implements PlatformAdapter {
                     }
                   }
                   opts.onStreamEvent?.({ type: "cost", costUsd: totalCost, tokensUsed: totalTokens, cacheReadTokens });
+
+                  // Agent done — kill RPC process and resolve
+                  clearTimeout(timer);
+                  proc.kill();
+                  resolve({
+                    agentId,
+                    agentName: opts.persona.name,
+                    output: finalText || "ERROR: Empty output",
+                    grade: this.extractGrade(finalText),
+                    findings: this.extractFindings(finalText),
+                    costUsd: totalCost,
+                    tokensUsed: totalTokens,
+                  });
+                  return;
                 }
               } catch {
                 // not valid JSON
