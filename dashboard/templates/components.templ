@@ -90,7 +90,7 @@ templ AgentNode(agent *models.Agent, sess *models.Session, depth int) {
 			</span>
 			<!-- Name -->
 			<span class="text-xs font-bold truncate" style={ "color:" + agentColor(agent) }>
-				{ agent.Name }
+				{ qualifiedName(agent) }
 			</span>
 		</div>
 		<div class="flex items-center gap-2 text-xs text-neutral-500 ml-5">
@@ -139,7 +139,7 @@ templ MessageBubble(evt models.Event, sess *models.Session) {
 	{{ agentName := evt.AgentID }}
 	{{ color := "#94a3b8" }}
 	if agent != nil {
-		{{ agentName = agent.Name }}
+		{{ agentName = qualifiedName(agent) }}
 		{{ color = agentColor(agent) }}
 	}
 	<div class="mb-3">
@@ -175,7 +175,7 @@ templ ToolCallEntry(evt models.Event, sess *models.Session) {
 			<span class={ toolStatusIcon(evt.Data.ToolStatus) }></span>
 			<span style={ "color:" + color } class="font-medium">
 				if agent != nil {
-					{ agent.Name }
+					{ qualifiedName(agent) }
 				} else {
 					{ evt.AgentID }
 				}
@@ -453,10 +453,25 @@ func formatTokens(tokens int64) string {
 func shortModel(model string) string {
 	parts := strings.Split(model, "/")
 	m := parts[len(parts)-1]
-	if len(m) > 12 {
-		return m[:12]
+	m = strings.TrimSuffix(m, "-nocache")
+	if len(m) > 15 {
+		return m[:15]
 	}
 	return m
+}
+
+func qualifiedName(agent *models.Agent) string {
+	if agent == nil {
+		return "unknown"
+	}
+	name := agent.Name
+	if agent.TeamName != "" && agent.TeamName != "Orchestration" {
+		name = agent.TeamName + ": " + name
+	}
+	if agent.Model != "" {
+		name += " (" + shortModel(agent.Model) + ")"
+	}
+	return name
 }
 
 func toolStatusIcon(status string) string {

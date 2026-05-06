@@ -202,7 +202,7 @@ export class ClaudeCodeAdapter implements PlatformAdapter {
           });
         }
         if (block.type === "text" && block.text) {
-          callback({ type: "assistant_text", content: block.text.slice(0, 500) });
+          callback({ type: "assistant_text", content: block.text });
         }
       }
     }

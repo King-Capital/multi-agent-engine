@@ -406,6 +406,8 @@ export class Orchestrator {
           this.emitter.toolCall(session.id, leadId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running");
         } else if (streamEvt.type === "cost") {
           this.emitter.costUpdate(session.id, leadId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
+        } else if (streamEvt.type === "assistant_text" && streamEvt.content) {
+          this.emitter.message(session.id, leadId, teamConfig.lead.name, "orchestrator", streamEvt.content);
         }
       },
     };
