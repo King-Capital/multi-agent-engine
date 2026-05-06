@@ -7,6 +7,7 @@ export class EventEmitter {
   private apiToken: string | undefined;
   private buffer: SessionEvent[] = [];
   private flushing = false;
+  private seq = 0;
   private pgAgentIds: Map<string, number> = new Map();
   private droppedEvents = 0;
 
@@ -47,6 +48,9 @@ export class EventEmitter {
       event.timestamp = new Date().toISOString();
     }
 
+    // Assign monotonic sequence number for ordering
+    (event as SessionEvent & { seq: number }).seq = ++this.seq;
+
     this.buffer.push(event);
     if (!this.flushing) {
       this.flushing = true;
@@ -55,20 +59,23 @@ export class EventEmitter {
   }
 
   private async flush(): Promise<void> {
-    const events = this.buffer.splice(0);
-    this.flushing = false;
+    // Serialized flush: keep draining buffer until empty
+    while (this.buffer.length > 0) {
+      const events = this.buffer.splice(0);
 
-    for (const event of events) {
-      const res = await this.fetchWithRetry(`${this.dashboardUrl}/api/events`, {
-        method: "POST",
-        headers: this.authHeaders(),
-        body: JSON.stringify(event),
-      });
-      if (!res) {
-        this.droppedEvents++;
-        console.error(`[event-emitter] Dropped event after retries: ${event.event_type}`);
+      for (const event of events) {
+        const res = await this.fetchWithRetry(`${this.dashboardUrl}/api/events`, {
+          method: "POST",
+          headers: this.authHeaders(),
+          body: JSON.stringify(event),
+        });
+        if (!res) {
+          this.droppedEvents++;
+          console.error(`[event-emitter] Dropped event after retries: ${event.event_type}`);
+        }
       }
     }
+    this.flushing = false;
   }
 
   sessionStart(sessionId: string, name: string, chain: string, task: string) {

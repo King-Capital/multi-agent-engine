@@ -64,6 +64,14 @@ export class PiAdapter implements PlatformAdapter {
     let finalText = "";
 
     return new Promise<DelegateResult>((resolve) => {
+      let resolved = false;
+      const safeResolve = (result: DelegateResult) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+
       const proc = Bun.spawn(args, {
         stdin: "pipe",
         stdout: "pipe",
@@ -71,10 +79,28 @@ export class PiAdapter implements PlatformAdapter {
         cwd: opts.workingDir,
       });
 
-      const timer = setTimeout(() => {
+      const timer = setTimeout(async () => {
         console.error(`[pi-rpc] ${opts.persona.name} timed out after ${timeout}ms`);
+        // Step 1: send abort RPC
         this.sendCmd(proc, { type: "abort" });
-        setTimeout(() => proc.kill(), 5000);
+        // Step 2: wait 5s, then SIGTERM
+        await Bun.sleep(5000);
+        if (resolved) return;
+        try { proc.kill(); } catch {}
+        // Step 3: wait 3s more, then SIGKILL if still alive
+        await Bun.sleep(3000);
+        if (resolved) return;
+        try { proc.kill(9); } catch {}
+        // Step 4: force-resolve with timeout error
+        safeResolve({
+          agentId,
+          agentName: opts.persona.name,
+          output: finalText || `ERROR: Agent timed out after ${timeout}ms (force-killed)`,
+          grade: finalText ? this.extractGrade(finalText) : "FAILED",
+          findings: finalText ? this.extractFindings(finalText) : ["timeout"],
+          costUsd: totalCost,
+          tokensUsed: totalTokens,
+        });
       }, timeout);
 
       // Register message sender so orchestrator/dashboard can inject messages
@@ -142,9 +168,8 @@ export class PiAdapter implements PlatformAdapter {
                   opts.onStreamEvent?.({ type: "cost", costUsd: totalCost, tokensUsed: totalTokens, cacheReadTokens });
 
                   // Agent done — kill RPC process and resolve
-                  clearTimeout(timer);
                   proc.kill();
-                  resolve({
+                  safeResolve({
                     agentId,
                     agentName: opts.persona.name,
                     output: finalText || "ERROR: Empty output",
@@ -164,13 +189,14 @@ export class PiAdapter implements PlatformAdapter {
           // stream closed
         }
 
-        clearTimeout(timer);
-
+        // Stream ended without agent_end — race with proc.exited
         const exitCode = await proc.exited;
         const stderr = await new Response(proc.stderr).text();
 
+        if (resolved) return; // already resolved by timeout or agent_end
+
         if (exitCode === 137 || exitCode === 143) {
-          resolve({
+          safeResolve({
             agentId,
             agentName: opts.persona.name,
             output: finalText || `ERROR: Agent timed out after ${timeout}ms`,
@@ -184,7 +210,7 @@ export class PiAdapter implements PlatformAdapter {
 
         if (exitCode !== 0 && !finalText) {
           console.error(`[pi-rpc] ${opts.persona.name} exited ${exitCode}: ${stderr.slice(0, 500)}`);
-          resolve({
+          safeResolve({
             agentId,
             agentName: opts.persona.name,
             output: `ERROR: ${stderr}`,
@@ -196,7 +222,7 @@ export class PiAdapter implements PlatformAdapter {
           return;
         }
 
-        resolve({
+        safeResolve({
           agentId,
           agentName: opts.persona.name,
           output: finalText || "ERROR: Empty output",
@@ -206,6 +232,41 @@ export class PiAdapter implements PlatformAdapter {
           tokensUsed: totalTokens,
         });
       };
+
+      // Race: processStream vs proc.exited (handles hung stream)
+      const exitRace = proc.exited.then(async (exitCode) => {
+        // Give stream a moment to finish processing
+        await Bun.sleep(1000);
+        if (resolved) return;
+
+        // Stream is hung — force resolve
+        console.error(`[pi-rpc] ${opts.persona.name} exited (code ${exitCode}) but stream still open, force-resolving`);
+        try { reader.cancel(); } catch {}
+
+        const stderr = await new Response(proc.stderr).text().catch(() => "");
+
+        if (exitCode !== 0 && !finalText) {
+          safeResolve({
+            agentId,
+            agentName: opts.persona.name,
+            output: `ERROR: Process exited ${exitCode}: ${stderr}`,
+            grade: "FAILED",
+            findings: [stderr || `exit code ${exitCode}`],
+            costUsd: totalCost,
+            tokensUsed: totalTokens,
+          });
+        } else {
+          safeResolve({
+            agentId,
+            agentName: opts.persona.name,
+            output: finalText || "ERROR: Empty output",
+            grade: this.extractGrade(finalText),
+            findings: this.extractFindings(finalText),
+            costUsd: totalCost,
+            tokensUsed: totalTokens,
+          });
+        }
+      });
 
       processStream();
     });
