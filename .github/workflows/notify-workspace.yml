@@ -1,0 +1,29 @@
+name: Notify Workspace
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  notify:
+    runs-on: [self-hosted, mae]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch to king-capital
+        uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bcbee4d9ff4d7c0 # v3
+        with:
+          token: ${{ secrets.WORKSPACE_PAT }}
+          repository: King-Capital/king-capital
+          event-type: mae-update
+          client-payload: '{"sha": "${{ github.sha }}", "version": "${{ steps.version.outputs.version }}", "ref": "${{ github.ref }}"}'
