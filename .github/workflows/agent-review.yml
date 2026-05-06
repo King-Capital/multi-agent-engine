@@ -1,4 +1,4 @@
-name: Multi-Agent Review
+name: Agent Review
 
 on:
   pull_request:
@@ -9,10 +9,6 @@ on:
         description: 'Chain to run (review-only, plan-build-review, scout-then-plan)'
         required: false
         default: 'review-only'
-      task:
-        description: 'Task description'
-        required: false
-        default: 'Review the PR changes'
 
 permissions:
   contents: read
@@ -20,7 +16,7 @@ permissions:
 
 jobs:
   agent-review:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, mae]
     timeout-minutes: 15
 
     steps:
@@ -28,21 +24,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - uses: extractions/setup-just@v2
-
       - name: Install engine dependencies
         working-directory: engine
         run: bun install
 
       - name: Run agent review (dry-run)
+        working-directory: engine
         run: |
-          just dry "Review PR #${{ github.event.pull_request.number }}: $(git log --oneline -1)"
-        env:
-          DASHBOARD_URL: ""
+          MAE_ROOT=${{ github.workspace }} \
+          bun cli.ts run review "PR #${{ github.event.pull_request.number }}" --dry-run
 
       - name: Run tests
-        run: just test
+        working-directory: engine
+        run: bun test
