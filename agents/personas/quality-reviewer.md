@@ -17,8 +17,8 @@ tools:
   - glob
 domain:
   read: ["**/*"]
-  write: ["agents/expertise/quality-reviewer.md"]
-  update: ["agents/expertise/quality-reviewer.md"]
+  write: ["**/*"]
+  update: ["**/*"]
 ---
 
 # Quality Reviewer

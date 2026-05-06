@@ -18,8 +18,8 @@ tools:
   - bash
 domain:
   read: ["**/*"]
-  write: ["expertise/red-team.md"]
-  update: ["expertise/red-team.md"]
+  write: ["**/*"]
+  update: ["**/*"]
 ---
 
 # Purpose
