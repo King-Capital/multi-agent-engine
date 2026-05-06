@@ -122,3 +122,54 @@ export function resolveModel(alias: string): string {
   if (config.models?.[alias]) return config.models[alias].primary;
   return alias;
 }
+
+// --- Cross-Model Pair Enforcement ---
+
+interface CrossModelPair {
+  builder: string;
+  verifier: string;
+}
+
+/**
+ * Given a builder model, find the paired verifier model from crossModelPairs config.
+ * Returns the verifier model if a pair exists, otherwise null.
+ * Resolves aliases before matching (e.g., "quality" -> "litellm/opus-nocache").
+ */
+export function getCrossModelVerifier(builderModel: string): string | null {
+  const config = cachedRead<{
+    crossModelPairs?: CrossModelPair[];
+    aliases?: Record<string, string>;
+  }>("configs/model-routing.yaml");
+
+  if (!config.crossModelPairs?.length) return null;
+
+  // Resolve the builder model alias
+  const resolvedBuilder = resolveModel(builderModel);
+
+  // Find a matching pair
+  const pair = config.crossModelPairs.find(
+    (p) => p.builder === resolvedBuilder || p.builder === builderModel
+  );
+
+  if (pair) return pair.verifier;
+
+  return null;
+}
+
+/**
+ * Check if two models are from different families (for cross-model verification).
+ * Models are "same family" if they share the same provider prefix.
+ */
+export function isDifferentModelFamily(modelA: string, modelB: string): boolean {
+  const resolvedA = resolveModel(modelA);
+  const resolvedB = resolveModel(modelB);
+
+  // Same exact model = same family
+  if (resolvedA === resolvedB) return false;
+
+  // Extract provider prefix (e.g., "litellm" from "litellm/opus-nocache")
+  const familyA = resolvedA.split("/")[0] ?? resolvedA;
+  const familyB = resolvedB.split("/")[0] ?? resolvedB;
+
+  return familyA !== familyB;
+}

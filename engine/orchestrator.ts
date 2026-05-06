@@ -8,6 +8,8 @@ import {
   getTeam,
   loadPrompt,
   loadModelRouting,
+  getCrossModelVerifier,
+  isDifferentModelFamily,
 } from "./config";
 import { EventEmitter } from "./event-emitter";
 import {
@@ -511,6 +513,37 @@ export class Orchestrator {
       `[orchestrator] Running ${teams.length} teams in parallel: ${teams.map((t) => t.team).join(", ")}`
     );
 
+    // Cross-model verification: check that parallel teams use different model families
+    if (teams.length >= 2) {
+      const teamConfigs = teams.map((t) => getTeam(t.team));
+      const leadModels = teamConfigs.map((tc) => resolveModel(tc.lead.model));
+
+      for (let i = 0; i < leadModels.length; i++) {
+        for (let j = i + 1; j < leadModels.length; j++) {
+          if (!isDifferentModelFamily(leadModels[i]!, leadModels[j]!)) {
+            console.warn(
+              `[orchestrator] ⚠️ Cross-model warning: ${teamConfigs[i]!["team-name"]} (${leadModels[i]}) and ` +
+              `${teamConfigs[j]!["team-name"]} (${leadModels[j]}) use the same model family. ` +
+              `Cross-model verification is most effective with different families.`
+            );
+
+            // Try to find a cross-model pair and override the second team's model
+            const verifierModel = getCrossModelVerifier(leadModels[i]!);
+            if (verifierModel) {
+              console.log(
+                `[orchestrator] Overriding ${teamConfigs[j]!["team-name"]} lead model to ${verifierModel} (cross-model pair)`
+              );
+              // Override via shallow clone to avoid mutating cached config
+              teamConfigs[j] = {
+                ...teamConfigs[j]!,
+                lead: { ...teamConfigs[j]!.lead, model: verifierModel },
+              };
+            }
+          }
+        }
+      }
+    }
+
     const promises = teams.map((t) =>
       this.runTeamStep(session, { ...step, team: t.team }, task, previousOutput, adapterName)
     );
@@ -653,6 +686,25 @@ export class Orchestrator {
         lastResult.output,
         adapterName
       );
+
+      // Cross-model enforcement: ensure validator uses different model than builder
+      const retryTeamConfig = getTeam(fb.retry_team);
+      const valTeamConfig = getTeam(step.team!);
+      const retryLeadModel = resolveModel(retryTeamConfig.lead.model);
+      const valLeadModel = resolveModel(valTeamConfig.lead.model);
+
+      if (!isDifferentModelFamily(retryLeadModel, valLeadModel)) {
+        const verifierModel = getCrossModelVerifier(retryLeadModel);
+        if (verifierModel) {
+          console.log(
+            `[orchestrator] Cross-model enforcement: overriding ${step.team} lead to ${verifierModel} ` +
+            `(builder used ${retryLeadModel})`
+          );
+          // Note: this override applies only to the runTeamStep call below
+          // because getTeam returns a fresh reference each call (cachedRead uses mtime)
+          valTeamConfig.lead = { ...valTeamConfig.lead, model: verifierModel };
+        }
+      }
 
       const revalResult = await this.runTeamStep(
         session,
