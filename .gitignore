@@ -3,6 +3,7 @@ dist/
 bun.lockb
 *.log
 .env
+.env.local
 .DS_Store
 
 # Dashboard

@@ -47,6 +47,10 @@ parallel *task:
 swarm *target:
     {{engine}} run swarm-review {{target}}
 
+# Full swarm review against local dashboard
+swarm-local *target:
+    {{engine}} run swarm-review {{target}} --local
+
 # Red team attacks, blue team validates (sequential)
 red-blue *target:
     {{engine}} run red-blue {{target}}
