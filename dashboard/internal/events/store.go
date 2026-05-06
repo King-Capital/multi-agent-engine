@@ -288,14 +288,17 @@ func (s *Store) StartReaper(interval, timeout time.Duration) {
 	}()
 }
 
-func (s *Store) ClearAll() {
+func (s *Store) ClearAll() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, sess := range s.sessions {
-		if sess.Status == "active" || sess.Status == "waiting" || sess.Status == "paused" {
-			sess.Status = "error"
-		}
+	n := len(s.sessions)
+	for id := range s.sessions {
+		fpath := filepath.Join(s.dir, id+".jsonl")
+		os.Remove(fpath)
 	}
+	s.sessions = make(map[string]*models.Session)
+	s.listeners = make(map[string][]chan models.Event)
+	return n
 }
 
 func (s *Store) SetSessionStatus(id, status string) bool {

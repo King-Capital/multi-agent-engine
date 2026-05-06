@@ -107,14 +107,14 @@ func handleClearStale(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleClearAll(w http.ResponseWriter, r *http.Request) {
-	store.ClearAll()
+	n := store.ClearAll()
 	if r.Header.Get("HX-Request") == "true" {
 		sessions := store.ListSessions()
 		templates.SessionListItems(sessions).Render(r.Context(), w)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "cleared", "count": n})
 }
 
 func handleSetSessionStatus(w http.ResponseWriter, r *http.Request) {
