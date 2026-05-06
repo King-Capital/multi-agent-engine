@@ -16,6 +16,8 @@ Usage:
   agent run <prompt-name> [args...]     Run a reusable prompt workflow
   agent chain <chain-name> <task>       Run a named chain directly
   agent task <task-description>         Run plan-build-review on a task
+  agent session list                    List all sessions
+  agent session close <id> [--status done|error]  Close a session
   agent new-agent <name> <role> <team>  Scaffold a new agent
   agent adapters                        List available adapters
   agent discover <url>                  Discover a remote A2A agent
@@ -35,6 +37,8 @@ Examples:
   agent task "Add rate limiting to API endpoints"
   agent task "review auth" --adapter a2a --a2a-url http://10.71.20.71:41271
   agent discover http://10.71.20.71:41271
+  agent session list
+  agent session close 2dbc90f5 --status error
   agent new-agent billing-specialist worker Engineering
   `);
   process.exit(0);
@@ -64,8 +68,8 @@ if (a2aUrl) {
 
 const adapters = [
   new EchoAdapter(),
-  new ClaudeCodeAdapter(),
   new PiAdapter(),
+  new ClaudeCodeAdapter(),
   new CodexAdapter(),
   a2aAdapter,
 ];
@@ -161,6 +165,45 @@ switch (command) {
       console.log(`  Streaming: ${card.capabilities?.streaming !== false ? "yes" : "no"}`);
     } else {
       console.error(`Could not discover agent at ${url}`);
+      process.exit(1);
+    }
+    break;
+  }
+
+  case "session": {
+    const subCmd = args[1];
+    const dashUrl = dashboardUrl;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiToken) headers["Authorization"] = `Bearer ${apiToken}`;
+
+    if (subCmd === "list") {
+      const resp = await fetch(`${dashUrl}/api/sessions`, { headers });
+      if (!resp.ok) { console.error(`Dashboard error: ${resp.status}`); process.exit(1); }
+      const sessions = await resp.json() as Array<{ id: string; name: string; status: string; started_at: string; total_cost: number; agents: Record<string, unknown> }>;
+      sessions.sort((a, b) => b.started_at.localeCompare(a.started_at));
+      console.log(`\n${"ID".padEnd(14)} ${"Status".padEnd(12)} ${"Agents".padEnd(8)} ${"Cost".padEnd(10)} Name`);
+      console.log("─".repeat(80));
+      for (const s of sessions) {
+        const agentCount = Object.keys(s.agents ?? {}).length;
+        console.log(`${s.id.slice(0, 12)}  ${s.status.padEnd(12)} ${String(agentCount).padEnd(8)} $${s.total_cost.toFixed(3).padEnd(9)} ${(s.name ?? "").slice(0, 50)}`);
+      }
+      console.log(`\n${sessions.length} sessions total`);
+    } else if (subCmd === "close") {
+      const sessionId = args[2];
+      if (!sessionId) { console.error("Usage: agent session close <id> [--status done|error]"); process.exit(1); }
+      const status = getFlag(args, "--status") ?? "completed";
+      if (status !== "completed" && status !== "error") {
+        console.error("--status must be completed or error"); process.exit(1);
+      }
+      const resp = await fetch(`${dashUrl}/api/sessions/${sessionId}/status`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ status }),
+      });
+      if (!resp.ok) { console.error(`Failed: ${resp.status} ${await resp.text()}`); process.exit(1); }
+      console.log(`Session ${sessionId} → ${status}`);
+    } else {
+      console.error("Usage: agent session <list|close>");
       process.exit(1);
     }
     break;

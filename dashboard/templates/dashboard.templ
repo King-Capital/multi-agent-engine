@@ -7,7 +7,7 @@ import (
 
 templ DashboardPage(sessions []*models.Session) {
 	@Layout("Dashboard") {
-		<div class="flex h-full" x-data="{ selectedSession: '', sidebarWidth: 288, currentUser: '', users: [] }" x-init="
+		<div class="flex h-full" x-data="{ selectedSession: '', sidebarWidth: 288, currentUser: localStorage.getItem('mae-user') || '', users: [] }" x-init="
 			fetch('/api/users').then(r => r.ok ? r.json() : []).then(u => { users = u || []; }).catch(() => {})
 		">
 			<!-- Sidebar: Session List (resizable) -->
@@ -24,19 +24,23 @@ templ DashboardPage(sessions []*models.Session) {
 						</a>
 					</div>
 					<!-- User Selector -->
-					<div class="mt-2" x-show="users.length > 0" x-cloak>
+					<div class="mt-2">
 						<select
 							x-model="currentUser"
+							@change="localStorage.setItem('mae-user', currentUser)"
 							class="w-full text-xs bg-neutral-50/5 border border-neutral-50/10 rounded px-2 py-1.5 text-neutral-300 focus:outline-none focus:border-cyan-500/50"
 						>
 							<option value="">All Users</option>
+							<template x-if="users.length === 0">
+								<option disabled>No users (DB offline)</option>
+							</template>
 							<template x-for="u in users" :key="u.username">
 								<option :value="u.username" x-text="u.display_name + ' (' + u.role + ')'"></option>
 							</template>
 						</select>
 					</div>
 				</div>
-				<div x-data="{ filters: new Set() }" class="flex-1 flex flex-col overflow-hidden">
+				<div x-data="{ filters: new Set(['active','waiting','paused']) }" class="flex-1 flex flex-col overflow-hidden">
 					<div class="px-2 pt-2 border-b border-neutral-50/5 pb-2 flex-shrink-0">
 						<div class="flex gap-1 items-center justify-between">
 							<div class="flex gap-1 flex-wrap">
@@ -48,24 +52,18 @@ templ DashboardPage(sessions []*models.Session) {
 								<button class="text-xs px-2 py-0.5 rounded transition-all" :class="filters.has('error') ? 'bg-red-500 text-white ring-1 ring-red-400' : 'bg-red-500/15 text-red-400 hover:bg-red-500/25'" @click="filters.has('error') ? filters.delete('error') : filters.add('error'); filters = new Set(filters)">Error</button>
 							</div>
 							<button
-								class="text-xs text-neutral-600 hover:text-red-400 transition-colors"
-								title="Clear all sessions"
-								hx-delete="/api/sessions/all"
+								class="text-xs text-neutral-600 hover:text-orange-400 transition-colors"
+								title="Close all stale sessions as error"
+								hx-post="/api/sessions/close-stale"
 								hx-target="#session-list"
 								hx-swap="innerHTML"
-								hx-confirm="Clear all sessions?"
+								hx-confirm="Close all active/waiting/paused sessions as error?"
 							>
-								<i class="ph-bold ph-trash"></i>
+								<i class="ph-bold ph-prohibit"></i>
 							</button>
 						</div>
 					</div>
-					<div
-						class="flex-1 overflow-y-auto scrollbar-thin p-2"
-						id="session-list"
-						hx-get="/htmx/sessions"
-						hx-trigger="every 5s"
-						hx-swap="innerHTML"
-					>
+					<div class="flex-1 overflow-y-auto scrollbar-thin p-2" id="session-list">
 						@SessionListItems(sessions)
 					</div>
 				</div>
@@ -95,6 +93,9 @@ templ DashboardPage(sessions []*models.Session) {
 				}
 			</main>
 		</div>
+		<script>
+			initDashboardSSE();
+		</script>
 	}
 }
 
@@ -147,31 +148,19 @@ templ SessionPage(sess *models.Session) {
 							<i class="ph-bold ph-coins"></i>
 							{ fmt.Sprintf("$%.3f", sess.TotalCost) }
 						</span>
-						<span class={ "px-1.5 py-0.5 rounded text-xs " + sessionStatusClass(sess.Status) }>
+						<span id="status-badge" class={ "px-1.5 py-0.5 rounded text-xs " + sessionStatusClass(sess.Status) }>
 							{ sess.Status }
 						</span>
 					</div>
 				</div>
 
 				<!-- Agent Tree -->
-				<div
-					class="flex-1 overflow-y-auto scrollbar-thin p-3"
-					id="agent-tree"
-					hx-get={ fmt.Sprintf("/htmx/session/%s/agents", sess.ID) }
-					hx-trigger="every 3s"
-					hx-swap="innerHTML"
-				>
+				<div class="flex-1 overflow-y-auto scrollbar-thin p-3" id="agent-tree">
 					@AgentTree(sess)
 				</div>
 
 				<!-- Cost Summary -->
-				<div
-					class="border-t border-neutral-50/5 p-3"
-					id="costs"
-					hx-get={ fmt.Sprintf("/htmx/session/%s/costs", sess.ID) }
-					hx-trigger="every 5s"
-					hx-swap="innerHTML"
-				>
+				<div class="border-t border-neutral-50/5 p-3" id="costs">
 					@CostTracker(sess)
 				</div>
 			</aside>
@@ -190,24 +179,26 @@ templ SessionPage(sess *models.Session) {
 			></div>
 
 			<!-- Center: Conversation Stream -->
-			<main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+			<main class="flex-1 flex flex-col h-full overflow-hidden min-w-0" x-data="{ paused: false }">
 				<div class="p-3 border-b border-neutral-50/5 flex items-center justify-between">
 					<h2 class="text-sm font-bold">Conversation Stream</h2>
 					<div class="flex items-center gap-2">
 						if sess.TillDone != nil {
-							<span class="text-xs neon-green">
+							<span id="tilldone-badge" class="text-xs neon-green">
 								TillDone: { fmt.Sprintf("[%d/%d]", sess.TillDone.Completed, sess.TillDone.Total) }
 							</span>
 						}
+						<span id="sse-status" class="text-xs text-green-500" title="SSE connected">●</span>
+						<button
+							class="text-xs px-2 py-0.5 rounded transition-all"
+							:class="paused ? 'bg-yellow-500/20 text-yellow-400 ring-1 ring-yellow-500/30' : 'bg-neutral-50/5 text-neutral-500 hover:text-neutral-300'"
+							@click="paused = !paused; toggleSSEPause(paused)"
+							x-text="paused ? '▶ Resume' : '⏸ Pause'"
+						>
+						</button>
 					</div>
 				</div>
-				<div
-					class="flex-1 overflow-y-auto scrollbar-thin p-4"
-					id="conversation"
-					hx-get={ fmt.Sprintf("/htmx/session/%s/conversation", sess.ID) }
-					hx-trigger="every 2s"
-					hx-swap="innerHTML scroll:bottom"
-				>
+				<div class="flex-1 overflow-y-auto scrollbar-thin p-4" id="conversation">
 					@ConversationStream(sess)
 				</div>
 				<!-- Chat Input -->
@@ -258,13 +249,7 @@ templ SessionPage(sess *models.Session) {
 						TillDone
 					</h2>
 				</div>
-				<div
-					class="flex-1 overflow-y-auto scrollbar-thin p-3"
-					id="tilldone"
-					hx-get={ fmt.Sprintf("/htmx/session/%s/tilldone", sess.ID) }
-					hx-trigger="every 3s"
-					hx-swap="innerHTML"
-				>
+				<div class="flex-1 overflow-y-auto scrollbar-thin p-3" id="tilldone">
 					if sess.TillDone != nil {
 						@TillDonePanel(sess.TillDone)
 					} else {
@@ -279,6 +264,9 @@ templ SessionPage(sess *models.Session) {
 				</div>
 			</aside>
 		</div>
+		<script>
+			initSessionSSE({ fmt.Sprintf("'%s'", sess.ID) });
+		</script>
 	}
 }
 

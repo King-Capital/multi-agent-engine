@@ -12,14 +12,15 @@ export async function isGitRepo(dir: string): Promise<boolean> {
 }
 
 export async function createWorktree(baseDir: string, id: string): Promise<string> {
-  const wtPath = join(tmpdir(), `mae-wt-${id}`);
-  const branch = `mae-wt-${id}`;
+  const safeId = id.replace(/[^a-zA-Z0-9._-]/g, "-");
+  const wtPath = join(tmpdir(), `mae-wt-${safeId}`);
+  const branch = `mae-wt-${safeId}`;
   await $`git -C ${baseDir} worktree add ${wtPath} -b ${branch}`.quiet();
   return wtPath;
 }
 
 export async function mergeWorktree(baseDir: string, id: string): Promise<{ merged: boolean; hadChanges: boolean }> {
-  const branch = `mae-wt-${id}`;
+  const branch = `mae-wt-${id.replace(/[^a-zA-Z0-9._-]/g, "-")}`;
   try {
     const diff = await $`git -C ${baseDir} diff HEAD...${branch} --stat`.text();
     if (!diff.trim()) return { merged: true, hadChanges: false };
@@ -34,8 +35,9 @@ export async function mergeWorktree(baseDir: string, id: string): Promise<{ merg
 }
 
 export async function cleanupWorktree(baseDir: string, id: string): Promise<void> {
-  const wtPath = join(tmpdir(), `mae-wt-${id}`);
-  const branch = `mae-wt-${id}`;
+  const safeId = id.replace(/[^a-zA-Z0-9._-]/g, "-");
+  const wtPath = join(tmpdir(), `mae-wt-${safeId}`);
+  const branch = `mae-wt-${safeId}`;
   await $`git -C ${baseDir} worktree remove ${wtPath} --force`.quiet().nothrow();
   await $`git -C ${baseDir} branch -D ${branch}`.quiet().nothrow();
 }

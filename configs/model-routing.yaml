@@ -8,9 +8,6 @@ tiers:
       - model: openai/gpt-5.5
         thinking: high
         note: "Cross-model validation partner"
-      - model: litellm/pro-nocache
-        thinking: high
-        note: "Gemini 3.1 Pro, free high-tier option"
     default: litellm/opus-nocache
     default_thinking: high
     context: 1000000
@@ -21,35 +18,23 @@ tiers:
       - model: litellm/opus-nocache
         thinking: low
         note: "Opus with low thinking = fast but still smart"
-      - model: litellm/sonnet-nocache
+      - model: openai/gpt-5.5
         thinking: medium
-        note: "Sonnet 4.6 medium thinking, good balance"
-      - model: openai/gpt-5.4-mini
-        thinking: medium
-        note: "Cheaper OpenAI option"
-      - model: litellm/pro-nocache
-        thinking: medium
-        note: "Gemini 3.1 Pro, free medium option"
-    default: litellm/sonnet-nocache
+        note: "GPT-5.5 medium thinking"
+    default: openai/gpt-5.5
     default_thinking: medium
     context: 1000000
 
   fast:
     description: "Scouts, triage, quick exploration, cheap passes"
     options:
-      - model: litellm/sonnet-nocache
+      - model: openai/gpt-5.5
         thinking: low
-        note: "Sonnet 4.6 low thinking = fast model"
-      - model: litellm/sonnet-nocache
-        thinking: minimal
-        note: "Even faster, near-zero reasoning overhead"
-      - model: litellm/pro-nocache
+        note: "GPT-5.5 low thinking for fast passes"
+      - model: litellm/opus-nocache
         thinking: low
-        note: "Gemini 3.1 Pro low, free fast option"
-      - model: litellm/flash
-        thinking: off
-        note: "Gemini Flash, cheapest possible"
-    default: litellm/sonnet-nocache
+        note: "Opus low thinking"
+    default: openai/gpt-5.5
     default_thinking: low
     context: 200000
 
@@ -64,10 +49,10 @@ tiers:
 # Model aliases used in persona frontmatter
 aliases:
   quality: litellm/opus-nocache
-  main: litellm/sonnet-nocache
-  fast: litellm/sonnet-nocache
-  pro: litellm/pro-nocache
-  free: litellm/flash
+  main: openai/gpt-5.5
+  fast: openai/gpt-5.5
+  pro: openai/gpt-5.5
+  free: openai/gpt-5.5
 
 # Role → tier mapping (always push leaders HIGH)
 roleDefaults:
@@ -87,13 +72,7 @@ roleDefaults:
 crossModelPairs:
   - builder: litellm/opus-nocache
     verifier: openai/gpt-5.5
-  - builder: litellm/sonnet-nocache
-    verifier: litellm/pro-nocache
-  - builder: litellm/sonnet-nocache
-    verifier: openai/gpt-5.5
   - builder: openai/gpt-5.5
-    verifier: litellm/opus-nocache
-  - builder: litellm/pro-nocache
     verifier: litellm/opus-nocache
 
 budgets:

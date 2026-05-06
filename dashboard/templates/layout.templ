@@ -47,8 +47,8 @@ templ Layout(title string) {
 		<body class="h-full bg-[#0a0e17] text-neutral-200">
 			{ children... }
 			<script>
-				function renderMd() {
-					document.querySelectorAll('.msg-md[data-md]').forEach(el => {
+				function renderMd(root) {
+					(root || document).querySelectorAll('.msg-md[data-md]').forEach(el => {
 						if (el.dataset.rendered) return;
 						const raw = el.dataset.md;
 						if (raw && typeof marked !== 'undefined') {
@@ -59,9 +59,107 @@ templ Layout(title string) {
 						}
 					});
 				}
+				function reinitAlpine(root) {
+					if (typeof Alpine === 'undefined') return;
+					(root || document).querySelectorAll('[x-data]').forEach(el => {
+						if (!el._x_dataStack) Alpine.initTree(el);
+					});
+				}
+
+				// SSE client for session pages
+				var __sseBuffer = [];
+				var __ssePaused = false;
+				var __sseSource = null;
+
+				function initSessionSSE(sessionId) {
+					const conv = document.getElementById('conversation');
+					if (!conv) return;
+					const es = new EventSource('/htmx/session/' + sessionId + '/stream');
+					__sseSource = es;
+
+					const indicator = document.getElementById('sse-status');
+
+					function appendHTML(html) {
+						if (__ssePaused) { __sseBuffer.push(html); return; }
+						conv.insertAdjacentHTML('beforeend', html);
+						const added = conv.lastElementChild;
+						if (added) { renderMd(added); reinitAlpine(added); }
+						const nearBottom = conv.scrollHeight - conv.scrollTop - conv.clientHeight < 150;
+						if (nearBottom) conv.scrollTop = conv.scrollHeight;
+					}
+
+					// Conversation events — server sends rendered HTML
+					['message', 'tool_call', 'domain_block', 'self_heal', 'agent_error'].forEach(t => {
+						es.addEventListener(t, e => appendHTML(e.data));
+					});
+
+					// Panel refresh events — server sends JSON, we trigger HTMX fetches
+					['agent_spawn', 'agent_done'].forEach(t => {
+						es.addEventListener(t, () => {
+							htmx.ajax('GET', '/htmx/session/' + sessionId + '/agents', {target:'#agent-tree', swap:'innerHTML'});
+							htmx.ajax('GET', '/htmx/session/' + sessionId + '/costs', {target:'#costs', swap:'innerHTML'});
+						});
+					});
+					es.addEventListener('cost_update', () => {
+						htmx.ajax('GET', '/htmx/session/' + sessionId + '/costs', {target:'#costs', swap:'innerHTML'});
+					});
+					es.addEventListener('tilldone', e => {
+						htmx.ajax('GET', '/htmx/session/' + sessionId + '/tilldone', {target:'#tilldone', swap:'innerHTML'});
+						try {
+							const evt = JSON.parse(e.data);
+							const td = evt.data && evt.data.tilldone;
+							const badge = document.getElementById('tilldone-badge');
+							if (td && badge) badge.textContent = 'TillDone: [' + td.completed + '/' + td.total + ']';
+						} catch(_) {}
+					});
+
+					// Session status changes
+					es.addEventListener('session_end', () => updateStatusBadge('completed', 'bg-blue-500/20 text-blue-400'));
+					es.addEventListener('pause', () => updateStatusBadge('paused', 'bg-amber-500/20 text-amber-400'));
+					es.addEventListener('resume', () => updateStatusBadge('active', 'bg-green-500/20 text-green-400'));
+					es.addEventListener('waiting', () => updateStatusBadge('waiting', 'bg-yellow-500/20 text-yellow-400'));
+
+					es.onopen = () => { if (indicator) { indicator.textContent = '●'; indicator.className = 'text-xs text-green-500'; indicator.title = 'SSE connected'; } };
+					es.onerror = () => { if (indicator) { indicator.textContent = '●'; indicator.className = 'text-xs text-red-500'; indicator.title = 'SSE reconnecting...'; } };
+				}
+
+				function updateStatusBadge(text, cls) {
+					const b = document.getElementById('status-badge');
+					if (b) { b.textContent = text; b.className = 'px-1.5 py-0.5 rounded text-xs ' + cls; }
+				}
+
+				function toggleSSEPause(paused) {
+					__ssePaused = paused;
+					if (!paused && __sseBuffer.length > 0) {
+						const conv = document.getElementById('conversation');
+						__sseBuffer.forEach(html => conv.insertAdjacentHTML('beforeend', html));
+						renderMd(conv);
+						reinitAlpine(conv);
+						conv.scrollTop = conv.scrollHeight;
+						__sseBuffer = [];
+					}
+				}
+
+				function initDashboardSSE() {
+					const es = new EventSource('/api/stream');
+					let pending = null;
+					function refresh() {
+						if (window.__ctxMenuOpen) return;
+						if (pending) return;
+						pending = setTimeout(() => {
+							htmx.ajax('GET', '/htmx/sessions', {target:'#session-list', swap:'innerHTML'});
+							pending = null;
+						}, 500);
+					}
+					['session_start','session_end','agent_spawn','agent_done','cost_update','pause','resume','waiting'].forEach(t => {
+						es.addEventListener(t, refresh);
+					});
+					es.addEventListener('error', e => { if (e instanceof MessageEvent) refresh(); });
+				}
+
 				renderMd();
-				document.body.addEventListener('htmx:afterSwap', renderMd);
-				document.body.addEventListener('htmx:afterSettle', renderMd);
+				document.body.addEventListener('htmx:afterSwap', (e) => { renderMd(); reinitAlpine(e.detail.elt); });
+				document.body.addEventListener('htmx:afterSettle', () => { renderMd(); });
 			</script>
 		</body>
 	</html>
