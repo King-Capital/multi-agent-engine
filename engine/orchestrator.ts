@@ -297,14 +297,15 @@ export class Orchestrator {
 
     await this.emitter.agentSpawn(session.id, leadId, "orch-1", teamConfig.lead.name, "lead",
       resolveModel(teamConfig.lead.model), teamConfig["team-name"], teamConfig["team-color"]);
-    await this.emitter.pgCreateAgent({ sessionId: session.id, agentId: leadId, role: "lead", persona: teamConfig.lead.name });
 
-    // Build task prompt — the Pi agent (with skills) handles delegation naturally
+    // Lead gets the task + team roster — produces a briefing for workers
     const members = teamConfig.members.map((m) => `- ${m.name}: ${m["consult-when"] ?? "general tasks"}`).join("\n");
     const leadPrompt = [
       `Task: ${task}`,
       previousOutput ? `\nContext from previous step:\n${previousOutput}` : "",
       `\nYour team:\n${members}`,
+      `\nBrief each worker with specific assignments. Use this format for each:`,
+      ...teamConfig.members.map((m) => `\n### ASSIGNMENT: ${m.name}\n[What this worker should focus on, which files to review, what to look for]`),
       step.till_done ? `\nTill done:\n${step.till_done.map((t) => `- [ ] ${t}`).join("\n")}` : "",
     ].join("\n");
 
@@ -337,19 +338,122 @@ export class Orchestrator {
     const leadResult = await adapter.delegate(leadOpts);
     session.totalCost += leadResult.costUsd;
     session.totalTokens += leadResult.tokensUsed;
-
     await this.emitter.costUpdate(session.id, leadId, leadResult.costUsd, leadResult.tokensUsed, 0);
 
-    // Post lead's output as their message (they have conversational-response skill)
-    if (leadResult.output && leadResult.output.length > 0) {
-      await this.emitter.message(session.id, leadId, teamConfig.lead.name, "orchestrator", leadResult.output);
+    if (leadResult.grade === "FAILED" || !teamConfig.members.length) {
+      const msg = leadResult.grade === "FAILED"
+        ? `${teamConfig["team-name"]} lead could not complete the task.`
+        : `${teamConfig["team-name"]} complete (lead only).`;
+      await this.emitter.message(session.id, "orch-1", "Orchestrator", "user", msg);
+      return leadResult;
     }
-    const statusMsg = leadResult.grade === "FAILED"
-      ? `${teamConfig["team-name"]} could not complete the task.`
-      : `${teamConfig["team-name"]} complete. Grade: ${leadResult.grade ?? "pending"}. Cost: $${leadResult.costUsd.toFixed(3)}.`;
-    await this.emitter.message(session.id, "orch-1", "Orchestrator", "user", statusMsg);
 
-    return leadResult;
+    // Spawn workers in parallel — each gets their assignment from the lead's brief
+    const useWorktrees = teamConfig.members.length > 1 && await isGitRepo(session.workingDir);
+    const workerWtIds: string[] = [];
+
+    console.log(`[orchestrator] Lead briefed. Spawning ${teamConfig.members.length} workers: ${teamConfig.members.map((m) => m.name).join(", ")}`);
+    await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+      `${teamConfig["team-name"]} lead assigned ${teamConfig.members.length} workers: ${teamConfig.members.map((m) => m.name).join(", ")}.`);
+
+    const workerPromises = teamConfig.members.map(async (member) => {
+      const workerPersona = loadPersona(member.path);
+      const workerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+
+      this.trackActivity(workerId, member.name, "worker");
+
+      let workerDir = session.workingDir;
+      if (useWorktrees) {
+        const wtId = `${session.id.slice(0, 8)}-${workerId}`;
+        workerDir = await createWorktree(session.workingDir, wtId);
+        workerWtIds.push(wtId);
+      }
+
+      await this.emitter.agentSpawn(session.id, workerId, leadId, member.name, "worker",
+        resolveModel(member.model), teamConfig["team-name"], member.color ?? teamConfig["team-color"]);
+
+      // Extract this worker's assignment from the lead brief, or give full brief
+      const assignment = this.parseAssignment(leadResult.output, member.name);
+      const workerPrompt = assignment
+        ? `Your assignment from ${teamConfig.lead.name}:\n${assignment}\n\nOriginal task: ${task}`
+        : `Brief from ${teamConfig.lead.name}:\n${leadResult.output}\n\nOriginal task: ${task}`;
+
+      const result = await adapter.delegate({
+        persona: workerPersona,
+        systemPrompt: buildSystemPrompt(workerPersona),
+        userPrompt: workerPrompt,
+        model: resolveModel(member.model),
+        thinking: "medium" as const,
+        tools: workerPersona.tools,
+        domain: workerPersona.domain,
+        workingDir: workerDir,
+        sessionDir: `data/sessions/${session.id}`,
+        parentId: leadId,
+        teamName: teamConfig["team-name"],
+        teamColor: member.color ?? teamConfig["team-color"],
+        onStreamEvent: (streamEvt) => {
+          if (streamEvt.type === "tool_call") {
+            this.trackToolCall(workerId, streamEvt.tool ?? "");
+            this.emitter.toolCall(session.id, workerId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running");
+          } else if (streamEvt.type === "cost") {
+            this.emitter.costUpdate(session.id, workerId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
+          }
+        },
+        sendMessage: (fn) => {
+          this.messageSenders.set(`${session.id}:${workerId}`, fn);
+        },
+      });
+
+      session.totalCost += result.costUsd;
+      session.totalTokens += result.tokensUsed;
+      await this.emitter.costUpdate(session.id, workerId, result.costUsd, result.tokensUsed, 0);
+
+      return result;
+    });
+
+    const workerResults = await Promise.all(workerPromises);
+
+    // Cleanup worktrees
+    for (const wtId of workerWtIds) {
+      await cleanupWorktree(session.workingDir, wtId);
+    }
+
+    const combinedOutput = workerResults.map((r) => `[${r.agentName}]:\n${r.output}`).join("\n\n---\n\n");
+    const worstGrade = this.worstGrade(workerResults.map((r) => r.grade));
+    const succeeded = workerResults.filter((r) => r.grade !== "FAILED").length;
+
+    await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+      `${teamConfig["team-name"]} complete. ${succeeded}/${workerResults.length} workers finished. Grade: ${worstGrade ?? "pending"}. Cost: $${(leadResult.costUsd + workerResults.reduce((s, r) => s + r.costUsd, 0)).toFixed(3)}.`);
+
+    return {
+      agentId: leadId,
+      agentName: teamConfig.lead.name,
+      output: combinedOutput,
+      grade: worstGrade,
+      findings: workerResults.flatMap((r) => r.findings ?? []),
+      costUsd: leadResult.costUsd + workerResults.reduce((s, r) => s + r.costUsd, 0),
+      tokensUsed: leadResult.tokensUsed + workerResults.reduce((s, r) => s + r.tokensUsed, 0),
+    };
+  }
+
+  private parseAssignment(leadOutput: string, workerName: string): string | null {
+    const pattern = new RegExp(
+      `### ASSIGNMENT:\\s*${workerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\n([\\s\\S]*?)(?=### ASSIGNMENT:|$)`, "i"
+    );
+    const match = leadOutput.match(pattern);
+    if (!match?.[1]) return null;
+    const assignment = match[1].trim();
+    return assignment.startsWith("SKIP:") ? null : assignment;
+  }
+
+  private worstGrade(grades: (string | undefined)[]): "PERFECT" | "VERIFIED" | "PARTIAL" | "FEEDBACK" | "FAILED" | undefined {
+    const order: Record<string, number> = { PERFECT: 0, VERIFIED: 1, PARTIAL: 2, FEEDBACK: 3, FAILED: 4 };
+    let worst: string | undefined;
+    for (const g of grades) {
+      if (!g) continue;
+      if (!worst || (order[g] ?? 0) > (order[worst] ?? 0)) worst = g;
+    }
+    return worst as ReturnType<typeof this.worstGrade>;
   }
 
   private async runParallelStep(
