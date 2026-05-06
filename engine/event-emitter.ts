@@ -210,11 +210,11 @@ export class EventEmitter {
     });
   }
 
-  sessionEnd(sessionId: string) {
+  async sessionEnd(sessionId: string) {
     if (this.droppedEvents > 0) {
       console.error(`[event-emitter] Session ended with ${this.droppedEvents} dropped events`);
     }
-    this.pgUpdateSession(sessionId, { status: "completed" });
+    await this.pgUpdateSession(sessionId, { status: "completed" });
     return this.emit({
       session_id: sessionId,
       agent_id: "orchestrator",

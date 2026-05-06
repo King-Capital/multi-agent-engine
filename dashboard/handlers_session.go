@@ -85,12 +85,23 @@ func handleGetSession(w http.ResponseWriter, r *http.Request) {
 func handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "sessionID")
 	store.DeleteSession(sessionID)
+	if dbEnabled {
+		status := "deleted"
+		if err := UpdateSession(r.Context(), sessionID, nil, &status); err != nil {
+			log.Printf("pg session delete sync error: %v", err)
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "session_id": sessionID})
 }
 
 func handleCloseStale(w http.ResponseWriter, r *http.Request) {
 	n := store.CloseStale()
+	if dbEnabled && n > 0 {
+		if _, err := MarkStaleSessions(r.Context(), 0); err != nil {
+			log.Printf("pg stale session sync error: %v", err)
+		}
+	}
 	if r.Header.Get("HX-Request") == "true" {
 		sessions := store.ListSessions()
 		templates.SessionListItems(sessions).Render(r.Context(), w)
@@ -108,6 +119,11 @@ func handleClearStale(w http.ResponseWriter, r *http.Request) {
 
 func handleClearAll(w http.ResponseWriter, r *http.Request) {
 	n := store.ClearAll()
+	if dbEnabled && n > 0 {
+		if _, err := MarkStaleSessions(r.Context(), 0); err != nil {
+			log.Printf("pg clear-all sync error: %v", err)
+		}
+	}
 	if r.Header.Get("HX-Request") == "true" {
 		sessions := store.ListSessions()
 		templates.SessionListItems(sessions).Render(r.Context(), w)
@@ -135,6 +151,11 @@ func handleSetSessionStatus(w http.ResponseWriter, r *http.Request) {
 	if !store.SetSessionStatus(sessionID, body.Status) {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
+	}
+	if dbEnabled {
+		if err := UpdateSession(r.Context(), sessionID, nil, &body.Status); err != nil {
+			log.Printf("pg session status sync error: %v", err)
+		}
 	}
 	if r.Header.Get("HX-Request") == "true" {
 		sessions := store.ListSessions()
