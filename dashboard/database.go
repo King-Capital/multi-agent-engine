@@ -397,7 +397,7 @@ func EnsureAuthTokens(ctx context.Context) error {
 		if _, err := db.ExecContext(ctx, `UPDATE users SET api_token = $1 WHERE id = $2`, token, u.id); err != nil {
 			return fmt.Errorf("set token for %s: %w", u.username, err)
 		}
-		log.Printf("Generated API token for %s: %s", u.username, token)
+		log.Printf("Generated API token for %s: %s...%s", u.username, token[:8], token[len(token)-4:])
 	}
 
 	return nil
