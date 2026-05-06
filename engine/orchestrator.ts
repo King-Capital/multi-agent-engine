@@ -10,8 +10,9 @@ import {
   loadModelRouting,
 } from "./config";
 import { EventEmitter } from "./event-emitter";
-import { isGitRepo, createWorktree, mergeWorktree, cleanupWorktree } from "./worktree";
 import { sanitizeAgentInput, validateAgentOutput } from "./security";
+import { isGitRepo, createWorktree, mergeWorktree, cleanupWorktree } from "./worktree";
+import { delegateWithHealing } from "./self-healing";
 import type {
   PlatformAdapter,
   DelegateResult,
@@ -245,6 +246,8 @@ export class Orchestrator {
     console.log(`[orchestrator] Dashboard: http://localhost:8400/session/${sessionId}`);
     console.log(`[orchestrator] Task: ${opts.task}\n`);
 
+    this.loadBudgets();
+    this.budgetWarned = false;
     await this.emitter.tillDone(sessionId, sessionName, session.tillDone);
     this.startMonitor(sessionId);
     this.listenForUserMessages(sessionId);
@@ -272,6 +275,8 @@ export class Orchestrator {
   private async runChain(session: SessionState, chain: Chain, task: string, adapterName?: string): Promise<void> {
     const steps = chain.steps ?? this.normalizeParallelChain(chain);
     let previousOutput = "";
+    let stepResult: DelegateResult | undefined;
+    let parallelResults: DelegateResult[] | undefined;
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
@@ -280,9 +285,6 @@ export class Orchestrator {
       const stepLabel = step.team ?? step.agent ?? "parallel teams";
       await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
         `Starting step ${i + 1}/${steps.length}: ${stepLabel}.`);
-
-      let stepResult: DelegateResult | undefined;
-      let parallelResults: DelegateResult[] | undefined;
 
       if (step.parallel) {
         parallelResults = await this.runParallelStep(session, step, task, previousOutput, adapterName);
@@ -387,10 +389,10 @@ export class Orchestrator {
     };
 
     const leadResult = await adapter.delegate(leadOpts);
-    this.redactOutput(leadResult);
     session.totalCost += leadResult.costUsd;
     session.totalTokens += leadResult.tokensUsed;
     await this.emitter.costUpdate(session.id, leadId, leadResult.costUsd, leadResult.tokensUsed, 0);
+    this.checkBudget(session, leadId, leadResult.costUsd);
 
     if (leadResult.grade === "FAILED" || !teamConfig.members.length) {
       const msg = leadResult.grade === "FAILED"
@@ -430,7 +432,7 @@ export class Orchestrator {
         ? `Your assignment from ${teamConfig.lead.name}:\n${assignment}\n\nOriginal task: ${task}`
         : `Brief from ${teamConfig.lead.name}:\n${leadResult.output}\n\nOriginal task: ${task}`;
 
-      const result = await adapter.delegate({
+      const workerOpts: DelegateOptions = {
         persona: workerPersona,
         systemPrompt: buildSystemPrompt(workerPersona),
         userPrompt: workerPrompt,
@@ -454,12 +456,22 @@ export class Orchestrator {
         sendMessage: (fn) => {
           this.messageSenders.set(`${session.id}:${workerId}`, fn);
         },
+      };
+
+      const result = await delegateWithHealing({
+        adapter,
+        opts: workerOpts,
+        sessionId: session.id,
+        agentRole: "worker",
+        onEvent: async (_type, data) => {
+          await this.emitter.selfHeal(session.id, workerId, data.failed_worker as string, data.heal_action as string);
+        },
       });
 
-      this.redactOutput(result);
       session.totalCost += result.costUsd;
       session.totalTokens += result.tokensUsed;
       await this.emitter.costUpdate(session.id, workerId, result.costUsd, result.tokensUsed, 0);
+      this.checkBudget(session, workerId, result.costUsd);
 
       return result;
     });
@@ -595,7 +607,7 @@ export class Orchestrator {
       previousOutput ? `\nContext:\n${previousOutput}` : "",
     ].join("\n");
 
-    const result = await adapter.delegate({
+    const agentOpts: DelegateOptions = {
       persona,
       systemPrompt: buildSystemPrompt(persona),
       userPrompt: prompt,
@@ -619,11 +631,21 @@ export class Orchestrator {
       sendMessage: (fn) => {
         this.messageSenders.set(`${session.id}:${agentId}`, fn);
       },
+    };
+
+    const result = await delegateWithHealing({
+      adapter,
+      opts: agentOpts,
+      sessionId: session.id,
+      agentRole: "worker",
+      onEvent: async (_type, data) => {
+        await this.emitter.selfHeal(session.id, agentId, data.failed_worker as string, data.heal_action as string);
+      },
     });
 
-    this.redactOutput(result);
     session.totalCost += result.costUsd;
     session.totalTokens += result.tokensUsed;
+    this.checkBudget(session, agentId, result.costUsd);
 
     return result;
   }
@@ -670,29 +692,6 @@ export class Orchestrator {
     if (idx < session.tillDone.length) session.tillDone[idx]!.active = true;
   }
 
-  /**
-   * Redact sensitive patterns from agent output. Advisory only -- logs warnings
-   * but does not block execution. (#45)
-   */
-  private redactOutput(result: DelegateResult): void {
-    const violations = validateAgentOutput(result.output);
-    if (violations.length > 0) {
-      for (const v of violations) {
-        console.warn(`[security] Output redaction warning from ${result.agentName}: ${v.reason}`);
-      }
-      // Redact common secret patterns in-place
-      result.output = result.output
-        .replace(/ghp_[A-Za-z0-9_]{36}/g, "ghp_[REDACTED]")
-        .replace(/sk-[A-Za-z0-9]{48}/g, "sk-[REDACTED]")
-        .replace(/sk-ant-[A-Za-z0-9-]{95}/g, "sk-ant-[REDACTED]")
-        .replace(/-----BEGIN (?:RSA |EC )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC )?PRIVATE KEY-----/g, "[PRIVATE KEY REDACTED]")
-        .replace(/(?:api[_-]?key|token|secret|password)\s*[:=]\s*["']?[A-Za-z0-9+/=_-]{20,}/gi, (match) => {
-          const prefix = match.split(/[:=]/)[0];
-          return `${prefix}=[REDACTED]`;
-        });
-    }
-  }
-
   private interpolatePrompt(body: string, args: string[]): string {
     return body.replace(/\$(\d+)/g, (match, numStr) => {
       const idx = parseInt(numStr, 10) - 1;
@@ -700,10 +699,44 @@ export class Orchestrator {
     });
   }
 
-  private loadBudgets(): { max_per_session_usd: number } | null {
+  private budgets: {
+    max_per_session_usd: number;
+    warn_at_usd: number;
+    max_per_agent_usd: number;
+    max_total_tokens: number;
+  } | null = null;
+  private budgetWarned = false;
+
+  private loadBudgets(): void {
     try {
-      return loadModelRouting().budgets ?? null;
-    } catch { return null; }
+      this.budgets = loadModelRouting().budgets ?? null;
+      if (this.budgets) {
+        console.log(`[budget] Limits: $${this.budgets.max_per_session_usd}/session, $${this.budgets.max_per_agent_usd}/agent, ${(this.budgets.max_total_tokens / 1e6).toFixed(0)}M tokens`);
+      }
+    } catch { this.budgets = null; }
+  }
+
+  private checkBudget(session: SessionState, agentId: string, agentCost: number): void {
+    if (!this.budgets) return;
+
+    if (agentCost > this.budgets.max_per_agent_usd) {
+      console.warn(`[budget] Agent ${agentId} exceeded per-agent limit: $${agentCost.toFixed(3)} > $${this.budgets.max_per_agent_usd}`);
+    }
+
+    if (!this.budgetWarned && session.totalCost >= this.budgets.warn_at_usd) {
+      this.budgetWarned = true;
+      console.warn(`[budget] WARNING: Session cost $${session.totalCost.toFixed(3)} passed warn threshold $${this.budgets.warn_at_usd}`);
+      this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+        `Budget warning: session cost $${session.totalCost.toFixed(2)} has passed the $${this.budgets.warn_at_usd} threshold.`);
+    }
+
+    if (session.totalCost >= this.budgets.max_per_session_usd) {
+      throw new Error(`Budget exceeded: session cost $${session.totalCost.toFixed(3)} >= limit $${this.budgets.max_per_session_usd}`);
+    }
+
+    if (session.totalTokens >= this.budgets.max_total_tokens) {
+      throw new Error(`Token budget exceeded: ${session.totalTokens} >= limit ${this.budgets.max_total_tokens}`);
+    }
   }
 
   private getAdapter(name?: string): PlatformAdapter {

@@ -20,6 +20,16 @@ type Store struct {
 	droppedCounts map[string]int64
 }
 
+// sanitizeID strips path traversal components from session IDs.
+// filepath.Base removes directory components (../ etc).
+func sanitizeID(id string) string {
+	safe := filepath.Base(id)
+	if safe == "." || safe == "" {
+		return "invalid"
+	}
+	return safe
+}
+
 func NewStore(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("create store dir: %w", err)
@@ -54,7 +64,7 @@ func (s *Store) loadExisting() error {
 }
 
 func (s *Store) loadSession(id string) error {
-	f, err := os.Open(filepath.Join(s.dir, id+".jsonl"))
+	f, err := os.Open(filepath.Join(s.dir, sanitizeID(id)+".jsonl"))
 	if err != nil {
 		return err
 	}
@@ -82,7 +92,7 @@ func (s *Store) Append(evt models.Event) error {
 		return fmt.Errorf("marshal event: %w", err)
 	}
 
-	fpath := filepath.Join(s.dir, evt.SessionID+".jsonl")
+	fpath := filepath.Join(s.dir, sanitizeID(evt.SessionID)+".jsonl")
 	f, err := os.OpenFile(fpath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("open event file: %w", err)
@@ -266,7 +276,7 @@ func (s *Store) ReapInactiveSessions(timeout time.Duration) int {
 
 			data, err := json.Marshal(evt)
 			if err == nil {
-				fpath := filepath.Join(s.dir, sess.ID+".jsonl")
+				fpath := filepath.Join(s.dir, sanitizeID(sess.ID)+".jsonl")
 				if f, err := os.OpenFile(fpath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
 					f.Write(append(data, '\n'))
 					f.Close()
@@ -295,7 +305,7 @@ func (s *Store) ClearAll() int {
 	defer s.mu.Unlock()
 	n := len(s.sessions)
 	for id := range s.sessions {
-		fpath := filepath.Join(s.dir, id+".jsonl")
+		fpath := filepath.Join(s.dir, sanitizeID(id)+".jsonl")
 		os.Remove(fpath)
 	}
 	s.sessions = make(map[string]*models.Session)
@@ -335,7 +345,7 @@ func (s *Store) SetSessionStatus(id, status string) bool {
 
 	data, err := json.Marshal(evt)
 	if err == nil {
-		fpath := filepath.Join(s.dir, id+".jsonl")
+		fpath := filepath.Join(s.dir, sanitizeID(id)+".jsonl")
 		if f, err := os.OpenFile(fpath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
 			f.Write(append(data, '\n'))
 			f.Close()
@@ -348,7 +358,7 @@ func (s *Store) DeleteSession(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, id)
-	fpath := filepath.Join(s.dir, id+".jsonl")
+	fpath := filepath.Join(s.dir, sanitizeID(id)+".jsonl")
 	os.Remove(fpath)
 }
 
