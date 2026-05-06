@@ -208,6 +208,9 @@ export class Orchestrator {
       taskBody = opts.task;
     }
 
+    // Sanitize task input to strip prompt injection patterns (#45)
+    taskBody = sanitizeAgentInput(taskBody);
+
     const chain = getChain(chainName);
     const taskSummary = (taskBody.split("\n")[0] ?? "").replace(/^#+\s*/, "").slice(0, 50).trim();
     const sessionName = opts.sessionName ?? `${taskSummary || chainName}`;
@@ -281,8 +284,8 @@ export class Orchestrator {
         `Starting step ${i + 1}/${steps.length}: ${stepLabel}.`);
 
       if (step.parallel) {
-        const results = await this.runParallelStep(session, step, task, previousOutput, adapterName);
-        previousOutput = results.map((r) => `[${r.agentName}]: ${r.output}`).join("\n\n");
+        parallelResults = await this.runParallelStep(session, step, task, previousOutput, adapterName);
+        previousOutput = parallelResults.map((r) => `[${r.agentName}]: ${r.output}`).join("\n\n");
       } else if (step.team) {
         const result = await this.runTeamStep(session, step, task, previousOutput, adapterName);
         previousOutput = result.output;
@@ -291,7 +294,33 @@ export class Orchestrator {
         previousOutput = result.output;
       }
 
-      this.markTillDone(session, i);
+      // Issue #64: on_feedback retry loop for team steps
+      if (step.on_feedback && stepResult && (stepResult.grade === "FEEDBACK" || stepResult.grade === "FAILED")) {
+        const fb = step.on_feedback;
+        let attempts = 0;
+        while (attempts < fb.max_attempts && (stepResult.grade === "FEEDBACK" || stepResult.grade === "FAILED")) {
+          attempts++;
+          console.log(`[orchestrator] on_feedback retry ${attempts}/${fb.max_attempts} -- re-running team "${fb.retry_team}" (grade was ${stepResult.grade})`);
+          await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+            `Feedback retry ${attempts}/${fb.max_attempts}: re-running ${fb.retry_team} (grade: ${stepResult.grade}).`);
+
+          const retryStep: ChainStep = { team: fb.retry_team };
+          const feedbackContext = `Previous attempt graded ${stepResult.grade}. Feedback/output:\n${stepResult.output}\n\nPlease address the issues and try again.`;
+          stepResult = await this.runTeamStep(session, retryStep, task, feedbackContext, adapterName);
+          previousOutput = stepResult.output;
+        }
+        if (stepResult.grade === "FEEDBACK" || stepResult.grade === "FAILED") {
+          console.warn(`[orchestrator] on_feedback exhausted ${fb.max_attempts} retries. Escalating to: ${fb.escalate_to}`);
+          await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+            `⚠️ Exhausted ${fb.max_attempts} feedback retries for step ${i + 1}. Escalation target: ${fb.escalate_to}. Grade: ${stepResult.grade}.`);
+        }
+      }
+
+      // Issue #65: Only mark till_done if the step didn't FAIL
+      const stepGrade = stepResult?.grade ?? (parallelResults ? this.worstGrade(parallelResults.map((r) => r.grade)) : undefined);
+      if (stepGrade !== "FAILED") {
+        this.markTillDone(session, i);
+      }
       await this.emitter.tillDone(session.id, session.name, session.tillDone);
     }
   }
@@ -635,6 +664,14 @@ export class Orchestrator {
     return items;
   }
 
+  /**
+   * Mark till_done items as completed for progress tracking purposes.
+   * This tracks chain progress for the dashboard UI -- it does NOT verify
+   * that the step's work was correct or successful.
+   *
+   * Callers should check the step result grade before calling this method;
+   * FAILED steps should NOT be marked as done. See issue #65.
+   */
   private markTillDone(session: SessionState, stepIndex: number): void {
     let idx = 0;
     const chain = getChain(session.chain);
