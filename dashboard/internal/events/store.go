@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"mae-dashboard/internal/models"
+	"mae.local/dashboard/internal/models"
 )
 
 type Store struct {

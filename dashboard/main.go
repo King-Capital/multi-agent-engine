@@ -19,9 +19,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"mae-dashboard/internal/events"
-	"mae-dashboard/internal/models"
-	"mae-dashboard/templates"
+	"mae.local/dashboard/internal/events"
+	"mae.local/dashboard/internal/models"
+	"mae.local/dashboard/templates"
 )
 
 var store *events.Store
