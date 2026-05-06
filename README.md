@@ -28,14 +28,27 @@ Orchestration engine that coordinates teams of AI agents through structured chai
     Dashboard (Go/templ/HTMX) ------> SSE event stream
 ```
 
+The engine CLI and dashboard can run on **different hosts**. The CLI streams events to a central dashboard over HTTP:
+
+```
+  Mac Mini (CLI)  ──────── events ────────▶  CT 272 (Dashboard + PG)
+  CC-King (CLI)   ──────── events ────────▶  CT 272 (Dashboard + PG)
+                                                     │
+                                              Caddy (CT 205)
+                                                     │
+                                           ai-agents.rodaddy.live
+```
+
 ## Prerequisites
 
-| Tool | Install |
-|------|---------|
-| [Bun](https://bun.sh) | See bun.sh for install instructions |
-| [just](https://github.com/casey/just) | `brew install just` |
-| [Go](https://go.dev) (1.22+) | `brew install go` |
-| [templ](https://templ.guide) | `go install github.com/a-h/templ/cmd/templ@latest` |
+| Tool | Required For | Install |
+|------|-------------|---------|
+| [Bun](https://bun.sh) | Engine CLI (all hosts) | See bun.sh |
+| [just](https://github.com/casey/just) | Justfile shortcuts (optional) | `brew install just` |
+| [Go](https://go.dev) (1.22+) | Dashboard server only | `brew install go` |
+| [templ](https://templ.guide) | Dashboard server only | `go install github.com/a-h/templ/cmd/templ@latest` |
+
+**CLI-only hosts** (Mac Mini, CC-King) only need bun. Go and templ are only needed on the dashboard server.
 
 ## Quickstart
 
@@ -43,8 +56,11 @@ Orchestration engine that coordinates teams of AI agents through structured chai
 # Install engine dependencies
 cd engine && bun install
 
-# Build the CLI binary
+# Build the CLI binary (optional -- can also run via bun directly)
 just build
+
+# Point at the dashboard (add to shell profile for persistence)
+export MAE_DASHBOARD_URL=http://10.71.20.72:8400
 
 # Run a task (plan-build-review chain)
 just task "add input validation to the signup handler"
@@ -52,10 +68,24 @@ just task "add input validation to the signup handler"
 # Dry run (echo adapter, no real agents)
 just dry "refactor the auth module"
 
-# Start the dashboard
+# Start the dashboard (dashboard server only)
 just dashboard-build
 just dashboard
 ```
+
+## Remote Dashboard Targeting
+
+The engine streams events to a dashboard server. By default it targets `http://localhost:8400`. To point at a remote dashboard:
+
+```bash
+# Environment variable (recommended -- add to ~/.bashrc or ~/.zshrc)
+export MAE_DASHBOARD_URL=http://10.71.20.72:8400
+
+# Or per-invocation flag
+bun engine/cli.ts task "your task" --dashboard http://10.71.20.72:8400
+```
+
+This lets any host with bun installed run agent teams and see results on the central dashboard at https://ai-agents.rodaddy.live.
 
 ## Justfile Commands
 
@@ -136,7 +166,7 @@ just dashboard
 |-----------|------------|
 | Engine | Bun / TypeScript |
 | CLI | Bun-compiled standalone binary |
-| Dashboard | Go 1.26 / chi router |
+| Dashboard | Go 1.22+ / chi router |
 | Templates | templ (type-safe Go templates) |
 | Dashboard UI | HTMX + Alpine.js + SSE |
 | Config | YAML (teams, chains, model routing, damage control) |
@@ -163,3 +193,11 @@ Cross-model pairs are configured in `configs/model-routing.yaml` to ensure build
 | `codex` | Delegates to OpenAI Codex CLI |
 | `pi` | Delegates to Pi coding agent |
 | `echo` | Dry-run adapter, prints what would happen |
+
+## Deployment
+
+See [deploy/README.md](deploy/README.md) for full setup instructions including:
+- Dashboard server provisioning (CT 272)
+- Remote CLI setup (Mac Mini, CC-King)
+- Caddy reverse proxy configuration
+- User seeding and PostgreSQL setup
