@@ -227,6 +227,13 @@ func handleGetAgentPrompt(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSaveAgent(w http.ResponseWriter, r *http.Request) {
+	// Admin-only: check user role
+	user, _ := r.Context().Value(userContextKey).(*DBUser)
+	if user == nil || user.Role != "admin" {
+		http.Error(w, "admin access required", http.StatusForbidden)
+		return
+	}
+
 	slug := chi.URLParam(r, "slug")
 	if sanitizeSlug(slug) != slug {
 		http.Error(w, "invalid slug", http.StatusBadRequest)
