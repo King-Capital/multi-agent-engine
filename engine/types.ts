@@ -165,4 +165,5 @@ export interface DelegateOptions {
   teamColor: string;
   timeoutMs?: number;
   onStreamEvent?: (event: StreamEvent) => void;
+  sendMessage?: (fn: (msg: string) => void) => void;
 }

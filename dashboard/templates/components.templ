@@ -4,8 +4,17 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 	"mae.local/dashboard/internal/models"
 )
+
+func easternTZ() *time.Location {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}
 
 // --- Session List ---
 
@@ -18,12 +27,17 @@ templ SessionListItems(sessions []*models.Session) {
 		<p class="text-xs text-neutral-500 p-2">No sessions yet.</p>
 	}
 	for _, sess := range sessions {
-			<a
-				href={ templ.SafeURL(fmt.Sprintf("/session/%s", sess.ID)) }
-				class="block p-2.5 rounded-md mb-1 hover:bg-neutral-50/5 transition-colors cursor-pointer"
+			<div
+				id={ "sess-" + sess.ID }
+				class="relative block p-2.5 rounded-md mb-1 hover:bg-neutral-50/5 transition-colors cursor-pointer"
 				data-status={ sess.Status }
+				x-data="{ ctxOpen: false, ctxX: 0, ctxY: 0 }"
 				x-show={ "filters.size === 0 || filters.has('" + sess.Status + "')" }
 				x-transition
+				@contextmenu.prevent="ctxX = $event.offsetX; ctxY = $event.offsetY; ctxOpen = true; window.__ctxMenuOpen = true"
+				@click.away="ctxOpen = false; window.__ctxMenuOpen = false"
+				@click="if (!ctxOpen) window.location.href = '/session/' + $el.dataset.sid"
+				data-sid={ sess.ID }
 			>
 				<!-- Session name with chain type badge -->
 				<div class="flex items-center gap-1.5 mb-0.5">
@@ -58,10 +72,59 @@ templ SessionListItems(sessions []*models.Session) {
 						{ formatDuration(sess.ElapsedMs) }
 					</span>
 					<span class="text-neutral-700">
-						{ sess.ID }
+						{ sess.ID[:8] }
 					</span>
 				</div>
-			</a>
+				<!-- Right-click context menu -->
+				<div
+					x-show="ctxOpen"
+					x-transition
+					@click.stop=""
+					class="absolute z-50 rounded-md shadow-xl border border-neutral-50/10 py-1 min-w-36"
+					style="background: rgba(15, 20, 30, 0.95); backdrop-filter: blur(12px);"
+					:style="'left:' + ctxX + 'px; top:' + ctxY + 'px'"
+				>
+					<div class="px-2 py-1 text-xs text-neutral-500 border-b border-neutral-50/5">
+						{ sess.ID[:8] } · { sess.Status }
+					</div>
+					if sess.Status != "completed" {
+						<button
+							class="w-full text-left px-2 py-1.5 text-xs text-blue-400 hover:bg-blue-500/10 transition-colors flex items-center gap-1.5"
+							hx-patch={ fmt.Sprintf("/api/sessions/%s/status", sess.ID) }
+							hx-vals='{"status":"completed"}'
+							hx-target="#session-list"
+							hx-swap="innerHTML"
+							@click="ctxOpen = false"
+						>
+							<i class="ph-bold ph-check-circle"></i> Mark Done
+						</button>
+					}
+					if sess.Status != "error" {
+						<button
+							class="w-full text-left px-2 py-1.5 text-xs text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-1.5"
+							hx-patch={ fmt.Sprintf("/api/sessions/%s/status", sess.ID) }
+							hx-vals='{"status":"error"}'
+							hx-target="#session-list"
+							hx-swap="innerHTML"
+							@click="ctxOpen = false"
+						>
+							<i class="ph-bold ph-x-circle"></i> Mark Error
+						</button>
+					}
+					<div class="border-t border-neutral-50/5 mt-0.5 pt-0.5">
+						<button
+							class="w-full text-left px-2 py-1.5 text-xs text-red-500 hover:bg-red-500/10 transition-colors flex items-center gap-1.5"
+							hx-delete={ fmt.Sprintf("/api/sessions/%s", sess.ID) }
+							hx-target="#session-list"
+							hx-swap="innerHTML"
+							hx-confirm="Delete this session permanently?"
+							@click="ctxOpen = false"
+						>
+							<i class="ph-bold ph-trash"></i> Delete
+						</button>
+					</div>
+				</div>
+			</div>
 	}
 }
 
@@ -151,7 +214,7 @@ templ MessageBubble(evt models.Event, sess *models.Session) {
 				{ agentName }
 			</span>
 			<span class="text-xs text-neutral-600">
-				{ evt.Timestamp.Format("15:04:05") }
+				{ evt.Timestamp.In(easternTZ()).Format("3:04:05 PM") }
 			</span>
 		</div>
 		<div class="glass rounded-md p-2.5 text-sm text-neutral-300 ml-4 msg-md" data-md={ evt.Data.Content }>
@@ -185,7 +248,7 @@ templ ToolCallEntry(evt models.Event, sess *models.Session) {
 				<span class="text-neutral-500 truncate max-w-60" title={ evt.Data.FilePath }>{ evt.Data.FilePath }</span>
 			}
 			if evt.Timestamp.Unix() > 0 {
-				<span class="text-neutral-700 ml-auto flex-shrink-0">{ evt.Timestamp.Format("15:04:05") }</span>
+				<span class="text-neutral-700 ml-auto flex-shrink-0">{ evt.Timestamp.In(easternTZ()).Format("3:04:05 PM") }</span>
 			}
 		</button>
 		<!-- Expanded detail -->

@@ -13,10 +13,11 @@ import (
 )
 
 type Store struct {
-	dir       string
-	mu        sync.RWMutex
-	sessions  map[string]*models.Session
-	listeners map[string][]chan models.Event
+	dir           string
+	mu            sync.RWMutex
+	sessions      map[string]*models.Session
+	listeners     map[string][]chan models.Event
+	droppedCounts map[string]int64
 }
 
 func NewStore(dir string) (*Store, error) {
@@ -24,9 +25,10 @@ func NewStore(dir string) (*Store, error) {
 		return nil, fmt.Errorf("create store dir: %w", err)
 	}
 	s := &Store{
-		dir:       dir,
-		sessions:  make(map[string]*models.Session),
-		listeners: make(map[string][]chan models.Event),
+		dir:           dir,
+		sessions:      make(map[string]*models.Session),
+		listeners:     make(map[string][]chan models.Event),
+		droppedCounts: make(map[string]int64),
 	}
 	if err := s.loadExisting(); err != nil {
 		return nil, err
@@ -71,9 +73,6 @@ func (s *Store) loadSession(id string) error {
 }
 
 func (s *Store) Append(evt models.Event) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if evt.Timestamp.IsZero() {
 		evt.Timestamp = time.Now()
 	}
@@ -88,14 +87,17 @@ func (s *Store) Append(evt models.Event) error {
 	if err != nil {
 		return fmt.Errorf("open event file: %w", err)
 	}
-	defer f.Close()
-
 	if _, err := f.Write(append(data, '\n')); err != nil {
+		f.Close()
 		return fmt.Errorf("write event: %w", err)
 	}
+	f.Close()
 
+	s.mu.Lock()
 	s.applyEvent(evt)
 	s.notifyListeners(evt)
+	s.mu.Unlock()
+
 	return nil
 }
 
@@ -170,8 +172,12 @@ func (s *Store) applyEvent(evt models.Event) {
 		sess.TillDone = evt.Data.TillDone
 
 	case models.EventError:
-		if a, ok := sess.Agents[evt.AgentID]; ok {
-			a.Status = models.StatusError
+		if evt.AgentID != "" {
+			if a, ok := sess.Agents[evt.AgentID]; ok {
+				a.Status = models.StatusError
+			}
+		} else {
+			sess.Status = "error"
 		}
 	}
 }
@@ -192,14 +198,24 @@ func (s *Store) ListSessions() []*models.Session {
 	return result
 }
 
-func (s *Store) ClearCompleted() {
+func (s *Store) CloseStale() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	closed := 0
 	for _, sess := range s.sessions {
-		if sess.Status == "completed" {
-			sess.Status = "archived"
+		if sess.Status == "active" || sess.Status == "waiting" || sess.Status == "paused" {
+			sess.Status = "error"
+			sess.ElapsedMs = time.Since(sess.StartedAt).Milliseconds()
+			for _, a := range sess.Agents {
+				if a.Status == models.StatusRunning || a.Status == models.StatusIdle {
+					a.Status = models.StatusError
+					a.ElapsedMs = time.Since(a.StartedAt).Milliseconds()
+				}
+			}
+			closed++
 		}
 	}
+	return closed
 }
 
 func (s *Store) ClearStale(maxAge time.Duration) {
@@ -213,14 +229,119 @@ func (s *Store) ClearStale(maxAge time.Duration) {
 	}
 }
 
-func (s *Store) ClearAll() {
+func (s *Store) ReapInactiveSessions(timeout time.Duration) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	cutoff := time.Now().Add(-timeout)
+	reaped := 0
 	for _, sess := range s.sessions {
-		if sess.Status == "active" || sess.Status == "completed" {
-			sess.Status = "archived"
+		if sess.Status != "active" && sess.Status != "waiting" && sess.Status != "paused" {
+			continue
+		}
+		lastActivity := sess.StartedAt
+		for _, evt := range sess.Events {
+			if evt.Timestamp.After(lastActivity) {
+				lastActivity = evt.Timestamp
+			}
+		}
+		if lastActivity.Before(cutoff) {
+			sess.Status = "error"
+			sess.ElapsedMs = time.Since(sess.StartedAt).Milliseconds()
+			for _, a := range sess.Agents {
+				if a.Status == models.StatusRunning || a.Status == models.StatusIdle {
+					a.Status = models.StatusError
+					a.ElapsedMs = time.Since(a.StartedAt).Milliseconds()
+				}
+			}
+			evt := models.Event{
+				SessionID: sess.ID,
+				EventType: models.EventError,
+				Timestamp: time.Now(),
+				Data: models.EventData{
+					ErrorMsg: fmt.Sprintf("Session timed out after %v of inactivity", timeout),
+				},
+			}
+			sess.Events = append(sess.Events, evt)
+			s.notifyListeners(evt)
+
+			data, err := json.Marshal(evt)
+			if err == nil {
+				fpath := filepath.Join(s.dir, sess.ID+".jsonl")
+				if f, err := os.OpenFile(fpath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+					f.Write(append(data, '\n'))
+					f.Close()
+				}
+			}
+			reaped++
 		}
 	}
+	return reaped
+}
+
+func (s *Store) StartReaper(interval, timeout time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			if n := s.ReapInactiveSessions(timeout); n > 0 {
+				fmt.Fprintf(os.Stderr, "[reaper] Marked %d stale sessions as error\n", n)
+			}
+		}
+	}()
+}
+
+func (s *Store) ClearAll() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := len(s.sessions)
+	for id := range s.sessions {
+		fpath := filepath.Join(s.dir, id+".jsonl")
+		os.Remove(fpath)
+	}
+	s.sessions = make(map[string]*models.Session)
+	s.listeners = make(map[string][]chan models.Event)
+	return n
+}
+
+func (s *Store) SetSessionStatus(id, status string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[id]
+	if !ok {
+		return false
+	}
+	sess.Status = status
+	sess.ElapsedMs = time.Since(sess.StartedAt).Milliseconds()
+	for _, a := range sess.Agents {
+		if a.Status == models.StatusRunning || a.Status == models.StatusIdle {
+			if status == "error" {
+				a.Status = models.StatusError
+			} else {
+				a.Status = models.StatusDone
+			}
+			a.ElapsedMs = time.Since(a.StartedAt).Milliseconds()
+		}
+	}
+	evt := models.Event{
+		SessionID: id,
+		EventType: models.EventSessionEnd,
+		Timestamp: time.Now(),
+		Data: models.EventData{
+			Content: fmt.Sprintf("Session manually marked as %s", status),
+		},
+	}
+	sess.Events = append(sess.Events, evt)
+	s.notifyListeners(evt)
+
+	data, err := json.Marshal(evt)
+	if err == nil {
+		fpath := filepath.Join(s.dir, id+".jsonl")
+		if f, err := os.OpenFile(fpath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+			f.Write(append(data, '\n'))
+			f.Close()
+		}
+	}
+	return true
 }
 
 func (s *Store) DeleteSession(id string) {
@@ -242,7 +363,7 @@ func (s *Store) InjectSession(sess *models.Session) {
 func (s *Store) Subscribe(sessionID string) chan models.Event {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ch := make(chan models.Event, 64)
+	ch := make(chan models.Event, 256)
 	s.listeners[sessionID] = append(s.listeners[sessionID], ch)
 	return ch
 }
@@ -265,12 +386,22 @@ func (s *Store) notifyListeners(evt models.Event) {
 		select {
 		case ch <- evt:
 		default:
+			s.droppedCounts[evt.SessionID]++
+			if s.droppedCounts[evt.SessionID]%10 == 1 {
+				fmt.Fprintf(os.Stderr, "warn: dropped SSE event for session %s (type=%s, total dropped=%d)\n",
+					evt.SessionID, string(evt.EventType), s.droppedCounts[evt.SessionID])
+			}
 		}
 	}
 	for _, ch := range s.listeners["*"] {
 		select {
 		case ch <- evt:
 		default:
+			s.droppedCounts[evt.SessionID]++
+			if s.droppedCounts[evt.SessionID]%10 == 1 {
+				fmt.Fprintf(os.Stderr, "warn: dropped SSE event for session %s (type=%s, total dropped=%d)\n",
+					evt.SessionID, string(evt.EventType), s.droppedCounts[evt.SessionID])
+			}
 		}
 	}
 }

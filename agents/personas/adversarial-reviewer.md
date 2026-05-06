@@ -18,8 +18,8 @@ tools:
   - bash
 domain:
   read: ["**/*"]
-  write: ["agents/expertise/adversarial-reviewer.md"]
-  update: ["agents/expertise/adversarial-reviewer.md"]
+  write: ["**/*"]
+  update: ["**/*"]
 ---
 
 # Adversarial Reviewer

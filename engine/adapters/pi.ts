@@ -1,6 +1,7 @@
 import { $ } from "bun";
-import { mkdirSync } from "fs";
-import type { PlatformAdapter, DelegateOptions, DelegateResult } from "../types";
+import { mkdirSync, existsSync } from "fs";
+import { join } from "path";
+import type { PlatformAdapter, DelegateOptions, DelegateResult, StreamEvent } from "../types";
 
 export class PiAdapter implements PlatformAdapter {
   name = "pi";
@@ -23,7 +24,8 @@ export class PiAdapter implements PlatformAdapter {
 
     const args = [
       "pi",
-      "--print",
+      "--mode", "rpc",
+      "--no-session",
       "--model", opts.model,
       "--thinking", opts.thinking ?? "medium",
       "-p", opts.systemPrompt,
@@ -33,90 +35,318 @@ export class PiAdapter implements PlatformAdapter {
       args.push("--tools", toolsFlag);
     }
 
-    console.log(`[pi] Spawning ${opts.persona.name} (${opts.model}) in ${opts.workingDir}`);
+    const baseDir = process.cwd();
+    for (const skill of opts.persona.skills) {
+      const skillPath = typeof skill === "string" ? skill : skill.path;
+      const filename = skillPath.split("/").pop()!;
+      const piSkillPath = join(baseDir, ".pi", "skills", filename);
+      const agentSkillPath = join(baseDir, skillPath);
+      const resolved = existsSync(piSkillPath) ? piSkillPath : existsSync(agentSkillPath) ? agentSkillPath : null;
+      if (resolved) {
+        args.push("--skill", resolved);
+      }
+    }
+
+    if (opts.persona.expertise) {
+      const expertisePath = join(baseDir, opts.persona.expertise);
+      if (existsSync(expertisePath)) {
+        args.push("--append-system-prompt", expertisePath);
+      }
+    }
+
+    console.log(`[pi-rpc] Spawning ${opts.persona.name} (${this.mapModel(opts.model)}) [${opts.persona.skills.length} skills] in ${opts.workingDir}`);
 
     const timeout = opts.timeoutMs ?? 300_000;
 
-    try {
+    let totalCost = 0;
+    let totalTokens = 0;
+    let cacheReadTokens = 0;
+    let finalText = "";
+
+    return new Promise<DelegateResult>((resolve) => {
+      let resolved = false;
+      const safeResolve = (result: DelegateResult) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+
       const proc = Bun.spawn(args, {
-        stdin: new Response(opts.userPrompt).body!,
+        stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
         cwd: opts.workingDir,
       });
 
-      const timer = setTimeout(() => proc.kill(), timeout);
-
-      const output = await new Response(proc.stdout).text();
-      const stderr = await new Response(proc.stderr).text();
-      const exitCode = await proc.exited;
-
-      clearTimeout(timer);
-
-      if (exitCode === null || exitCode === 137 || exitCode === 143) {
-        console.error(`[pi] ${opts.persona.name} timed out after ${timeout}ms`);
-        return {
+      const timer = setTimeout(async () => {
+        console.error(`[pi-rpc] ${opts.persona.name} timed out after ${timeout}ms`);
+        // Step 1: send abort RPC
+        this.sendCmd(proc, { type: "abort" });
+        // Step 2: wait 5s, then SIGTERM
+        await Bun.sleep(5000);
+        if (resolved) return;
+        try { proc.kill(); } catch {}
+        // Step 3: wait 3s more, then SIGKILL if still alive
+        await Bun.sleep(3000);
+        if (resolved) return;
+        try { proc.kill(9); } catch {}
+        // Step 4: force-resolve with timeout error
+        safeResolve({
           agentId,
           agentName: opts.persona.name,
-          output: `ERROR: Agent timed out after ${timeout}ms`,
-          grade: "FAILED",
-          findings: ["timeout"],
-          costUsd: 0,
-          tokensUsed: 0,
-        };
+          output: finalText || `ERROR: Agent timed out after ${timeout}ms (force-killed)`,
+          grade: finalText ? this.extractGrade(finalText) : "FAILED",
+          findings: finalText ? this.extractFindings(finalText) : ["timeout"],
+          costUsd: totalCost,
+          tokensUsed: totalTokens,
+        });
+      }, timeout);
+
+      // Register message sender so orchestrator/dashboard can inject messages
+      if (opts.sendMessage) {
+        opts.sendMessage((msg: string) => {
+          this.sendCmd(proc, { type: "follow_up", message: msg });
+        });
       }
 
-      if (exitCode !== 0) {
-        console.error(`[pi] ${opts.persona.name} exited ${exitCode}: ${stderr.slice(0, 500)}`);
-        return {
+      // Send the initial prompt
+      this.sendCmd(proc, { type: "prompt", message: opts.userPrompt });
+
+      // Stream stdout JSONL
+      const reader = proc.stdout.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      const processStream = async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            let newlineIdx: number;
+            while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+              const line = buffer.slice(0, newlineIdx);
+              buffer = buffer.slice(newlineIdx + 1);
+              const trimmed = line.endsWith("\r") ? line.slice(0, -1) : line;
+              if (!trimmed) continue;
+
+              try {
+                const evt = JSON.parse(trimmed);
+                this.processRpcEvent(evt, opts.onStreamEvent, (cost, tokens, cache) => {
+                  totalCost += cost;
+                  totalTokens = tokens;
+                  cacheReadTokens = cache;
+                });
+
+                if (evt.type === "tool_execution_end") {
+                  const toolName = evt.toolName ?? "unknown";
+                  const isError = evt.isError ?? false;
+                  opts.onStreamEvent?.({
+                    type: "tool_result",
+                    tool: toolName,
+                    status: isError ? "error" : "success",
+                  });
+                }
+
+                if (evt.type === "agent_end") {
+                  const messages = evt.messages ?? [];
+                  const lastAssistant = [...messages].reverse().find((m: { role: string }) => m.role === "assistant");
+                  if (lastAssistant) {
+                    const content = lastAssistant.content;
+                    if (Array.isArray(content)) {
+                      const textBlock = content.find((b: { type: string }) => b.type === "text");
+                      if (textBlock?.text) finalText = textBlock.text;
+                    }
+                    const usage = lastAssistant.usage;
+                    if (usage) {
+                      totalCost = messages.reduce((sum: number, m: { usage?: { cost?: { total?: number } } }) =>
+                        sum + (m.usage?.cost?.total ?? 0), 0);
+                    }
+                  }
+                  opts.onStreamEvent?.({ type: "cost", costUsd: totalCost, tokensUsed: totalTokens, cacheReadTokens });
+
+                  // Agent done — kill RPC process and resolve
+                  proc.kill();
+                  safeResolve({
+                    agentId,
+                    agentName: opts.persona.name,
+                    output: finalText || "ERROR: Empty output",
+                    grade: this.extractGrade(finalText),
+                    findings: this.extractFindings(finalText),
+                    costUsd: totalCost,
+                    tokensUsed: totalTokens,
+                  });
+                  return;
+                }
+              } catch {
+                // not valid JSON
+              }
+            }
+          }
+        } catch {
+          // stream closed
+        }
+
+        // Stream ended without agent_end — race with proc.exited
+        const exitCode = await proc.exited;
+        const stderr = await new Response(proc.stderr).text();
+
+        if (resolved) return; // already resolved by timeout or agent_end
+
+        if (exitCode === 137 || exitCode === 143) {
+          safeResolve({
+            agentId,
+            agentName: opts.persona.name,
+            output: finalText || `ERROR: Agent timed out after ${timeout}ms`,
+            grade: finalText ? this.extractGrade(finalText) : "FAILED",
+            findings: finalText ? this.extractFindings(finalText) : ["timeout"],
+            costUsd: totalCost,
+            tokensUsed: totalTokens,
+          });
+          return;
+        }
+
+        if (exitCode !== 0 && !finalText) {
+          console.error(`[pi-rpc] ${opts.persona.name} exited ${exitCode}: ${stderr.slice(0, 500)}`);
+          safeResolve({
+            agentId,
+            agentName: opts.persona.name,
+            output: `ERROR: ${stderr}`,
+            grade: "FAILED",
+            findings: [stderr],
+            costUsd: totalCost,
+            tokensUsed: totalTokens,
+          });
+          return;
+        }
+
+        safeResolve({
           agentId,
           agentName: opts.persona.name,
-          output: `ERROR: ${stderr}`,
-          grade: "FAILED",
-          findings: [stderr],
-          costUsd: 0,
-          tokensUsed: 0,
-        };
-      }
-
-      if (!output.trim()) {
-        console.warn(`[pi] ${opts.persona.name} returned empty output`);
-        return {
-          agentId,
-          agentName: opts.persona.name,
-          output: "ERROR: Empty output from agent",
-          grade: "FAILED",
-          findings: ["empty_output"],
-          costUsd: 0,
-          tokensUsed: 0,
-        };
-      }
-
-      return {
-        agentId,
-        agentName: opts.persona.name,
-        output,
-        grade: this.extractGrade(output),
-        findings: this.extractFindings(output),
-        costUsd: this.estimateCost(output, opts.model),
-        tokensUsed: this.estimateTokens(output),
+          output: finalText || "ERROR: Empty output",
+          grade: this.extractGrade(finalText),
+          findings: this.extractFindings(finalText),
+          costUsd: totalCost,
+          tokensUsed: totalTokens,
+        });
       };
-    } catch (err) {
-      return {
-        agentId,
-        agentName: opts.persona.name,
-        output: `ERROR: ${err}`,
-        grade: "FAILED",
-        findings: [`${err}`],
-        costUsd: 0,
-        tokensUsed: 0,
-      };
+
+      // Race: processStream vs proc.exited (handles hung stream)
+      const exitRace = proc.exited.then(async (exitCode) => {
+        // Give stream a moment to finish processing
+        await Bun.sleep(1000);
+        if (resolved) return;
+
+        // Stream is hung — force resolve
+        console.error(`[pi-rpc] ${opts.persona.name} exited (code ${exitCode}) but stream still open, force-resolving`);
+        try { reader.cancel(); } catch {}
+
+        const stderr = await new Response(proc.stderr).text().catch(() => "");
+
+        if (exitCode !== 0 && !finalText) {
+          safeResolve({
+            agentId,
+            agentName: opts.persona.name,
+            output: `ERROR: Process exited ${exitCode}: ${stderr}`,
+            grade: "FAILED",
+            findings: [stderr || `exit code ${exitCode}`],
+            costUsd: totalCost,
+            tokensUsed: totalTokens,
+          });
+        } else {
+          safeResolve({
+            agentId,
+            agentName: opts.persona.name,
+            output: finalText || "ERROR: Empty output",
+            grade: this.extractGrade(finalText),
+            findings: this.extractFindings(finalText),
+            costUsd: totalCost,
+            tokensUsed: totalTokens,
+          });
+        }
+      });
+
+      processStream();
+    });
+  }
+
+  private sendCmd(proc: ReturnType<typeof Bun.spawn>, cmd: Record<string, unknown>): void {
+    try {
+      const stdin = proc.stdin;
+      if (stdin && typeof stdin === "object" && "write" in stdin) {
+        (stdin as { write(data: string | Uint8Array): void }).write(JSON.stringify(cmd) + "\n");
+      }
+    } catch {
+      // process may have exited
     }
+  }
+
+  private processRpcEvent(
+    evt: Record<string, unknown>,
+    onStream: ((event: StreamEvent) => void) | undefined,
+    onCost: (cost: number, tokens: number, cacheRead: number) => void,
+  ): void {
+    if (!onStream) return;
+
+    // Tool execution events — real-time tool call visibility
+    if (evt.type === "tool_execution_start") {
+      const toolName = (evt.toolName as string) ?? "unknown";
+      const args = evt.args as Record<string, unknown> | undefined;
+      let filePath = "";
+      if (args) {
+        filePath = ((args.file_path ?? args.path ?? args.command ?? "") as string).slice(0, 200);
+      }
+      onStream({
+        type: "tool_call",
+        tool: toolName,
+        filePath,
+        status: "running",
+      });
+    }
+
+    // Streaming text deltas
+    if (evt.type === "message_update") {
+      const ame = evt.assistantMessageEvent as Record<string, unknown> | undefined;
+      if (ame?.type === "text_delta" && ame.delta) {
+        // Don't emit individual deltas as full messages — accumulate
+      }
+      if (ame?.type === "text_end" && ame.content) {
+        onStream({
+          type: "assistant_text",
+          content: ame.content as string,
+        });
+      }
+    }
+
+    // Cost updates from message_end
+    if (evt.type === "message_end") {
+      const msg = evt.message as Record<string, unknown> | undefined;
+      if (msg?.role === "assistant") {
+        const usage = msg.usage as Record<string, unknown> | undefined;
+        if (usage) {
+          const cost = usage.cost as Record<string, number> | undefined;
+          const costTotal = cost?.total ?? 0;
+          const tokens = (usage.totalTokens as number) ?? 0;
+          const cache = (usage.cacheRead as number) ?? 0;
+          if (costTotal > 0) {
+            onCost(costTotal, tokens, cache);
+            onStream({ type: "cost", costUsd: costTotal, tokensUsed: tokens, cacheReadTokens: cache });
+          }
+        }
+      }
+    }
+  }
+
+  private mapModel(model: string): string {
+    const parts = model.split("/");
+    return parts[parts.length - 1]!;
   }
 
   private extractGrade(output: string): "PERFECT" | "VERIFIED" | "PARTIAL" | "FEEDBACK" | "FAILED" | undefined {
     const match = output.match(/GRADE:\s*(PERFECT|VERIFIED|PARTIAL|FEEDBACK|FAILED)/i);
-    return match?.[1]?.toUpperCase() as any;
+    return match?.[1]?.toUpperCase() as ReturnType<typeof this.extractGrade>;
   }
 
   private extractFindings(output: string): string[] {
@@ -125,15 +355,5 @@ export class PiAdapter implements PlatformAdapter {
       if (/^\s*-\s*P[0-3]:/.test(line)) findings.push(line.trim());
     }
     return findings;
-  }
-
-  private estimateCost(output: string, model: string): number {
-    const tokens = this.estimateTokens(output);
-    const rate = model.includes("opus") ? 0.075 : model.includes("sonnet") ? 0.015 : 0.005;
-    return (tokens / 1000) * rate;
-  }
-
-  private estimateTokens(output: string): number {
-    return Math.ceil(output.length / 4);
   }
 }

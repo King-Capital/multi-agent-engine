@@ -25,8 +25,8 @@ tools:
   - bash
 domain:
   read: ["**/*"]
-  write: ["expertise/validator.md"]
-  update: ["expertise/validator.md"]
+  write: ["**/*"]
+  update: ["**/*"]
 ---
 
 # Purpose

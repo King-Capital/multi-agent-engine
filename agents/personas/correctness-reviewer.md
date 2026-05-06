@@ -18,8 +18,8 @@ tools:
   - bash
 domain:
   read: ["**/*"]
-  write: ["agents/expertise/correctness-reviewer.md"]
-  update: ["agents/expertise/correctness-reviewer.md"]
+  write: ["**/*"]
+  update: ["**/*"]
 ---
 
 # Correctness Reviewer
