@@ -78,6 +78,22 @@ export class ClaudeCodeAdapter implements PlatformAdapter {
 
       const timer = timeout > 0 ? setTimeout(() => proc.kill(), timeout) : null;
 
+      // Start draining stderr immediately to prevent pipe deadlock (#63)
+      const stderrChunks: string[] = [];
+      const stderrReader = proc.stderr.getReader();
+      const stderrDecoder = new TextDecoder();
+      const drainStderr = (async () => {
+        try {
+          while (true) {
+            const { done, value } = await stderrReader.read();
+            if (done) break;
+            stderrChunks.push(stderrDecoder.decode(value, { stream: true }));
+          }
+        } catch {
+          // stderr closed or process killed -- safe to ignore
+        }
+      })();
+
       let resultText = "";
       let costUsd = 0;
       let tokensUsed = 0;
@@ -139,6 +155,10 @@ export class ClaudeCodeAdapter implements PlatformAdapter {
       const exitCode = await proc.exited;
       if (timer) clearTimeout(timer);
 
+      // Wait for stderr drain to complete
+      await drainStderr;
+      const stderr = stderrChunks.join("");
+
       if (exitCode === null || exitCode === 137 || exitCode === 143) {
         console.error(`[claude-code] ${opts.persona.name} timed out after ${timeout}ms`);
         return {
@@ -149,7 +169,6 @@ export class ClaudeCodeAdapter implements PlatformAdapter {
       }
 
       if (exitCode !== 0 && !resultText.trim()) {
-        const stderr = await new Response(proc.stderr).text();
         console.error(`[claude-code] ${opts.persona.name} exited ${exitCode}: ${stderr.slice(0, 500)}`);
         return {
           agentId, agentName: opts.persona.name,
