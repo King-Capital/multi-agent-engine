@@ -127,9 +127,9 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(corsMiddleware)
-	r.Use(rateLimitMiddleware)
 	r.Use(authMiddleware)
 	r.Use(maxBodySize)
+	r.Use(rateLimitMiddleware)
 
 	// Page routes
 	r.Get("/", handleDashboard)
