@@ -13,10 +13,11 @@ import (
 )
 
 type Store struct {
-	dir       string
-	mu        sync.RWMutex
-	sessions  map[string]*models.Session
-	listeners map[string][]chan models.Event
+	dir           string
+	mu            sync.RWMutex
+	sessions      map[string]*models.Session
+	listeners     map[string][]chan models.Event
+	droppedCounts map[string]int64
 }
 
 func NewStore(dir string) (*Store, error) {
@@ -24,9 +25,10 @@ func NewStore(dir string) (*Store, error) {
 		return nil, fmt.Errorf("create store dir: %w", err)
 	}
 	s := &Store{
-		dir:       dir,
-		sessions:  make(map[string]*models.Session),
-		listeners: make(map[string][]chan models.Event),
+		dir:           dir,
+		sessions:      make(map[string]*models.Session),
+		listeners:     make(map[string][]chan models.Event),
+		droppedCounts: make(map[string]int64),
 	}
 	if err := s.loadExisting(); err != nil {
 		return nil, err
@@ -358,7 +360,7 @@ func (s *Store) InjectSession(sess *models.Session) {
 func (s *Store) Subscribe(sessionID string) chan models.Event {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ch := make(chan models.Event, 64)
+	ch := make(chan models.Event, 256)
 	s.listeners[sessionID] = append(s.listeners[sessionID], ch)
 	return ch
 }
@@ -381,12 +383,22 @@ func (s *Store) notifyListeners(evt models.Event) {
 		select {
 		case ch <- evt:
 		default:
+			s.droppedCounts[evt.SessionID]++
+			if s.droppedCounts[evt.SessionID]%10 == 1 {
+				fmt.Fprintf(os.Stderr, "warn: dropped SSE event for session %s (type=%s, total dropped=%d)\n",
+					evt.SessionID, string(evt.EventType), s.droppedCounts[evt.SessionID])
+			}
 		}
 	}
 	for _, ch := range s.listeners["*"] {
 		select {
 		case ch <- evt:
 		default:
+			s.droppedCounts[evt.SessionID]++
+			if s.droppedCounts[evt.SessionID]%10 == 1 {
+				fmt.Fprintf(os.Stderr, "warn: dropped SSE event for session %s (type=%s, total dropped=%d)\n",
+					evt.SessionID, string(evt.EventType), s.droppedCounts[evt.SessionID])
+			}
 		}
 	}
 }
