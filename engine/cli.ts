@@ -21,6 +21,7 @@ Usage:
 Options:
   --adapter <name>     Use specific adapter (echo, claude-code, pi, codex)
   --dashboard <url>    Dashboard URL (default: http://localhost:8400)
+  --token <token>      API token for dashboard auth (or MAE_API_TOKEN env var)
   --dry-run            Use echo adapter for testing
 
 Examples:
@@ -36,11 +37,12 @@ Examples:
 
 const command = args[0];
 const dashboardUrl = getFlag(args, "--dashboard") ?? process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400";
+const apiToken = getFlag(args, "--token") ?? process.env.MAE_API_TOKEN;
 const adapterName = getFlag(args, "--adapter");
 const workingDir = getFlag(args, "--cwd") ?? process.cwd();
 const dryRun = args.includes("--dry-run");
 
-const orch = new Orchestrator(dashboardUrl);
+const orch = new Orchestrator(dashboardUrl, apiToken);
 
 const adapters = [
   new EchoAdapter(),

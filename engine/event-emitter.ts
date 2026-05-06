@@ -1,13 +1,44 @@
 import type { SessionEvent } from "./types";
 
+const RETRY_DELAYS = [100, 500, 2000];
+
 export class EventEmitter {
   private dashboardUrl: string;
+  private token: string | undefined;
   private buffer: SessionEvent[] = [];
   private flushing = false;
-  private pgAgentIds: Map<string, number> = new Map(); // engine agentId -> PG agent id
+  private pgAgentIds: Map<string, number> = new Map();
+  private droppedEvents = 0;
 
-  constructor(dashboardUrl?: string) {
+  constructor(dashboardUrl?: string, token?: string) {
     this.dashboardUrl = dashboardUrl ?? "http://localhost:8400";
+    this.token = token;
+  }
+
+  private headers(): Record<string, string> {
+    const h: Record<string, string> = { "Content-Type": "application/json" };
+    if (this.token) h["Authorization"] = `Bearer ${this.token}`;
+    return h;
+  }
+
+  private async fetchWithRetry(url: string, init: RequestInit): Promise<Response | null> {
+    for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+      try {
+        const res = await fetch(url, init);
+        if (res.ok || res.status < 500) return res;
+        if (attempt < RETRY_DELAYS.length) {
+          await Bun.sleep(RETRY_DELAYS[attempt]!);
+        }
+      } catch (err: unknown) {
+        const code = (err as { code?: string })?.code ?? "";
+        const msg = err instanceof Error ? err.message : "";
+        if (code === "ConnectionRefused" || msg.includes("ECONNREFUSED")) return null;
+        if (attempt < RETRY_DELAYS.length) {
+          await Bun.sleep(RETRY_DELAYS[attempt]!);
+        }
+      }
+    }
+    return null;
   }
 
   async emit(event: SessionEvent): Promise<void> {
@@ -27,14 +58,14 @@ export class EventEmitter {
     this.flushing = false;
 
     for (const event of events) {
-      try {
-        await fetch(`${this.dashboardUrl}/api/events`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(event),
-        });
-      } catch {
-        console.error(`[event-emitter] Failed to send event: ${event.event_type}`);
+      const res = await this.fetchWithRetry(`${this.dashboardUrl}/api/events`, {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify(event),
+      });
+      if (!res) {
+        this.droppedEvents++;
+        console.error(`[event-emitter] Dropped event after retries: ${event.event_type}`);
       }
     }
   }
@@ -172,6 +203,9 @@ export class EventEmitter {
   }
 
   sessionEnd(sessionId: string) {
+    if (this.droppedEvents > 0) {
+      console.error(`[event-emitter] Session ended with ${this.droppedEvents} dropped events`);
+    }
     this.pgUpdateSession(sessionId, { status: "completed" });
     return this.emit({
       session_id: sessionId,
@@ -193,35 +227,29 @@ export class EventEmitter {
     chain?: string;
     config?: Record<string, unknown>;
   }): Promise<void> {
-    try {
-      await fetch(`${this.dashboardUrl}/api/pg/sessions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: opts.id,
-          name: opts.name,
-          platform: opts.platform ?? "multi-agent-engine",
-          user_id: opts.userId,
-          team: opts.team,
-          chain: opts.chain,
-          config: opts.config,
-        }),
-      });
-    } catch {
-      console.error(`[event-emitter] Failed to create PG session: ${opts.id}`);
-    }
+    const res = await this.fetchWithRetry(`${this.dashboardUrl}/api/pg/sessions`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({
+        id: opts.id,
+        name: opts.name,
+        platform: opts.platform ?? "multi-agent-engine",
+        user_id: opts.userId,
+        team: opts.team,
+        chain: opts.chain,
+        config: opts.config,
+      }),
+    });
+    if (!res) console.error(`[event-emitter] Failed to create PG session after retries: ${opts.id}`);
   }
 
   async pgUpdateSession(sessionId: string, updates: { name?: string; status?: string }): Promise<void> {
-    try {
-      await fetch(`${this.dashboardUrl}/api/pg/sessions/${sessionId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      });
-    } catch {
-      console.error(`[event-emitter] Failed to update PG session: ${sessionId}`);
-    }
+    const res = await this.fetchWithRetry(`${this.dashboardUrl}/api/pg/sessions/${sessionId}`, {
+      method: "PATCH",
+      headers: this.headers(),
+      body: JSON.stringify(updates),
+    });
+    if (!res) console.error(`[event-emitter] Failed to update PG session after retries: ${sessionId}`);
   }
 
   async pgCreateAgent(opts: {
@@ -233,29 +261,27 @@ export class EventEmitter {
     prompt?: string;
     config?: Record<string, unknown>;
   }): Promise<void> {
-    try {
-      const res = await fetch(`${this.dashboardUrl}/api/pg/sessions/${opts.sessionId}/agents`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session_id: opts.sessionId,
-          agent_id: opts.agentId,
-          role: opts.role,
-          persona: opts.persona,
-          adapter: opts.adapter,
-          status: "running",
-          prompt: opts.prompt,
-          config: opts.config,
-        }),
-      });
-      if (res.ok) {
-        const agent = (await res.json()) as { id?: number };
-        if (agent?.id) {
-          this.pgAgentIds.set(opts.agentId, agent.id);
-        }
+    const res = await this.fetchWithRetry(`${this.dashboardUrl}/api/pg/sessions/${opts.sessionId}/agents`, {
+      method: "POST",
+      headers: this.headers(),
+      body: JSON.stringify({
+        session_id: opts.sessionId,
+        agent_id: opts.agentId,
+        role: opts.role,
+        persona: opts.persona,
+        adapter: opts.adapter,
+        status: "running",
+        prompt: opts.prompt,
+        config: opts.config,
+      }),
+    });
+    if (res?.ok) {
+      const agent = (await res.json()) as { id?: number };
+      if (agent?.id) {
+        this.pgAgentIds.set(opts.agentId, agent.id);
       }
-    } catch {
-      console.error(`[event-emitter] Failed to create PG agent: ${opts.agentId}`);
+    } else {
+      console.error(`[event-emitter] Failed to create PG agent after retries: ${opts.agentId}`);
     }
   }
 
@@ -267,14 +293,11 @@ export class EventEmitter {
   }): Promise<void> {
     const pgId = this.pgAgentIds.get(agentId);
     if (!pgId) return;
-    try {
-      await fetch(`${this.dashboardUrl}/api/pg/agents/${pgId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      });
-    } catch {
-      console.error(`[event-emitter] Failed to update PG agent: ${agentId}`);
-    }
+    const res = await this.fetchWithRetry(`${this.dashboardUrl}/api/pg/agents/${pgId}`, {
+      method: "PATCH",
+      headers: this.headers(),
+      body: JSON.stringify(updates),
+    });
+    if (!res) console.error(`[event-emitter] Failed to update PG agent after retries: ${agentId}`);
   }
 }
