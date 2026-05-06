@@ -10,6 +10,7 @@ import {
   loadModelRouting,
 } from "./config";
 import { EventEmitter } from "./event-emitter";
+import { sanitizeAgentInput, validateAgentOutput } from "./security";
 import { isGitRepo, createWorktree, mergeWorktree, cleanupWorktree } from "./worktree";
 import { delegateWithHealing } from "./self-healing";
 import type {
@@ -274,6 +275,8 @@ export class Orchestrator {
   private async runChain(session: SessionState, chain: Chain, task: string, adapterName?: string): Promise<void> {
     const steps = chain.steps ?? this.normalizeParallelChain(chain);
     let previousOutput = "";
+    let stepResult: DelegateResult | undefined;
+    let parallelResults: DelegateResult[] | undefined;
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
@@ -287,11 +290,11 @@ export class Orchestrator {
         parallelResults = await this.runParallelStep(session, step, task, previousOutput, adapterName);
         previousOutput = parallelResults.map((r) => `[${r.agentName}]: ${r.output}`).join("\n\n");
       } else if (step.team) {
-        const result = await this.runTeamStep(session, step, task, previousOutput, adapterName);
-        previousOutput = result.output;
+        stepResult = await this.runTeamStep(session, step, task, previousOutput, adapterName);
+        previousOutput = stepResult.output;
       } else if (step.agent) {
-        const result = await this.runAgent(session, step.agent, task, previousOutput, "orch-1", adapterName);
-        previousOutput = result.output;
+        stepResult = await this.runAgent(session, step.agent, task, previousOutput, "orch-1", adapterName);
+        previousOutput = stepResult.output;
       }
 
       // Issue #64: on_feedback retry loop for team steps
