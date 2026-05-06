@@ -63,6 +63,58 @@ func main() {
 			tokenMap = m
 			log.Printf("Loaded %d API tokens", len(tokenMap))
 		}
+
+		// Mark stale active sessions as error
+		if n, err := MarkStaleSessions(ctx, 30); err != nil {
+			log.Printf("WARNING: failed to mark stale sessions: %v", err)
+		} else if n > 0 {
+			log.Printf("Marked %d stale sessions as error", n)
+		}
+
+		// Hydrate recent sessions from PG into in-memory store
+		if sessions, eventsBySession, err := HydrateRecentSessions(ctx, 50); err != nil {
+			log.Printf("WARNING: failed to hydrate sessions: %v", err)
+		} else {
+			for _, s := range sessions {
+				chainStr := ""
+				if s.Chain != nil { chainStr = *s.Chain }
+				sess := &models.Session{
+					ID:        s.ID,
+					Name:      s.Name,
+					TeamConfig: chainStr,
+					Status:    s.Status,
+					StartedAt: s.CreatedAt,
+				}
+				if s.Status == "active" {
+					sess.Status = "error"
+				}
+				sess.Agents = make(map[string]*models.Agent)
+				for _, evt := range eventsBySession[s.ID] {
+					if evt.EventType == "agent_spawn" {
+						var data map[string]interface{}
+						json.Unmarshal(evt.Payload, &data)
+						agentID := ""
+						if evt.AgentID != nil { agentID = *evt.AgentID }
+						name, _ := data["agent_name"].(string)
+						role, _ := data["agent_role"].(string)
+						model, _ := data["model"].(string)
+						teamName, _ := data["team_name"].(string)
+						teamColor, _ := data["team_color"].(string)
+						sess.Agents[agentID] = &models.Agent{
+							ID: agentID, Name: name, Role: models.AgentRole(role),
+							Model: model, TeamName: teamName, TeamColor: teamColor,
+							Status: models.StatusDone,
+						}
+					}
+				}
+				sess.TotalCost = 0
+				for _, a := range sess.Agents {
+					sess.TotalCost += a.CostUSD
+				}
+				store.InjectSession(sess)
+			}
+			log.Printf("Hydrated %d sessions from PG", len(sessions))
+		}
 	}
 
 	port := os.Getenv("DASHBOARD_PORT")
@@ -95,6 +147,7 @@ func main() {
 		r.Get("/sessions/{sessionID}", handleGetSession)
 		r.Get("/sessions/{sessionID}/stream", handleSSE)
 		r.Get("/stream", handleSSEAll)
+		r.Delete("/sessions/{sessionID}", handleDeleteSession)
 		r.Delete("/sessions/completed", handleClearCompleted)
 		r.Delete("/sessions/stale", handleClearStale)
 		r.Delete("/sessions/all", handleClearAll)
@@ -623,6 +676,13 @@ Return ONLY the improved system prompt markdown, no explanation.`, slug, strings
 	} else {
 		http.Error(w, "no response from LiteLLM", http.StatusBadGateway)
 	}
+}
+
+func handleDeleteSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionID")
+	store.DeleteSession(sessionID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "session_id": sessionID})
 }
 
 func handleClearCompleted(w http.ResponseWriter, r *http.Request) {

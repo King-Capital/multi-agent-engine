@@ -325,6 +325,43 @@ func RecordEvent(ctx context.Context, e *DBEvent) error {
 	).Scan(&e.ID, &e.CreatedAt)
 }
 
+// --- Hydration ---
+
+func HydrateRecentSessions(ctx context.Context, limit int) ([]DBSession, map[string][]DBEvent, error) {
+	sessions, err := querySessions(ctx,
+		`SELECT id, user_id, name, platform, team, chain, status, COALESCE(config, 'null'::jsonb), created_at, updated_at, completed_at
+		 FROM sessions ORDER BY created_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load sessions: %w", err)
+	}
+
+	eventsBySession := make(map[string][]DBEvent)
+	for _, s := range sessions {
+		events, err := GetEventsBySession(ctx, s.ID)
+		if err != nil {
+			log.Printf("WARNING: failed to load events for session %s: %v", s.ID, err)
+			continue
+		}
+		eventsBySession[s.ID] = events
+	}
+
+	return sessions, eventsBySession, nil
+}
+
+// MarkStaleSessions marks active sessions with no recent events as error.
+func MarkStaleSessions(ctx context.Context, maxIdleMinutes int) (int, error) {
+	result, err := db.ExecContext(ctx, `
+		UPDATE sessions SET status = 'error', updated_at = NOW()
+		WHERE status = 'active'
+		  AND updated_at < NOW() - make_interval(mins := $1)
+	`, maxIdleMinutes)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := result.RowsAffected()
+	return int(n), nil
+}
+
 // --- Auth Tokens ---
 
 func EnsureAuthTokens(ctx context.Context) error {

@@ -195,11 +195,9 @@ func (s *Store) ListSessions() []*models.Session {
 func (s *Store) ClearCompleted() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for id, sess := range s.sessions {
+	for _, sess := range s.sessions {
 		if sess.Status == "completed" {
-			delete(s.sessions, id)
-			fpath := filepath.Join(s.dir, id+".jsonl")
-			os.Remove(fpath)
+			sess.Status = "archived"
 		}
 	}
 }
@@ -208,11 +206,9 @@ func (s *Store) ClearStale(maxAge time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cutoff := time.Now().Add(-maxAge)
-	for id, sess := range s.sessions {
+	for _, sess := range s.sessions {
 		if sess.Status == "active" && len(sess.Agents) == 0 && sess.StartedAt.Before(cutoff) {
-			delete(s.sessions, id)
-			fpath := filepath.Join(s.dir, id+".jsonl")
-			os.Remove(fpath)
+			sess.Status = "error"
 		}
 	}
 }
@@ -220,10 +216,26 @@ func (s *Store) ClearStale(maxAge time.Duration) {
 func (s *Store) ClearAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for id := range s.sessions {
-		delete(s.sessions, id)
-		fpath := filepath.Join(s.dir, id+".jsonl")
-		os.Remove(fpath)
+	for _, sess := range s.sessions {
+		if sess.Status == "active" || sess.Status == "completed" {
+			sess.Status = "archived"
+		}
+	}
+}
+
+func (s *Store) DeleteSession(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, id)
+	fpath := filepath.Join(s.dir, id+".jsonl")
+	os.Remove(fpath)
+}
+
+func (s *Store) InjectSession(sess *models.Session) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.sessions[sess.ID]; !exists {
+		s.sessions[sess.ID] = sess
 	}
 }
 
