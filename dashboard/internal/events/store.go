@@ -73,9 +73,6 @@ func (s *Store) loadSession(id string) error {
 }
 
 func (s *Store) Append(evt models.Event) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if evt.Timestamp.IsZero() {
 		evt.Timestamp = time.Now()
 	}
@@ -90,14 +87,17 @@ func (s *Store) Append(evt models.Event) error {
 	if err != nil {
 		return fmt.Errorf("open event file: %w", err)
 	}
-	defer f.Close()
-
 	if _, err := f.Write(append(data, '\n')); err != nil {
+		f.Close()
 		return fmt.Errorf("write event: %w", err)
 	}
+	f.Close()
 
+	s.mu.Lock()
 	s.applyEvent(evt)
 	s.notifyListeners(evt)
+	s.mu.Unlock()
+
 	return nil
 }
 
