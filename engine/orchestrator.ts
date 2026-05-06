@@ -38,12 +38,15 @@ export class Orchestrator {
   private adapters: Map<string, PlatformAdapter> = new Map();
   private defaultAdapter: string = "";
   private emitter: EventEmitter;
+  private dashboardUrl: string;
   private sessions: Map<string, SessionState> = new Map();
   private agentActivity: Map<string, AgentActivity> = new Map();
   private monitorInterval: ReturnType<typeof setInterval> | null = null;
   private messageSenders: Map<string, (msg: string) => void> = new Map();
+  private sseAbort: AbortController | null = null;
 
   constructor(dashboardUrl?: string, apiToken?: string) {
+    this.dashboardUrl = dashboardUrl ?? "http://localhost:8400";
     this.emitter = new EventEmitter(dashboardUrl, apiToken);
   }
 
@@ -114,10 +117,57 @@ export class Orchestrator {
   }
 
   sendUserMessage(sessionId: string, message: string): void {
-    const sender = this.messageSenders.get(sessionId);
-    if (sender) {
-      sender(message);
+    // Forward to the orchestrator's lead RPC session (first available sender)
+    for (const [key, sender] of this.messageSenders) {
+      if (key.startsWith(sessionId)) {
+        sender(message);
+        return;
+      }
     }
+  }
+
+  private listenForUserMessages(sessionId: string): void {
+    this.sseAbort = new AbortController();
+    const url = `${this.dashboardUrl}/api/sessions/${sessionId}/stream`;
+
+    fetch(url, { signal: this.sseAbort.signal }).then(async (res) => {
+      if (!res.ok || !res.body) return;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let currentEvent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let lineEnd: number;
+        while ((lineEnd = buffer.indexOf("\n")) !== -1) {
+          const line = buffer.slice(0, lineEnd).trim();
+          buffer = buffer.slice(lineEnd + 1);
+
+          if (line.startsWith("event:")) {
+            currentEvent = line.slice(6).trim();
+          } else if (line.startsWith("data:") && currentEvent === "message") {
+            try {
+              const evt = JSON.parse(line.slice(5));
+              if (evt.data?.from === "user" && evt.data?.content) {
+                console.log(`[orchestrator] User message: ${evt.data.content.slice(0, 80)}`);
+                this.sendUserMessage(sessionId, evt.data.content);
+              }
+            } catch { /* not JSON */ }
+          } else if (line === "") {
+            currentEvent = "";
+          }
+        }
+      }
+    }).catch(() => { /* SSE connection closed */ });
+  }
+
+  private stopListening(): void {
+    this.sseAbort?.abort();
+    this.sseAbort = null;
   }
 
   async run(opts: {
@@ -178,6 +228,7 @@ export class Orchestrator {
 
     await this.emitter.tillDone(sessionId, sessionName, session.tillDone);
     this.startMonitor(sessionId);
+    this.listenForUserMessages(sessionId);
 
     try {
       await this.runChain(session, chain, taskBody, opts.adapter);
@@ -189,6 +240,7 @@ export class Orchestrator {
     }
 
     this.stopMonitor();
+    this.stopListening();
     this.messageSenders.delete(sessionId);
     await this.emitter.sessionEnd(sessionId);
     console.log(`\nSession ${sessionId} ${session.status}. Cost: $${session.totalCost.toFixed(3)}`);
@@ -288,10 +340,13 @@ export class Orchestrator {
 
     await this.emitter.costUpdate(session.id, leadId, leadResult.costUsd, leadResult.tokensUsed, 0);
 
-    // Synthesize team result for dashboard
+    // Post lead's output as their message (they have conversational-response skill)
+    if (leadResult.output && leadResult.output.length > 0) {
+      await this.emitter.message(session.id, leadId, teamConfig.lead.name, "orchestrator", leadResult.output);
+    }
     const statusMsg = leadResult.grade === "FAILED"
       ? `${teamConfig["team-name"]} could not complete the task.`
-      : `${teamConfig["team-name"]} complete. Grade: ${leadResult.grade ?? "pending"}.`;
+      : `${teamConfig["team-name"]} complete. Grade: ${leadResult.grade ?? "pending"}. Cost: $${leadResult.costUsd.toFixed(3)}.`;
     await this.emitter.message(session.id, "orch-1", "Orchestrator", "user", statusMsg);
 
     return leadResult;
