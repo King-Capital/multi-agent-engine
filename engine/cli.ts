@@ -4,6 +4,7 @@ import { EchoAdapter } from "./adapters/echo";
 import { ClaudeCodeAdapter } from "./adapters/claude-code";
 import { PiAdapter } from "./adapters/pi";
 import { CodexAdapter } from "./adapters/codex";
+import { A2AAdapter } from "./adapters/a2a";
 
 const args = process.argv.slice(2);
 
@@ -17,10 +18,13 @@ Usage:
   agent task <task-description>         Run plan-build-review on a task
   agent new-agent <name> <role> <team>  Scaffold a new agent
   agent adapters                        List available adapters
+  agent discover <url>                  Discover a remote A2A agent
 
 Options:
-  --adapter <name>     Use specific adapter (echo, claude-code, pi, codex)
+  --adapter <name>     Use specific adapter (echo, claude-code, pi, codex, a2a)
   --dashboard <url>    Dashboard URL (default: http://localhost:8400)
+  --a2a-url <url>      Remote A2A agent URL (sets default A2A endpoint)
+  --a2a-token <token>  Bearer token for A2A agent auth
   --dry-run            Use echo adapter for testing
 
 Examples:
@@ -29,6 +33,8 @@ Examples:
   agent run parallel-build "Implement caching layer"
   agent chain build-verify "Fix the login bug"
   agent task "Add rate limiting to API endpoints"
+  agent task "review auth" --adapter a2a --a2a-url http://10.71.20.71:41271
+  agent discover http://10.71.20.71:41271
   agent new-agent billing-specialist worker Engineering
   `);
   process.exit(0);
@@ -40,13 +46,27 @@ const adapterName = getFlag(args, "--adapter");
 const workingDir = getFlag(args, "--cwd") ?? process.cwd();
 const dryRun = args.includes("--dry-run");
 
+// A2A configuration
+const a2aUrl = getFlag(args, "--a2a-url") ?? process.env.MAE_A2A_URL;
+const a2aToken = getFlag(args, "--a2a-token") ?? process.env.MAE_A2A_TOKEN;
+
 const orch = new Orchestrator(dashboardUrl);
+
+// Set up A2A adapter with endpoint if configured
+const a2aAdapter = new A2AAdapter();
+if (a2aUrl) {
+  a2aAdapter.setDefaultEndpoint({
+    url: a2aUrl,
+    token: a2aToken,
+  });
+}
 
 const adapters = [
   new EchoAdapter(),
   new ClaudeCodeAdapter(),
   new PiAdapter(),
   new CodexAdapter(),
+  a2aAdapter,
 ];
 
 for (const adapter of adapters) {
@@ -59,7 +79,7 @@ if (dryRun) {
   orch.setDefaultAdapter(adapterName);
 } else {
   for (const adapter of adapters) {
-    if (adapter.name !== "echo" && await adapter.isAvailable()) {
+    if (adapter.name !== "echo" && adapter.name !== "a2a" && await adapter.isAvailable()) {
       orch.setDefaultAdapter(adapter.name);
       console.log(`[cli] Using adapter: ${adapter.name}`);
       break;
@@ -118,6 +138,33 @@ switch (command) {
     break;
   }
 
+  case "discover": {
+    const url = args[1];
+    if (!url) {
+      console.error("Usage: agent discover <url>");
+      process.exit(1);
+    }
+    const card = await a2aAdapter.discover(url, a2aToken);
+    if (card) {
+      console.log(`\nDiscovered A2A agent:`);
+      console.log(`  Name: ${card.name}`);
+      console.log(`  URL: ${card.url}`);
+      console.log(`  Version: ${card.version ?? "unknown"}`);
+      console.log(`  Protocol: ${card.protocolVersion ?? "unknown"}`);
+      if (card.skills?.length) {
+        console.log(`  Skills:`);
+        for (const skill of card.skills) {
+          console.log(`    - ${skill.name}: ${skill.description ?? ""}`);
+        }
+      }
+      console.log(`  Streaming: ${card.capabilities?.streaming !== false ? "yes" : "no"}`);
+    } else {
+      console.error(`Could not discover agent at ${url}`);
+      process.exit(1);
+    }
+    break;
+  }
+
   case "new-agent": {
     await scaffoldAgent(args.slice(1));
     break;
@@ -127,7 +174,7 @@ switch (command) {
     console.log("\nAvailable adapters:");
     for (const adapter of adapters) {
       const available = await adapter.isAvailable();
-      console.log(`  ${available ? "✓" : "✗"} ${adapter.name}${available ? "" : " (not installed)"}`);
+      console.log(`  ${available ? "✓" : "✗"} ${adapter.name}${available ? "" : " (not installed/configured)"}`);
     }
     break;
   }
