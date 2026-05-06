@@ -23,7 +23,7 @@ jobs:
       - name: Dispatch to king-capital
         uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bcbee4d9ff4d7c0 # v3
         with:
-          token: ${{ secrets.WORKSPACE_PAT }}
+          token: ${{ secrets.GH_PAT }}
           repository: King-Capital/king-capital
           event-type: mae-update
           client-payload: '{"sha": "${{ github.sha }}", "version": "${{ steps.version.outputs.version }}", "ref": "${{ github.ref }}"}'
