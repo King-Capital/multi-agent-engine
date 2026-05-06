@@ -1,5 +1,6 @@
 import { $ } from "bun";
-import { mkdirSync } from "fs";
+import { mkdirSync, existsSync } from "fs";
+import { join } from "path";
 import type { PlatformAdapter, DelegateOptions, DelegateResult, StreamEvent } from "../types";
 
 export class PiAdapter implements PlatformAdapter {
@@ -34,7 +35,26 @@ export class PiAdapter implements PlatformAdapter {
       args.push("--tools", toolsFlag);
     }
 
-    console.log(`[pi] Spawning ${opts.persona.name} (${this.mapModel(opts.model)}) in ${opts.workingDir}`);
+    const baseDir = process.cwd();
+    for (const skill of opts.persona.skills) {
+      const skillPath = typeof skill === "string" ? skill : skill.path;
+      const filename = skillPath.split("/").pop()!;
+      const piSkillPath = join(baseDir, ".pi", "skills", filename);
+      const agentSkillPath = join(baseDir, skillPath);
+      const resolved = existsSync(piSkillPath) ? piSkillPath : existsSync(agentSkillPath) ? agentSkillPath : null;
+      if (resolved) {
+        args.push("--skill", resolved);
+      }
+    }
+
+    if (opts.persona.expertise) {
+      const expertisePath = join(baseDir, opts.persona.expertise);
+      if (existsSync(expertisePath)) {
+        args.push("--append-system-prompt", expertisePath);
+      }
+    }
+
+    console.log(`[pi] Spawning ${opts.persona.name} (${this.mapModel(opts.model)}) [${opts.persona.skills.length} skills] in ${opts.workingDir}`);
 
     const timeout = opts.timeoutMs ?? 300_000;
 
