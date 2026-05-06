@@ -16,6 +16,15 @@ import (
 	"mae.local/dashboard/templates"
 )
 
+// sanitizeSlug strips path traversal components from agent slugs.
+func sanitizeSlug(slug string) string {
+	safe := filepath.Base(slug)
+	if safe == "." || safe == "" || strings.ContainsAny(safe, `/\`) {
+		return "invalid"
+	}
+	return safe
+}
+
 func handleAgentsList(w http.ResponseWriter, r *http.Request) {
 	agents := loadAllAgents()
 	templates.AgentsPage(agents, nil).Render(r.Context(), w)
@@ -23,6 +32,10 @@ func handleAgentsList(w http.ResponseWriter, r *http.Request) {
 
 func handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")
+	if sanitizeSlug(slug) != slug {
+		http.Error(w, "invalid slug", http.StatusBadRequest)
+		return
+	}
 	agents := loadAllAgents()
 	var selected *templates.AgentInfo
 	for i := range agents {
@@ -192,6 +205,10 @@ func parseNestedYAMLList(fm, key string) []string {
 
 func handleGetAgentPrompt(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")
+	if sanitizeSlug(slug) != slug {
+		http.Error(w, "invalid slug", http.StatusBadRequest)
+		return
+	}
 	path := filepath.Join("..", "agents", "personas", slug+".md")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -211,6 +228,10 @@ func handleGetAgentPrompt(w http.ResponseWriter, r *http.Request) {
 
 func handleSaveAgent(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")
+	if sanitizeSlug(slug) != slug {
+		http.Error(w, "invalid slug", http.StatusBadRequest)
+		return
+	}
 	path := filepath.Join("..", "agents", "personas", slug+".md")
 
 	data, err := os.ReadFile(path)
@@ -267,6 +288,10 @@ func handleSaveAgent(w http.ResponseWriter, r *http.Request) {
 
 func handleAIAssist(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")
+	if sanitizeSlug(slug) != slug {
+		http.Error(w, "invalid slug", http.StatusBadRequest)
+		return
+	}
 
 	var req struct {
 		Prompt string   `json:"prompt"`
