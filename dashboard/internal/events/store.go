@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rodaddy/multi-agent-dashboard/internal/models"
+	"github.com/King-Capital/multi-agent-engine/dashboard/internal/models"
 )
 
 type Store struct {

@@ -1,4 +1,4 @@
-module github.com/rodaddy/multi-agent-dashboard
+module github.com/King-Capital/multi-agent-engine/dashboard
 
 go 1.26.1
 
