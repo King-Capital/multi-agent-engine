@@ -97,6 +97,23 @@ build:
 check:
     cd engine && bunx tsc --noEmit
 
+# --- CC Native Agent Teams ---
+
+# Launch Opus orchestrator with CC agent teams enabled
+cldyo *args:
+    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --dangerously-skip-permissions --model opus {{args}}
+
+# Launch Sonnet worker with CC agent teams enabled
+cldys *args:
+    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --dangerously-skip-permissions --model sonnet {{args}}
+
+# --- Library ---
+
+# List all registered skills, agents, and prompts
+library:
+    @echo "=== Skills ===" && grep '  - name:' library.yaml | head -20
+    @echo "=== Agents ===" && grep '  - name:' library.yaml | tail -20
+
 # --- Info ---
 
 # Show the full team configuration

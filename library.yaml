@@ -1,0 +1,111 @@
+# MAE Skill/Agent/Prompt Library Registry
+# Pattern from IndyDevDan's Library Meta-Skill
+# https://www.youtube.com/watch?v=_vpNQ6IwP9w
+#
+# Single source of truth for all reusable assets.
+# Each entry is a reference (not a copy) to a source file.
+# Supports: GitHub URLs, local paths, requires for dependencies.
+#
+# Operations: add, install, list, push, remove, search, sync, use
+# See agents/skills/library/ for cookbook commands.
+
+default_dirs:
+  skills:
+    project: .claude/skills/
+    global: ~/.claude/skills/
+  agents:
+    project: agents/personas/
+    global: ~/.claude/agents/
+  prompts:
+    project: prompts/
+    global: ~/.claude/commands/
+
+library:
+  skills:
+    # --- Core MAE skills ---
+    - name: conversational-response
+      description: "Concise orchestrator voice for dashboard output"
+      source: agents/skills/conversational-response.md
+      scope: project
+
+    - name: mental-model
+      description: "Expertise file read/update for persistent agent memory"
+      source: agents/skills/mental-model.md
+      scope: project
+
+    - name: high-autonomy
+      description: "Zero-question autonomous execution mode"
+      source: agents/skills/high-autonomy.md
+      scope: project
+
+    # --- Platform skills (from other repos) ---
+    - name: drive
+      description: "Terminal automation via tmux (session, run, send, logs, poll, fanout)"
+      source: local
+      path: ~/Development/mac-mini-agent/.claude/skills/drive/SKILL.md
+      platform: mac-mini
+      status: planned
+
+    - name: steer
+      description: "GUI automation via macOS Accessibility (see, click, type, OCR)"
+      source: local
+      path: ~/Development/mac-mini-agent/.claude/skills/steer/SKILL.md
+      platform: mac-mini
+      status: planned
+
+  agents:
+    - name: orchestrator
+      description: "Session orchestrator — plans, delegates, synthesizes"
+      source: agents/personas/orchestrator.md
+      tier: high
+
+    - name: scout
+      description: "Fast codebase exploration and triage"
+      source: agents/personas/scout.md
+      tier: fast
+
+    - name: builder
+      description: "Implementation worker — writes code, runs tests"
+      source: agents/personas/builder.md
+      tier: medium
+
+    - name: planner
+      description: "Planning lead — breaks tasks into worker assignments"
+      source: agents/personas/planner.md
+      tier: high
+
+    - name: reviewer
+      description: "Code review and quality verification"
+      source: agents/personas/reviewer.md
+      tier: high
+
+    - name: validator
+      description: "Validation lead — orchestrates review workflows"
+      source: agents/personas/validator.md
+      tier: high
+
+  prompts:
+    - name: plan-build-review
+      description: "Full lifecycle: plan → build → review"
+      source: prompts/plan-build-review.md
+      chain: plan-build-review
+
+    - name: review
+      description: "Code review on git diff"
+      source: prompts/review.md
+      chain: review-only
+
+    - name: scout
+      description: "Explore and map a codebase area"
+      source: prompts/scout.md
+      chain: scout-then-plan
+
+    - name: parallel-build
+      description: "Multi-model parallel build, pick best output"
+      source: prompts/parallel-build.md
+      chain: parallel-build
+
+    - name: swarm-review
+      description: "Red team + blue team adversarial review"
+      source: prompts/swarm-review.md
+      chain: swarm

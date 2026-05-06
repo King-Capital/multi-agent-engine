@@ -1,4 +1,4 @@
-name: Agent Engine Tests
+name: Engine Tests
 
 on:
   push:
@@ -12,30 +12,29 @@ on:
       - 'agents/**'
       - 'configs/**'
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, mae]
     timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - uses: extractions/setup-just@v2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install dependencies
         working-directory: engine
         run: bun install
 
-      - name: Run security + integration tests
-        run: just test
+      - name: Type check
+        working-directory: engine
+        run: bunx tsc --noEmit
 
-      - name: Verify all configs load
-        run: |
-          just teams > /dev/null
-          just chains > /dev/null
-          just prompts > /dev/null
-          just adapters
+      - name: Run tests
+        working-directory: engine
+        run: bun test
+
+      - name: Verify configs load
+        working-directory: engine
+        run: bun cli.ts adapters

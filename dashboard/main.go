@@ -19,9 +19,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/rodaddy/multi-agent-dashboard/internal/events"
-	"github.com/rodaddy/multi-agent-dashboard/internal/models"
-	"github.com/rodaddy/multi-agent-dashboard/templates"
+	"mae.local/dashboard/internal/events"
+	"mae.local/dashboard/internal/models"
+	"mae.local/dashboard/templates"
 )
 
 var store *events.Store

@@ -16,7 +16,7 @@ curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o
 apt-get update && apt-get upgrade -y
 apt-get install -y \
   curl ca-certificates git build-essential \
-  postgresql-18 postgresql-client-18 \
+  postgresql-17 postgresql-client-17 \
   sudo
 
 # 3. Install Bun (system-wide)

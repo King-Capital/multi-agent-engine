@@ -10,7 +10,7 @@ Group=mae
 WorkingDirectory=/opt/mae/dashboard
 ExecStart=/opt/mae/dashboard/mae-dashboard
 Environment=DATABASE_URL=postgres://mae:mae@localhost:5432/mae?sslmode=disable
-Environment=PORT=3000
+Environment=DASHBOARD_PORT=8400
 Restart=always
 RestartSec=5
 StandardOutput=journal

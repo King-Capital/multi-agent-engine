@@ -1,0 +1,28 @@
+# Board Sync -- auto-add + status progression via org reusable workflow.
+# All logic lives in King-Capital/king-capital -- this caller never needs updating.
+
+name: Board Sync
+
+on:
+  issues:
+    types: [opened, closed, reopened]
+  pull_request:
+    types: [opened, closed, reopened, review_requested]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    uses: King-Capital/king-capital/.github/workflows/board-automation.yml@main
+    with:
+      event_name: ${{ github.event_name }}
+      event_action: ${{ github.event.action }}
+      item_node_id: ${{ github.event.issue.node_id || github.event.pull_request.node_id }}
+      item_url: ${{ github.event.issue.html_url || github.event.pull_request.html_url }}
+      review_state: ${{ github.event.review.state || '' }}
+      pr_merged: ${{ github.event.pull_request.merged || '' }}
+    secrets:
+      GH_PAT: ${{ secrets.GH_PAT }}

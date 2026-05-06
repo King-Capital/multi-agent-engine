@@ -1,4 +1,4 @@
-name: Deploy MAE Dashboard
+name: Deploy MAE
 
 on:
   push:
@@ -9,41 +9,22 @@ on:
       - 'agents/**'
       - 'configs/**'
       - 'deploy/**'
+      - 'library.yaml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mae-deploy
+  cancel-in-progress: false
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, mae]
     timeout-minutes: 5
 
-    services:
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_USER: mae
-          POSTGRES_PASSWORD: mae
-          POSTGRES_DB: mae
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-          cache-dependency-path: dashboard/go.sum
-
-      - name: Run migrations
-        run: PGPASSWORD=mae psql -h localhost -U mae -d mae -f dashboard/migrations/001_initial.sql
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install engine dependencies
         working-directory: engine
@@ -57,7 +38,11 @@ jobs:
         working-directory: engine
         run: bun test
 
-      - name: Dashboard build
+      - name: Generate templ
+        working-directory: dashboard
+        run: templ generate ./templates/
+
+      - name: Dashboard build check
         working-directory: dashboard
         run: go build -o mae-dashboard .
 
@@ -67,39 +52,41 @@ jobs:
 
   deploy:
     needs: test
-    runs-on: self-hosted
+    runs-on: [self-hosted, mae]
     if: github.ref == 'refs/heads/main'
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Pull latest
+      - name: Sync to /opt/mae
         run: |
-          cd /opt/mae
-          git fetch origin main
-          git reset --hard origin/main
+          rsync -a --delete \
+            --exclude='node_modules' \
+            --exclude='.git' \
+            --exclude='dashboard/mae-dashboard' \
+            --exclude='dashboard/data' \
+            ./ /opt/mae/
 
       - name: Install engine dependencies
-        run: |
-          cd /opt/mae/engine
-          bun install --frozen-lockfile
+        run: cd /opt/mae/engine && bun install
 
       - name: Run migrations
-        run: psql -U mae -d mae -f /opt/mae/dashboard/migrations/001_initial.sql 2>/dev/null || true
+        run: sudo -u postgres psql -d mae -f /opt/mae/dashboard/migrations/001_initial.sql 2>/dev/null || true
 
       - name: Build dashboard
-        run: |
-          cd /opt/mae/dashboard
-          go build -o mae-dashboard .
+        run: cd /opt/mae/dashboard && templ generate ./templates/ && go build -o mae-dashboard .
+
+      - name: Set ownership
+        run: chown -R mae:mae /opt/mae
 
       - name: Restart dashboard
         run: |
-          sudo systemctl restart mae-dashboard
+          systemctl restart mae-dashboard
           sleep 2
           systemctl is-active mae-dashboard
 
       - name: Health check
         run: |
-          curl -sf http://localhost:3000/api/users > /dev/null
+          curl -sf http://localhost:8400/api/users > /dev/null
           echo "Dashboard healthy"

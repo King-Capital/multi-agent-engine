@@ -1,0 +1,148 @@
+# Dashboard Observability Event Types
+# Modeled on IndyDevDan's Multi-Agent Observability dashboard
+# https://www.youtube.com/watch?v=RpUTF_U4kiw
+#
+# These event types should be emitted by the engine and displayed
+# in the dashboard's real-time event stream.
+
+eventTypes:
+  # Session lifecycle
+  - type: SessionStart
+    icon: "▶"
+    color: green
+    description: "New orchestration session started"
+
+  - type: SessionEnd
+    icon: "■"
+    color: gray
+    description: "Session completed or failed"
+
+  # Agent lifecycle
+  - type: AgentSpawn
+    icon: "+"
+    color: blue
+    description: "New agent spawned (lead or worker)"
+
+  - type: AgentComplete
+    icon: "✓"
+    color: green
+    description: "Agent finished its task"
+
+  - type: AgentFailed
+    icon: "✗"
+    color: red
+    description: "Agent failed or timed out"
+
+  - type: AgentShutdown
+    icon: "⏏"
+    color: gray
+    description: "Agent process terminated"
+
+  # Task tracking
+  - type: TaskCreate
+    icon: "📋"
+    color: blue
+    description: "New task created and assigned"
+
+  - type: TaskUpdate
+    icon: "↻"
+    color: yellow
+    description: "Task status changed"
+
+  # Communication
+  - type: SendMessage
+    icon: "✉"
+    color: cyan
+    description: "Agent sent message to lead mailbox"
+
+  - type: UserPromptSubmit
+    icon: "→"
+    color: white
+    description: "User or lead submitted prompt to agent"
+
+  # Tool usage
+  - type: PreToolUse
+    icon: "⚙"
+    color: yellow
+    description: "Agent about to call a tool"
+
+  - type: PostToolUse
+    icon: "✓"
+    color: green
+    description: "Tool call completed"
+
+  - type: ToolError
+    icon: "✗"
+    color: red
+    description: "Tool call failed"
+
+  # Team management (CC native)
+  - type: TeamCreate
+    icon: "👥"
+    color: blue
+    description: "New agent team created"
+
+  - type: TeamDelete
+    icon: "🗑"
+    color: gray
+    description: "Team dissolved, agents cleaned up"
+
+  # Self-healing
+  - type: SelfHealAttempt
+    icon: "🔧"
+    color: orange
+    description: "Agent retrying after failure"
+
+  - type: SelfHealUpgrade
+    icon: "⬆"
+    color: magenta
+    description: "Agent upgrading model tier after repeated failure"
+
+  - type: SelfHealEscalate
+    icon: "🚨"
+    color: red
+    description: "All retry attempts exhausted, escalating"
+
+  # Cost tracking
+  - type: CostUpdate
+    icon: "$"
+    color: yellow
+    description: "Agent cost updated"
+
+  - type: BudgetWarning
+    icon: "⚠"
+    color: orange
+    description: "Approaching budget limit"
+
+# Dashboard display config
+dashboard:
+  defaultTimeWindow: "5m"
+  timeWindows: ["1m", "3m", "5m", "10m", "30m", "all"]
+
+  # Live activity pulse counters
+  counters:
+    - label: "Agents"
+      filter: "AgentSpawn"
+      mode: "active"  # count spawned minus completed
+    - label: "Events"
+      filter: "*"
+      mode: "total"
+    - label: "Tools"
+      filter: "PostToolUse"
+      mode: "total"
+    - label: "Avg Gap"
+      mode: "computed"  # average time between events
+
+  # Agent session filters (colored pills)
+  filters:
+    groupBy: "session_id"
+    showModel: true    # show opus-4-6, haiku-4-5 tags
+    showCost: true     # show running cost per agent
+
+  # Search
+  search:
+    supportsRegex: true
+    examples:
+      - "tool.*error"
+      - "^GET"
+      - "AgentSpawn|AgentComplete"

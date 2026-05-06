@@ -35,7 +35,7 @@ Examples:
 }
 
 const command = args[0];
-const dashboardUrl = getFlag(args, "--dashboard") ?? "http://localhost:8400";
+const dashboardUrl = getFlag(args, "--dashboard") ?? process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400";
 const adapterName = getFlag(args, "--adapter");
 const workingDir = getFlag(args, "--cwd") ?? process.cwd();
 const dryRun = args.includes("--dry-run");

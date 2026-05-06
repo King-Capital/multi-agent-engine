@@ -1,0 +1,84 @@
+# Steer Architecture — Mac Mini Agent Control
+# Pattern from IndyDevDan's OpenClaw Alternatives video
+# https://www.youtube.com/watch?v=LOazLNQnB80
+#
+# 4 CLI apps replace OpenClaw for Mac Mini agent management.
+# Skippy runs on Mac Mini M4 (10.71.1.21) — this config
+# defines the target architecture for local agent control.
+#
+# STATUS: Planning — not yet implemented
+
+# Target host
+host:
+  name: mac-mini-m4
+  ip: 10.71.1.21
+  agent: skippy
+  platform: openclaw  # current, migrating away
+
+# CLI apps (each is a standalone Python/TS tool)
+apps:
+  listen:
+    description: "Job server — receives tasks, persists as YAML, dispatches to workers"
+    tech: "FastAPI + YAML persistence"
+    commands: [start, get, list, stop, clear]
+    port: 8500
+
+  direct:
+    description: "Client CLI — sends prompts to Listen server"
+    tech: "HTTP client"
+    commands: [send, jobs, status]
+
+  drive:
+    description: "Terminal automation via tmux"
+    tech: "tmux CLI wrapper"
+    commands:
+      - session  # create/attach tmux session
+      - run      # execute command in pane
+      - send     # send keystrokes to pane
+      - logs     # capture pane output
+      - poll     # watch for output changes
+      - fanout   # send command to multiple panes
+
+  steer:
+    description: "GUI automation via macOS Accessibility"
+    tech: "Swift + macOS Accessibility API + OCR"
+    commands:
+      - see      # screenshot + OCR current state
+      - click    # click at coordinates or element
+      - type     # type text into focused element
+      - ocr      # extract text from screen region
+      - scroll   # scroll in direction
+      - drag     # drag from point A to point B
+
+# Execution pattern
+observeActVerify:
+  description: "Agent loop for GUI interaction"
+  steps:
+    - "steer see (observe current state)"
+    - "one action at a time (click, type, etc.)"
+    - "read output (capture result)"
+    - "steer see (verify action worked)"
+    - "recover from failures"
+    - "clean up"
+
+# Task execution rules
+rules:
+  timeLimit: "5m"
+  onTimeout: "summarize progress and deliver partial results"
+  proofOfWork:
+    - "screenshot of final state"
+    - "terminal log capture"
+    - "git diff of changes"
+  delivery: "AirDrop to engineer or post to dashboard"
+
+# Job format (YAML persistence)
+jobSchema:
+  id: "uuid"
+  status: "pending | running | completed | failed | timeout"
+  prompt: "string"
+  agent: "skippy | bilby | custom"
+  created_at: "ISO 8601"
+  started_at: "ISO 8601"
+  completed_at: "ISO 8601"
+  result: "string (output or error)"
+  proof: "list of file paths (screenshots, logs)"

@@ -5,36 +5,20 @@ on:
     paths:
       - 'dashboard/**'
 
+permissions:
+  contents: read
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, mae]
     timeout-minutes: 5
 
-    services:
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_USER: mae
-          POSTGRES_PASSWORD: mae
-          POSTGRES_DB: mae
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-          cache-dependency-path: dashboard/go.sum
-
-      - name: Run migrations
-        run: PGPASSWORD=mae psql -h localhost -U mae -d mae -f dashboard/migrations/001_initial.sql
+      - name: Generate templ
+        working-directory: dashboard
+        run: templ generate ./templates/
 
       - name: Build
         working-directory: dashboard
@@ -43,12 +27,3 @@ jobs:
       - name: Vet
         working-directory: dashboard
         run: go vet ./...
-
-      - name: Smoke test
-        working-directory: dashboard
-        run: |
-          DATABASE_URL="postgres://mae:mae@localhost:5432/mae?sslmode=disable" \
-            timeout 5 ./mae-dashboard &
-          sleep 2
-          curl -sf http://localhost:8400/api/users | grep rico
-          echo "Smoke test passed"

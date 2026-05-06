@@ -1,0 +1,21 @@
+name: Restart Dashboard
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  restart:
+    runs-on: [self-hosted, mae]
+    timeout-minutes: 5
+
+    steps:
+      - name: Restart mae-dashboard service
+        run: systemctl restart mae-dashboard
+
+      - name: Health check
+        run: |
+          sleep 3
+          curl -sf http://localhost:8400/api/users > /dev/null
+          echo "Dashboard restarted and healthy"

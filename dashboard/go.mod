@@ -1,4 +1,4 @@
-module github.com/rodaddy/multi-agent-dashboard
+module mae.local/dashboard
 
 go 1.26.1
 

@@ -10,7 +10,7 @@ import type {
   TeamConfig,
 } from "./types";
 
-const BASE_DIR = join(import.meta.dir, "..");
+const BASE_DIR = process.env.MAE_ROOT ?? join(import.meta.dir, "..");
 
 const cache = new Map<string, { data: unknown; mtime: number }>();
 

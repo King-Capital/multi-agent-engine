@@ -1,0 +1,48 @@
+name: Security Scan
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+env:
+  GOPATH: /tmp/go
+  GOMODCACHE: /tmp/go/pkg/mod
+
+jobs:
+  codeql:
+    name: CodeQL
+    runs-on: [self-hosted, mae]
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup Go env
+        run: |
+          mkdir -p $GOPATH/pkg/mod
+          cd dashboard && go mod download
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4
+        with:
+          languages: javascript-typescript, go
+          queries: security-extended
+
+      - name: Build Go
+        working-directory: dashboard
+        run: templ generate ./templates/ && go build ./...
+
+      - name: Run CodeQL analysis
+        uses: github/codeql-action/analyze@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4
+        with:
+          category: "/language:javascript-typescript,go"
