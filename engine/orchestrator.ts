@@ -129,40 +129,55 @@ export class Orchestrator {
   private listenForUserMessages(sessionId: string): void {
     this.sseAbort = new AbortController();
     const url = `${this.dashboardUrl}/api/sessions/${sessionId}/stream`;
+    const RETRY_DELAY_MS = 3_000;
 
-    fetch(url, { signal: this.sseAbort.signal }).then(async (res) => {
-      if (!res.ok || !res.body) return;
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let currentEvent = "";
+    const connect = () => {
+      if (!this.sseAbort || this.sseAbort.signal.aborted) return;
+      fetch(url, { signal: this.sseAbort.signal }).then(async (res) => {
+        if (!res.ok || !res.body) return;
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let currentEvent = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
 
-        let lineEnd: number;
-        while ((lineEnd = buffer.indexOf("\n")) !== -1) {
-          const line = buffer.slice(0, lineEnd).trim();
-          buffer = buffer.slice(lineEnd + 1);
+          let lineEnd: number;
+          while ((lineEnd = buffer.indexOf("\n")) !== -1) {
+            const line = buffer.slice(0, lineEnd).trim();
+            buffer = buffer.slice(lineEnd + 1);
 
-          if (line.startsWith("event:")) {
-            currentEvent = line.slice(6).trim();
-          } else if (line.startsWith("data:") && currentEvent === "message") {
-            try {
-              const evt = JSON.parse(line.slice(5));
-              if (evt.data?.from === "user" && evt.data?.content) {
-                console.log(`[orchestrator] User message: ${evt.data.content.slice(0, 80)}`);
-                this.sendUserMessage(sessionId, evt.data.content);
-              }
-            } catch { /* not JSON */ }
-          } else if (line === "") {
-            currentEvent = "";
+            if (line.startsWith("event:")) {
+              currentEvent = line.slice(6).trim();
+            } else if (line.startsWith("data:") && currentEvent === "message") {
+              try {
+                const evt = JSON.parse(line.slice(5));
+                if (evt.data?.from === "user" && evt.data?.content) {
+                  console.log(`[orchestrator] User message: ${evt.data.content.slice(0, 80)}`);
+                  this.sendUserMessage(sessionId, evt.data.content);
+                }
+              } catch { /* not JSON */ }
+            } else if (line === "") {
+              currentEvent = "";
+            }
           }
         }
-      }
-    }).catch(() => { /* SSE connection closed */ });
+
+        if (!this.sseAbort?.signal.aborted) {
+          console.log(`[orchestrator] SSE stream ended, reconnecting in ${RETRY_DELAY_MS}ms`);
+          setTimeout(connect, RETRY_DELAY_MS);
+        }
+      }).catch((err) => {
+        if (this.sseAbort?.signal.aborted) return;
+        console.warn(`[orchestrator] SSE connection failed, retrying in ${RETRY_DELAY_MS}ms:`, err.message ?? err);
+        setTimeout(connect, RETRY_DELAY_MS);
+      });
+    };
+
+    connect();
   }
 
   private stopListening(): void {
@@ -241,7 +256,10 @@ export class Orchestrator {
 
     this.stopMonitor();
     this.stopListening();
-    this.messageSenders.delete(sessionId);
+    const prefix = `${sessionId}:`;
+    for (const key of this.messageSenders.keys()) {
+      if (key.startsWith(prefix)) this.messageSenders.delete(key);
+    }
     await this.emitter.sessionEnd(sessionId);
     console.log(`\nSession ${sessionId} ${session.status}. Cost: $${session.totalCost.toFixed(3)}`);
     return session;
