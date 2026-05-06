@@ -38,6 +38,10 @@ jobs:
         working-directory: engine
         run: bun test
 
+      - name: Generate templ
+        working-directory: dashboard
+        run: templ generate ./templates/
+
       - name: Dashboard build check
         working-directory: dashboard
         run: go build -o mae-dashboard .
@@ -71,7 +75,7 @@ jobs:
         run: sudo -u postgres psql -d mae -f /opt/mae/dashboard/migrations/001_initial.sql 2>/dev/null || true
 
       - name: Build dashboard
-        run: cd /opt/mae/dashboard && go build -o mae-dashboard .
+        run: cd /opt/mae/dashboard && templ generate ./templates/ && go build -o mae-dashboard .
 
       - name: Set ownership
         run: chown -R mae:mae /opt/mae
