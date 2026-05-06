@@ -25,10 +25,10 @@ const THINKING_ESCALATION: Record<ThinkingLevel, ThinkingLevel> = {
 };
 
 const TIMEOUT_FOR_ROLE: Record<string, number> = {
-  scout: 60_000,
-  worker: 300_000,
-  lead: 600_000,
-  orchestrator: 600_000,
+  scout: 300_000,
+  worker: 1_800_000,
+  lead: 1_800_000,
+  orchestrator: 0,
 };
 
 function isFailed(result: DelegateResult): boolean {
