@@ -387,6 +387,65 @@ func LoadTokenMap(ctx context.Context) (map[string]*DBUser, error) {
 	return m, rows.Err()
 }
 
+// --- Agent Traces ---
+
+type DBTrace struct {
+	ID        int64           `json:"id"`
+	SessionID string          `json:"session_id"`
+	AgentID   string          `json:"agent_id"`
+	Direction string          `json:"direction"`
+	Content   string          `json:"content"`
+	Metadata  json.RawMessage `json:"metadata,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
+}
+
+func RecordTrace(ctx context.Context, t *DBTrace) error {
+	return db.QueryRowContext(ctx,
+		`INSERT INTO agent_traces (session_id, agent_id, direction, content, metadata)
+		 VALUES ($1, $2, $3, $4, $5)
+		 RETURNING id, created_at`,
+		t.SessionID, t.AgentID, t.Direction, t.Content, t.Metadata,
+	).Scan(&t.ID, &t.CreatedAt)
+}
+
+func SearchTraces(ctx context.Context, query string, sessionID string) ([]DBTrace, error) {
+	var rows *sql.Rows
+	var err error
+	if sessionID != "" {
+		rows, err = db.QueryContext(ctx,
+			`SELECT id, session_id, agent_id, direction,
+			        ts_headline('english', content, q, 'MaxFragments=3,MaxWords=50') as content,
+			        metadata, created_at
+			 FROM agent_traces, plainto_tsquery('english', $1) q
+			 WHERE content_tsv @@ q AND session_id = $2
+			 ORDER BY ts_rank(content_tsv, q) DESC LIMIT 50`,
+			query, sessionID)
+	} else {
+		rows, err = db.QueryContext(ctx,
+			`SELECT id, session_id, agent_id, direction,
+			        ts_headline('english', content, q, 'MaxFragments=3,MaxWords=50') as content,
+			        metadata, created_at
+			 FROM agent_traces, plainto_tsquery('english', $1) q
+			 WHERE content_tsv @@ q
+			 ORDER BY ts_rank(content_tsv, q) DESC LIMIT 50`,
+			query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var traces []DBTrace
+	for rows.Next() {
+		var t DBTrace
+		if err := rows.Scan(&t.ID, &t.SessionID, &t.AgentID, &t.Direction, &t.Content, &t.Metadata, &t.CreatedAt); err != nil {
+			return nil, err
+		}
+		traces = append(traces, t)
+	}
+	return traces, rows.Err()
+}
+
 func GetEventsBySession(ctx context.Context, sessionID string) ([]DBEvent, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, session_id, agent_id, event_type, payload, created_at

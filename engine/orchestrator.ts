@@ -16,12 +16,16 @@ import {
   registerPersonaHash,
   sanitizeAgentInput,
   validateAgentOutput,
+  checkFileAccess,
+  checkBashCommand,
+  checkConfigMutation,
 } from "./security";
 import { delegateWithHealing } from "./self-healing";
 import type {
   PlatformAdapter,
   DelegateResult,
   DelegateOptions,
+  DomainConfig,
   Chain,
   ChainStep,
   TeamConfig,
@@ -242,8 +246,10 @@ export class Orchestrator {
       agentId: leadId,
       role: "lead",
       persona: teamConfig.lead.name,
-      prompt: leadPrompt.slice(0, 2000),
     });
+
+    // Full I/O trace -- input
+    await this.emitter.trace(session.id, leadId, "input", leadPrompt);
 
     await this.emitter.message(
       session.id,
@@ -301,6 +307,10 @@ export class Orchestrator {
     this.redactSensitiveOutput(leadResult, leadPersona.name);
     session.totalCost += leadResult.costUsd;
     session.totalTokens += leadResult.tokensUsed;
+
+    // Full I/O trace -- output + security audit
+    await this.emitter.trace(session.id, leadId, "output", leadResult.output, { grade: leadResult.grade, cost_usd: leadResult.costUsd });
+    this.auditOutput(session.id, leadId, leadResult.output, leadPersona.domain);
 
     await this.emitter.costUpdate(session.id, leadId, leadResult.costUsd, leadResult.tokensUsed, 0);
 
@@ -382,9 +392,12 @@ export class Orchestrator {
             step.till_done ? `\nTill done:\n${step.till_done.map((t) => `- [ ] ${t}`).join("\n")}` : "",
           ].join("\n");
 
+      // Full I/O trace -- worker input
+      await this.emitter.trace(session.id, workerId, "input", workerPrompt);
+
       const workerOpts: DelegateOptions = {
         persona: workerPersona,
-        systemPrompt: buildSystemPrompt(workerPersona),
+        systemPrompt: buildSystemPrompt(workerPersona) + this.buildDomainPrompt(workerPersona.domain),
         userPrompt: sanitizeAgentInput(workerPrompt),
         model: resolveModel(member.model),
         thinking: "medium" as const,
@@ -414,6 +427,10 @@ export class Orchestrator {
       this.redactSensitiveOutput(workerResult, member.name);
       session.totalCost += workerResult.costUsd;
       session.totalTokens += workerResult.tokensUsed;
+
+      // Full I/O trace -- worker output + security audit
+      await this.emitter.trace(session.id, workerId, "output", workerResult.output, { grade: workerResult.grade, cost_usd: workerResult.costUsd });
+      this.auditOutput(session.id, workerId, workerResult.output, workerPersona.domain);
 
       await this.emitter.costUpdate(session.id, workerId, workerResult.costUsd, workerResult.tokensUsed, 0);
 
@@ -605,15 +622,17 @@ export class Orchestrator {
       agentId: step.agent!,
       role: "worker",
       persona: agentConfig.name,
-      prompt: prompt.slice(0, 2000),
     });
+
+    // Full I/O trace -- solo agent input
+    await this.emitter.trace(session.id, step.agent!, "input", prompt);
 
     const sanitizedPrompt = sanitizeAgentInput(prompt);
 
     const isScout = step.agent?.toLowerCase() === "scout";
     const delegateOpts = {
       persona,
-      systemPrompt: buildSystemPrompt(persona),
+      systemPrompt: buildSystemPrompt(persona) + this.buildDomainPrompt(persona.domain),
       userPrompt: sanitizedPrompt,
       model: resolveModel(agentConfig.model),
       thinking: (isScout ? "low" : "medium") as "low" | "medium",
@@ -644,6 +663,10 @@ export class Orchestrator {
 
     session.totalCost += result.costUsd;
     session.totalTokens += result.tokensUsed;
+
+    // Full I/O trace -- solo agent output + security audit
+    await this.emitter.trace(session.id, step.agent!, "output", result.output, { grade: result.grade, cost_usd: result.costUsd });
+    this.auditOutput(session.id, step.agent!, result.output, persona.domain);
 
     // Update solo agent status in PG
     await this.emitter.pgUpdateAgent(step.agent!, {
@@ -841,6 +864,45 @@ export class Orchestrator {
       const config = loadModelRouting();
       return config.budgets ?? null;
     } catch { return null; }
+  }
+
+  private buildDomainPrompt(domain: DomainConfig | undefined): string {
+    if (!domain) return "";
+    const parts: string[] = ["\n## Domain Restrictions (ENFORCED)"];
+    if (domain.read?.length) parts.push(`You may READ files matching: ${domain.read.join(", ")}`);
+    if (domain.write?.length) parts.push(`You may WRITE files matching: ${domain.write.join(", ")}`);
+    parts.push("Any file operation outside these patterns will be flagged as a security violation.");
+    return parts.join("\n");
+  }
+
+  private auditOutput(sessionId: string, agentId: string, output: string, domain: DomainConfig | undefined): void {
+    const filePattern = /(?:Write|Edit|Create|Delete|Modified|Created)\s+(?:file\s+)?[`'"]?([^\s`'",:]+)/gi;
+    let match;
+    while ((match = filePattern.exec(output)) !== null) {
+      const path = match[1]!;
+      if (domain) {
+        const violations = checkFileAccess(path, "write", domain);
+        for (const v of violations) {
+          console.warn(`[security] Domain violation by ${agentId}: ${v.reason}`);
+          this.emitter.domainBlock(sessionId, agentId, path, "write", v.reason);
+        }
+      }
+      const configViolations = checkConfigMutation(path);
+      for (const v of configViolations) {
+        console.warn(`[security] Config mutation by ${agentId}: ${v.reason}`);
+        this.emitter.domainBlock(sessionId, agentId, path, "write", v.reason);
+      }
+    }
+
+    const bashPattern = /(?:bash|shell|command|exec)[`'"]?\s*[:>]\s*[`'"]?(.+?)(?:[`'"]|$)/gi;
+    while ((match = bashPattern.exec(output)) !== null) {
+      const cmd = match[1]!;
+      const violations = checkBashCommand(cmd);
+      for (const v of violations) {
+        console.warn(`[security] Bash violation by ${agentId}: ${v.reason}`);
+        this.emitter.domainBlock(sessionId, agentId, cmd, "bash", v.reason);
+      }
+    }
   }
 
   private getAdapter(name?: string): PlatformAdapter {

@@ -110,6 +110,10 @@ func main() {
 			r.Post("/{id}/agents", handleAPICreateAgent)
 		})
 		r.Patch("/pg/agents/{id}", handleAPIPatchAgent)
+
+		// Agent traces (full I/O logging)
+		r.Post("/traces", handleCreateTrace)
+		r.Get("/traces/search", handleSearchTraces)
 	})
 
 	r.Get("/htmx/sessions", handleHTMXSessions)
@@ -685,6 +689,67 @@ func handleHTMXCosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	templates.CostTracker(sess).Render(r.Context(), w)
+}
+
+// --- Agent Traces ---
+
+func handleCreateTrace(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+	var req struct {
+		SessionID string          `json:"session_id"`
+		AgentID   string          `json:"agent_id"`
+		Direction string          `json:"direction"`
+		Content   string          `json:"content"`
+		Metadata  json.RawMessage `json:"metadata,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.SessionID == "" || req.AgentID == "" || req.Direction == "" || req.Content == "" {
+		http.Error(w, "session_id, agent_id, direction, and content are required", http.StatusBadRequest)
+		return
+	}
+	if req.Direction != "input" && req.Direction != "output" {
+		http.Error(w, "direction must be 'input' or 'output'", http.StatusBadRequest)
+		return
+	}
+
+	trace := &DBTrace{
+		SessionID: req.SessionID,
+		AgentID:   req.AgentID,
+		Direction: req.Direction,
+		Content:   req.Content,
+		Metadata:  req.Metadata,
+	}
+	if err := RecordTrace(r.Context(), trace); err != nil {
+		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(trace)
+}
+
+func handleSearchTraces(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		http.Error(w, "q parameter required", http.StatusBadRequest)
+		return
+	}
+	sessionID := r.URL.Query().Get("session_id")
+	traces, err := SearchTraces(r.Context(), query, sessionID)
+	if err != nil {
+		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(traces)
 }
 
 // --- Health & Auth ---
