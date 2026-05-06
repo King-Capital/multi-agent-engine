@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -126,6 +127,7 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(corsMiddleware)
+	r.Use(rateLimitMiddleware)
 	r.Use(authMiddleware)
 	r.Use(maxBodySize)
 
@@ -205,8 +207,15 @@ func main() {
 // --- Middleware ---
 
 func corsMiddleware(next http.Handler) http.Handler {
+	allowedOrigin := os.Getenv("CORS_ALLOWED_ORIGIN")
+	if allowedOrigin == "" {
+		allowedOrigin = "http://localhost:8400"
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+		if origin == allowedOrigin || origin == "" {
+			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == "OPTIONS" {
@@ -226,12 +235,27 @@ func maxBodySize(next http.Handler) http.Handler {
 
 func authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" || r.Method == "HEAD" || r.Method == "OPTIONS" {
+		// Always allow CORS preflight
+		if r.Method == "OPTIONS" {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if len(tokenMap) == 0 {
+
+		path := r.URL.Path
+		isAPI := strings.HasPrefix(path, "/api/")
+		isPublicAPI := path == "/api/health" || strings.HasSuffix(path, "/stream")
+		isUIPage := !isAPI
+
+		// Allow unauthenticated GET/HEAD for UI pages and public API endpoints
+		if (r.Method == "GET" || r.Method == "HEAD") && (isUIPage || isPublicAPI) {
 			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Fail closed: if no tokens loaded (DB offline), reject auth-required requests
+		if len(tokenMap) == 0 {
+			w.Header().Set("Content-Type", "application/json")
+			http.Error(w, `{"error":"auth unavailable - database offline"}`, http.StatusServiceUnavailable)
 			return
 		}
 
@@ -258,6 +282,50 @@ func authMiddleware(next http.Handler) http.Handler {
 func getAuthUser(r *http.Request) *DBUser {
 	u, _ := r.Context().Value(userContextKey).(*DBUser)
 	return u
+}
+
+
+// --- Rate Limiting ---
+
+var (
+	rateMu  sync.Mutex
+	rateMap = make(map[string]*rateLimiter)
+)
+
+type rateLimiter struct {
+	tokens     float64
+	lastTime   time.Time
+	maxTokens  float64
+	refillRate float64
+}
+
+func rateLimitMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Only rate-limit mutating requests
+		if r.Method == "GET" || r.Method == "HEAD" || r.Method == "OPTIONS" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ip := strings.Split(r.RemoteAddr, ":")[0]
+		rateMu.Lock()
+		rl, ok := rateMap[ip]
+		if !ok {
+			rl = &rateLimiter{tokens: 60, lastTime: time.Now(), maxTokens: 60, refillRate: 10}
+			rateMap[ip] = rl
+		}
+		now := time.Now()
+		elapsed := now.Sub(rl.lastTime).Seconds()
+		rl.tokens = min(rl.maxTokens, rl.tokens+elapsed*rl.refillRate)
+		rl.lastTime = now
+		if rl.tokens < 1 {
+			rateMu.Unlock()
+			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+		rl.tokens--
+		rateMu.Unlock()
+		next.ServeHTTP(w, r)
+	})
 }
 
 // --- Health ---

@@ -174,6 +174,18 @@ func handleUserMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "empty message", http.StatusBadRequest)
 		return
 	}
+
+	// Sanitize: strip control characters (keep newline, carriage return, tab)
+	content = strings.Map(func(r rune) rune {
+		if r < 32 && r != '\n' && r != '\r' && r != '\t' {
+			return -1
+		}
+		return r
+	}, content)
+	// Enforce max message length
+	if len(content) > 10000 {
+		content = content[:10000]
+	}
 	evt := models.Event{
 		SessionID: sessionID,
 		AgentID:   "user",
