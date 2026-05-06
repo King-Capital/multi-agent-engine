@@ -12,13 +12,16 @@ on:
       - 'agents/**'
       - 'configs/**'
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: [self-hosted, mae]
     timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install dependencies
         working-directory: engine
@@ -33,5 +36,5 @@ jobs:
         run: bun test
 
       - name: Verify configs load
-        run: |
-          cd engine && bun cli.ts adapters
+        working-directory: engine
+        run: bun cli.ts adapters

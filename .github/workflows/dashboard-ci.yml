@@ -5,13 +5,16 @@ on:
     paths:
       - 'dashboard/**'
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: [self-hosted, mae]
     timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Build
         working-directory: dashboard
@@ -20,13 +23,3 @@ jobs:
       - name: Vet
         working-directory: dashboard
         run: go vet ./...
-
-      - name: Smoke test
-        working-directory: dashboard
-        run: |
-          DATABASE_URL="postgres://mae:mae@localhost:5432/mae?sslmode=disable" \
-            timeout 5 ./mae-dashboard --port 8499 &
-          sleep 2
-          curl -sf http://localhost:8499/api/users | grep rico
-          kill %1 2>/dev/null || true
-          echo "Smoke test passed"

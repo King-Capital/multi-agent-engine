@@ -1,0 +1,16 @@
+name: Auto Version
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    if: github.event.pull_request.merged == true
+    uses: King-Capital/king-capital/.github/workflows/auto-version.yml@main
+    secrets:
+      GH_PAT: ${{ secrets.GH_PAT }}

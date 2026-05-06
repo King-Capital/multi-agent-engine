@@ -11,13 +11,20 @@ on:
       - 'deploy/**'
       - 'library.yaml'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: mae-deploy
+  cancel-in-progress: false
+
 jobs:
   test:
     runs-on: [self-hosted, mae]
     timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install engine dependencies
         working-directory: engine
@@ -46,7 +53,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Sync to /opt/mae
         run: |
