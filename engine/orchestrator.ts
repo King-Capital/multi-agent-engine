@@ -282,10 +282,11 @@ export class Orchestrator {
         `Starting step ${i + 1}/${steps.length}: ${stepLabel}.`);
 
       let stepResult: DelegateResult | undefined;
+      let parallelResults: DelegateResult[] | undefined;
 
       if (step.parallel) {
-        const results = await this.runParallelStep(session, step, task, previousOutput, adapterName);
-        previousOutput = results.map((r) => `[${r.agentName}]: ${r.output}`).join("\n\n");
+        parallelResults = await this.runParallelStep(session, step, task, previousOutput, adapterName);
+        previousOutput = parallelResults.map((r) => `[${r.agentName}]: ${r.output}`).join("\n\n");
       } else if (step.team) {
         stepResult = await this.runTeamStep(session, step, task, previousOutput, adapterName);
         previousOutput = stepResult.output;
@@ -316,7 +317,11 @@ export class Orchestrator {
         }
       }
 
-      this.markTillDone(session, i);
+      // Issue #65: Only mark till_done if the step didn't FAIL
+      const stepGrade = stepResult?.grade ?? (parallelResults ? this.worstGrade(parallelResults.map((r) => r.grade)) : undefined);
+      if (stepGrade !== "FAILED") {
+        this.markTillDone(session, i);
+      }
       await this.emitter.tillDone(session.id, session.name, session.tillDone);
     }
   }
@@ -640,6 +645,14 @@ export class Orchestrator {
     return items;
   }
 
+  /**
+   * Mark till_done items as completed for progress tracking purposes.
+   * This tracks chain progress for the dashboard UI -- it does NOT verify
+   * that the step's work was correct or successful.
+   *
+   * Callers should check the step result grade before calling this method;
+   * FAILED steps should NOT be marked as done. See issue #65.
+   */
   private markTillDone(session: SessionState, stepIndex: number): void {
     let idx = 0;
     const chain = getChain(session.chain);
