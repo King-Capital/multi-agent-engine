@@ -301,4 +301,19 @@ export class EventEmitter {
     });
     if (!res) console.error(`[event-emitter] Failed to update PG agent after retries: ${agentId}`);
   }
+
+  async trace(sessionId: string, agentId: string, direction: "input" | "output", content: string, metadata?: Record<string, unknown>): Promise<void> {
+    const res = await this.fetchWithRetry(`${this.dashboardUrl}/api/traces`, {
+      method: "POST",
+      headers: this.authHeaders(),
+      body: JSON.stringify({
+        session_id: sessionId,
+        agent_id: agentId,
+        direction,
+        content,
+        metadata,
+      }),
+    });
+    if (!res) console.error(`[event-emitter] Failed to record trace for ${agentId} (${direction})`);
+  }
 }
