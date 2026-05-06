@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/King-Capital/multi-agent-engine/dashboard/internal/models"
+	"mae-dashboard/internal/models"
 )
 
 type Store struct {

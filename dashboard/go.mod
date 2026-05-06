@@ -1,4 +1,4 @@
-module github.com/King-Capital/multi-agent-engine/dashboard
+module mae-dashboard
 
 go 1.26.1
 
