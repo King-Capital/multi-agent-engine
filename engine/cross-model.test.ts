@@ -8,20 +8,15 @@ describe("cross-model pair enforcement", () => {
       expect(verifier).toBe("openai/gpt-5.5");
     });
 
-    it("returns verifier for sonnet builder", () => {
-      const verifier = getCrossModelVerifier("litellm/sonnet-nocache");
-      // First matching pair: sonnet -> pro
-      expect(verifier).toBe("litellm/pro-nocache");
-    });
-
-    it("returns verifier for pro builder", () => {
-      const verifier = getCrossModelVerifier("litellm/pro-nocache");
-      expect(verifier).toBe("litellm/opus-nocache");
-    });
-
     it("returns verifier for openai builder", () => {
       const verifier = getCrossModelVerifier("openai/gpt-5.5");
       expect(verifier).toBe("litellm/opus-nocache");
+    });
+
+    it("returns null for model not in crossModelPairs", () => {
+      // sonnet is not in the current crossModelPairs config
+      const verifier = getCrossModelVerifier("litellm/sonnet-nocache");
+      expect(verifier).toBeNull();
     });
 
     it("returns null for unknown model", () => {
@@ -49,46 +44,41 @@ describe("cross-model pair enforcement", () => {
       expect(isDifferentModelFamily("litellm/opus-nocache", "openai/gpt-5.5")).toBe(true);
     });
 
-    it("litellm/opus vs litellm/pro = same family", () => {
-      expect(isDifferentModelFamily("litellm/opus-nocache", "litellm/pro-nocache")).toBe(false);
-    });
-
     it("same model = same family", () => {
       expect(isDifferentModelFamily("litellm/opus-nocache", "litellm/opus-nocache")).toBe(false);
     });
 
     it("resolves aliases before comparing", () => {
-      // "quality" = litellm/opus-nocache, "pro" = litellm/pro-nocache -- same family
-      expect(isDifferentModelFamily(resolveModel("quality"), resolveModel("pro"))).toBe(false);
+      // "quality" = litellm/opus-nocache, "pro" = openai/gpt-5.5 -- different families
+      const qualityModel = resolveModel("quality");
+      const proModel = resolveModel("pro");
+      expect(qualityModel).toBe("litellm/opus-nocache");
+      expect(proModel).toBe("openai/gpt-5.5");
+      expect(isDifferentModelFamily(qualityModel, proModel)).toBe(true);
     });
   });
 
   describe("team config cross-model pairs", () => {
-    it("Engineering and Engineering B have different model families configured", () => {
-      // Engineering uses quality (litellm/opus), Engineering B uses pro (litellm/pro)
-      // These are same family (litellm) -- cross-model enforcement should catch this
-      // and override Engineering B's model to the paired verifier
-      const engModel = resolveModel("quality");
-      const engBModel = resolveModel("pro");
+    it("quality and pro aliases resolve to different model families", () => {
+      // quality = litellm/opus-nocache, pro = openai/gpt-5.5
+      const qualityModel = resolveModel("quality");
+      const proModel = resolveModel("pro");
 
-      expect(isDifferentModelFamily(engModel, engBModel)).toBe(false);
+      // These are different families now (litellm vs openai)
+      expect(isDifferentModelFamily(qualityModel, proModel)).toBe(true);
 
-      // getCrossModelVerifier should find a cross-family pair
-      const verifier = getCrossModelVerifier(engModel);
+      // getCrossModelVerifier should find the paired verifier
+      const verifier = getCrossModelVerifier(qualityModel);
       expect(verifier).toBe("openai/gpt-5.5");
-      expect(isDifferentModelFamily(engModel, verifier!)).toBe(true);
+      expect(isDifferentModelFamily(qualityModel, verifier!)).toBe(true);
     });
 
-    it("Validation and Validation B lead models", () => {
-      // Validation uses quality, Validation B uses pro -- same family
-      const valModel = resolveModel("quality");
-      const valBModel = resolveModel("pro");
-
-      expect(isDifferentModelFamily(valModel, valBModel)).toBe(false);
-
-      const verifier = getCrossModelVerifier(valModel);
-      expect(verifier).not.toBeNull();
-      expect(isDifferentModelFamily(valModel, verifier!)).toBe(true);
+    it("crossModelPairs are bidirectional", () => {
+      // opus -> gpt-5.5 and gpt-5.5 -> opus
+      const opusVerifier = getCrossModelVerifier("litellm/opus-nocache");
+      const gptVerifier = getCrossModelVerifier("openai/gpt-5.5");
+      expect(opusVerifier).toBe("openai/gpt-5.5");
+      expect(gptVerifier).toBe("litellm/opus-nocache");
     });
   });
 });
