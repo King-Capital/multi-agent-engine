@@ -24,8 +24,8 @@ export class PiAdapter implements PlatformAdapter {
 
     const args = [
       "pi",
-      "--print",
-      "--mode", "json",
+      "--mode", "rpc",
+      "--no-session",
       "--model", opts.model,
       "--thinking", opts.thinking ?? "medium",
       "-p", opts.systemPrompt,
@@ -54,7 +54,7 @@ export class PiAdapter implements PlatformAdapter {
       }
     }
 
-    console.log(`[pi] Spawning ${opts.persona.name} (${this.mapModel(opts.model)}) [${opts.persona.skills.length} skills] in ${opts.workingDir}`);
+    console.log(`[pi-rpc] Spawning ${opts.persona.name} (${this.mapModel(opts.model)}) [${opts.persona.skills.length} skills] in ${opts.workingDir}`);
 
     const timeout = opts.timeoutMs ?? 300_000;
 
@@ -62,215 +62,204 @@ export class PiAdapter implements PlatformAdapter {
     let totalTokens = 0;
     let cacheReadTokens = 0;
     let finalText = "";
-    let toolCallCount = 0;
 
-    try {
+    return new Promise<DelegateResult>((resolve) => {
       const proc = Bun.spawn(args, {
-        stdin: new Response(opts.userPrompt).body!,
+        stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
         cwd: opts.workingDir,
       });
 
-      const timer = setTimeout(() => proc.kill(), timeout);
+      const timer = setTimeout(() => {
+        console.error(`[pi-rpc] ${opts.persona.name} timed out after ${timeout}ms`);
+        this.sendCmd(proc, { type: "abort" });
+        setTimeout(() => proc.kill(), 5000);
+      }, timeout);
 
+      // Register message sender so orchestrator/dashboard can inject messages
+      if (opts.sendMessage) {
+        opts.sendMessage((msg: string) => {
+          this.sendCmd(proc, { type: "follow_up", message: msg });
+        });
+      }
+
+      // Send the initial prompt
+      this.sendCmd(proc, { type: "prompt", message: opts.userPrompt });
+
+      // Stream stdout JSONL
       const reader = proc.stdout.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+      const processStream = async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
 
-        let newlineIdx: number;
-        while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
-          const line = buffer.slice(0, newlineIdx).trim();
-          buffer = buffer.slice(newlineIdx + 1);
-          if (!line) continue;
+            let newlineIdx: number;
+            while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+              const line = buffer.slice(0, newlineIdx);
+              buffer = buffer.slice(newlineIdx + 1);
+              const trimmed = line.endsWith("\r") ? line.slice(0, -1) : line;
+              if (!trimmed) continue;
 
-          try {
-            const evt = JSON.parse(line);
-            this.processJsonEvent(evt, opts.onStreamEvent, (cost, tokens, cache) => {
-              totalCost = cost;
-              totalTokens = tokens;
-              cacheReadTokens = cache;
-            });
+              try {
+                const evt = JSON.parse(trimmed);
+                this.processRpcEvent(evt, opts.onStreamEvent, (cost, tokens, cache) => {
+                  totalCost += cost;
+                  totalTokens = tokens;
+                  cacheReadTokens = cache;
+                });
 
-            if (evt.type === "message_end" && evt.message?.role === "assistant") {
-              const content = evt.message.content;
-              if (Array.isArray(content)) {
-                for (const block of content) {
-                  if (block.type === "text" && block.text) {
-                    finalText = block.text;
-                  }
-                  if (block.type === "toolCall") {
-                    toolCallCount++;
-                  }
+                if (evt.type === "tool_execution_end") {
+                  const toolName = evt.toolName ?? "unknown";
+                  const isError = evt.isError ?? false;
+                  opts.onStreamEvent?.({
+                    type: "tool_result",
+                    tool: toolName,
+                    status: isError ? "error" : "success",
+                  });
                 }
-              }
-              const usage = evt.message.usage;
-              if (usage?.cost?.total) {
-                totalCost += usage.cost.total;
-                totalTokens = usage.totalTokens ?? totalTokens;
-                cacheReadTokens = usage.cacheRead ?? cacheReadTokens;
+
+                if (evt.type === "agent_end") {
+                  const messages = evt.messages ?? [];
+                  const lastAssistant = [...messages].reverse().find((m: { role: string }) => m.role === "assistant");
+                  if (lastAssistant) {
+                    const content = lastAssistant.content;
+                    if (Array.isArray(content)) {
+                      const textBlock = content.find((b: { type: string }) => b.type === "text");
+                      if (textBlock?.text) finalText = textBlock.text;
+                    }
+                    const usage = lastAssistant.usage;
+                    if (usage) {
+                      totalCost = messages.reduce((sum: number, m: { usage?: { cost?: { total?: number } } }) =>
+                        sum + (m.usage?.cost?.total ?? 0), 0);
+                    }
+                  }
+                  opts.onStreamEvent?.({ type: "cost", costUsd: totalCost, tokensUsed: totalTokens, cacheReadTokens });
+                }
+              } catch {
+                // not valid JSON
               }
             }
-
-            if (evt.type === "agent_end") {
-              const messages = evt.messages ?? [];
-              const lastAssistant = [...messages].reverse().find((m: { role: string }) => m.role === "assistant");
-              if (lastAssistant) {
-                const content = lastAssistant.content;
-                if (Array.isArray(content)) {
-                  const textBlock = content.find((b: { type: string }) => b.type === "text");
-                  if (textBlock?.text) finalText = textBlock.text;
-                }
-                const usage = lastAssistant.usage;
-                if (usage?.cost?.total != null) {
-                  totalCost = messages.reduce((sum: number, m: { usage?: { cost?: { total?: number } } }) => sum + (m.usage?.cost?.total ?? 0), 0);
-                  const lastUsage = lastAssistant.usage;
-                  totalTokens = lastUsage?.totalTokens ?? totalTokens;
-                  cacheReadTokens = lastUsage?.cacheRead ?? cacheReadTokens;
-                }
-              }
-            }
-          } catch {
-            // not JSON, skip
           }
+        } catch {
+          // stream closed
         }
-      }
 
-      const stderr = await new Response(proc.stderr).text();
-      const exitCode = await proc.exited;
-      clearTimeout(timer);
+        clearTimeout(timer);
 
-      if (exitCode === null || exitCode === 137 || exitCode === 143) {
-        console.error(`[pi] ${opts.persona.name} timed out after ${timeout}ms`);
-        return {
+        const exitCode = await proc.exited;
+        const stderr = await new Response(proc.stderr).text();
+
+        if (exitCode === 137 || exitCode === 143) {
+          resolve({
+            agentId,
+            agentName: opts.persona.name,
+            output: finalText || `ERROR: Agent timed out after ${timeout}ms`,
+            grade: finalText ? this.extractGrade(finalText) : "FAILED",
+            findings: finalText ? this.extractFindings(finalText) : ["timeout"],
+            costUsd: totalCost,
+            tokensUsed: totalTokens,
+          });
+          return;
+        }
+
+        if (exitCode !== 0 && !finalText) {
+          console.error(`[pi-rpc] ${opts.persona.name} exited ${exitCode}: ${stderr.slice(0, 500)}`);
+          resolve({
+            agentId,
+            agentName: opts.persona.name,
+            output: `ERROR: ${stderr}`,
+            grade: "FAILED",
+            findings: [stderr],
+            costUsd: totalCost,
+            tokensUsed: totalTokens,
+          });
+          return;
+        }
+
+        resolve({
           agentId,
           agentName: opts.persona.name,
-          output: `ERROR: Agent timed out after ${timeout}ms`,
-          grade: "FAILED",
-          findings: ["timeout"],
+          output: finalText || "ERROR: Empty output",
+          grade: this.extractGrade(finalText),
+          findings: this.extractFindings(finalText),
           costUsd: totalCost,
           tokensUsed: totalTokens,
-        };
-      }
-
-      if (exitCode !== 0) {
-        console.error(`[pi] ${opts.persona.name} exited ${exitCode}: ${stderr.slice(0, 500)}`);
-        return {
-          agentId,
-          agentName: opts.persona.name,
-          output: `ERROR: ${stderr}`,
-          grade: "FAILED",
-          findings: [stderr],
-          costUsd: totalCost,
-          tokensUsed: totalTokens,
-        };
-      }
-
-      if (!finalText.trim()) {
-        console.warn(`[pi] ${opts.persona.name} returned empty output`);
-        return {
-          agentId,
-          agentName: opts.persona.name,
-          output: "ERROR: Empty output from agent",
-          grade: "FAILED",
-          findings: ["empty_output"],
-          costUsd: totalCost,
-          tokensUsed: totalTokens,
-        };
-      }
-
-      opts.onStreamEvent?.({ type: "cost", costUsd: totalCost, tokensUsed: totalTokens, cacheReadTokens });
-
-      return {
-        agentId,
-        agentName: opts.persona.name,
-        output: finalText,
-        grade: this.extractGrade(finalText),
-        findings: this.extractFindings(finalText),
-        costUsd: totalCost,
-        tokensUsed: totalTokens,
+        });
       };
-    } catch (err) {
-      return {
-        agentId,
-        agentName: opts.persona.name,
-        output: `ERROR: ${err}`,
-        grade: "FAILED",
-        findings: [`${err}`],
-        costUsd: totalCost,
-        tokensUsed: totalTokens,
-      };
+
+      processStream();
+    });
+  }
+
+  private sendCmd(proc: ReturnType<typeof Bun.spawn>, cmd: Record<string, unknown>): void {
+    try {
+      const stdin = proc.stdin;
+      if (stdin && typeof stdin === "object" && "write" in stdin) {
+        (stdin as { write(data: string | Uint8Array): void }).write(JSON.stringify(cmd) + "\n");
+      }
+    } catch {
+      // process may have exited
     }
   }
 
-  private processJsonEvent(
+  private processRpcEvent(
     evt: Record<string, unknown>,
     onStream: ((event: StreamEvent) => void) | undefined,
     onCost: (cost: number, tokens: number, cacheRead: number) => void,
   ): void {
     if (!onStream) return;
 
+    // Tool execution events — real-time tool call visibility
+    if (evt.type === "tool_execution_start") {
+      const toolName = (evt.toolName as string) ?? "unknown";
+      const args = evt.args as Record<string, unknown> | undefined;
+      let filePath = "";
+      if (args) {
+        filePath = ((args.file_path ?? args.path ?? args.command ?? "") as string).slice(0, 200);
+      }
+      onStream({
+        type: "tool_call",
+        tool: toolName,
+        filePath,
+        status: "running",
+      });
+    }
+
+    // Streaming text deltas
+    if (evt.type === "message_update") {
+      const ame = evt.assistantMessageEvent as Record<string, unknown> | undefined;
+      if (ame?.type === "text_delta" && ame.delta) {
+        // Don't emit individual deltas as full messages — accumulate
+      }
+      if (ame?.type === "text_end" && ame.content) {
+        onStream({
+          type: "assistant_text",
+          content: ame.content as string,
+        });
+      }
+    }
+
+    // Cost updates from message_end
     if (evt.type === "message_end") {
       const msg = evt.message as Record<string, unknown> | undefined;
-      if (!msg) return;
-      const role = msg.role as string;
-      const content = msg.content as Array<Record<string, unknown>> | undefined;
-      const usage = msg.usage as Record<string, unknown> | undefined;
-
-      if (role === "assistant" && Array.isArray(content)) {
-        for (const block of content) {
-          if (block.type === "toolCall") {
-            const args = block.arguments as Record<string, unknown> | undefined;
-            const toolName = (block.name as string) ?? "unknown";
-            let filePath = "";
-            if (args && typeof args === "object") {
-              filePath = (args.file_path ?? args.path ?? args.command ?? "") as string;
-            }
-            onStream({
-              type: "tool_call",
-              tool: toolName,
-              filePath: typeof filePath === "string" ? filePath.slice(0, 200) : "",
-              status: "running",
-            });
-          }
-
-          if (block.type === "text" && block.text) {
-            onStream({
-              type: "assistant_text",
-              content: block.text as string,
-            });
-          }
-        }
-
+      if (msg?.role === "assistant") {
+        const usage = msg.usage as Record<string, unknown> | undefined;
         if (usage) {
           const cost = usage.cost as Record<string, number> | undefined;
-          onCost(
-            cost?.total ?? 0,
-            (usage.totalTokens as number) ?? 0,
-            (usage.cacheRead as number) ?? 0,
-          );
-          onStream({
-            type: "cost",
-            costUsd: cost?.total ?? 0,
-            tokensUsed: (usage.totalTokens as number) ?? 0,
-            cacheReadTokens: (usage.cacheRead as number) ?? 0,
-          });
+          const costTotal = cost?.total ?? 0;
+          const tokens = (usage.totalTokens as number) ?? 0;
+          const cache = (usage.cacheRead as number) ?? 0;
+          if (costTotal > 0) {
+            onCost(costTotal, tokens, cache);
+            onStream({ type: "cost", costUsd: costTotal, tokensUsed: tokens, cacheReadTokens: cache });
+          }
         }
-      }
-
-      if (role === "toolResult") {
-        const toolName = (msg.toolName as string) ?? "unknown";
-        const isError = msg.isError as boolean;
-        onStream({
-          type: "tool_result",
-          tool: toolName,
-          status: isError ? "error" : "success",
-        });
       }
     }
   }
