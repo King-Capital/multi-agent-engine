@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"mae.local/dashboard/internal/events"
 	"mae.local/dashboard/internal/models"
 	"mae.local/dashboard/templates"
 )
@@ -37,12 +38,13 @@ func handlePostEvent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid event: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if evt.SessionID == "" {
-		http.Error(w, "session_id required", http.StatusBadRequest)
+	if err := events.ValidateSessionID(evt.SessionID); err != nil {
+		http.Error(w, "invalid session_id", http.StatusBadRequest)
 		return
 	}
 	if err := store.Append(evt); err != nil {
-		http.Error(w, "store error: "+err.Error(), http.StatusInternalServerError)
+		log.Printf("store error: %v", err)
+		http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
 		return
 	}
 
@@ -173,6 +175,18 @@ func handleUserMessage(w http.ResponseWriter, r *http.Request) {
 	if content == "" {
 		http.Error(w, "empty message", http.StatusBadRequest)
 		return
+	}
+
+	// Sanitize: strip control characters (keep newline, carriage return, tab)
+	content = strings.Map(func(r rune) rune {
+		if r < 32 && r != '\n' && r != '\r' && r != '\t' {
+			return -1
+		}
+		return r
+	}, content)
+	// Enforce max message length
+	if len(content) > 10000 {
+		content = content[:10000]
 	}
 	evt := models.Event{
 		SessionID: sessionID,

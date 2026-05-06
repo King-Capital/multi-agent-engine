@@ -6,11 +6,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"time"
 
 	"mae.local/dashboard/internal/models"
 )
+
+var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+
+func ValidateSessionID(id string) error {
+	if len(id) == 0 || len(id) > 128 || !validSessionID.MatchString(id) {
+		return fmt.Errorf("invalid session ID: %q", id)
+	}
+	return nil
+}
 
 type Store struct {
 	dir           string

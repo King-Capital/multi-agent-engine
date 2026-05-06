@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -18,13 +19,18 @@ func requireDB(w http.ResponseWriter) bool {
 	return true
 }
 
+func dbError(w http.ResponseWriter, context string, err error) {
+	log.Printf("db error [%s]: %v", context, err)
+	http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+}
+
 func handleAPIGetUsers(w http.ResponseWriter, r *http.Request) {
 	if !requireDB(w) {
 		return
 	}
 	users, err := GetUsers(r.Context())
 	if err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		dbError(w, "get users", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -44,7 +50,7 @@ func handleAPIGetSessions(w http.ResponseWriter, r *http.Request) {
 		sessions, err = GetSessions(r.Context())
 	}
 	if err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		dbError(w, "query", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -80,7 +86,7 @@ func handleAPICreateSession(w http.ResponseWriter, r *http.Request) {
 	if req.UserID == nil && req.User != "" {
 		u, err := GetUserByUsername(r.Context(), req.User)
 		if err != nil {
-			http.Error(w, "user lookup: "+err.Error(), http.StatusInternalServerError)
+			dbError(w, "user lookup", err)
 			return
 		}
 		if u != nil {
@@ -107,7 +113,7 @@ func handleAPICreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := CreateSession(r.Context(), sess); err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		dbError(w, "query", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -129,12 +135,12 @@ func handleAPIPatchSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := UpdateSession(r.Context(), id, req.Name, req.Status); err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		dbError(w, "query", err)
 		return
 	}
 	sess, err := GetDBSession(r.Context(), id)
 	if err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		dbError(w, "query", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -148,7 +154,7 @@ func handleAPIGetAgents(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "id")
 	agents, err := GetAgentsBySession(r.Context(), sessionID)
 	if err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		dbError(w, "query", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -192,7 +198,7 @@ func handleAPICreateAgent(w http.ResponseWriter, r *http.Request) {
 		Config:    req.Config,
 	}
 	if err := CreateAgent(r.Context(), agent); err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		dbError(w, "query", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -221,12 +227,12 @@ func handleAPIPatchAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := UpdateAgent(r.Context(), id, req.Status, req.Config, req.Result, req.CostUSD); err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		dbError(w, "query", err)
 		return
 	}
 	agent, err := GetDBAgent(r.Context(), id)
 	if err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		dbError(w, "query", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -267,7 +273,7 @@ func handleCreateTrace(w http.ResponseWriter, r *http.Request) {
 		Metadata:  req.Metadata,
 	}
 	if err := RecordTrace(r.Context(), trace); err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		dbError(w, "query", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -287,7 +293,7 @@ func handleSearchTraces(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("session_id")
 	traces, err := SearchTraces(r.Context(), query, sessionID)
 	if err != nil {
-		http.Error(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		dbError(w, "query", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
