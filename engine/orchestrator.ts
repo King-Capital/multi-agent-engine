@@ -33,8 +33,8 @@ export class Orchestrator {
   private emitter: EventEmitter;
   private sessions: Map<string, SessionState> = new Map();
 
-  constructor(dashboardUrl?: string) {
-    this.emitter = new EventEmitter(dashboardUrl);
+  constructor(dashboardUrl?: string, apiToken?: string) {
+    this.emitter = new EventEmitter(dashboardUrl, apiToken);
   }
 
   registerAdapter(adapter: PlatformAdapter): void {
