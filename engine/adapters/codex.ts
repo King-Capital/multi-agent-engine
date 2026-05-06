@@ -171,7 +171,7 @@ export class CodexAdapter implements PlatformAdapter {
     const combined = output + "\n" + stderr;
     const costMatch = combined.match(/(?:total\s+)?cost:\s*\$?([\d.]+)/i);
     if (costMatch) {
-      const parsed = parseFloat(costMatch[1]);
+      const parsed = parseFloat(costMatch[1] ?? "0");
       if (!isNaN(parsed) && parsed > 0) return parsed;
     }
     // Fallback: rough estimation based on output tokens
