@@ -105,6 +105,33 @@ export function buildSystemPrompt(persona: PersonaConfig): string {
     .join("\n");
 }
 
+
+// --- Tool Registry ---
+
+interface ToolRegistry {
+  groups: Record<string, { description: string; tools: string[] }>;
+  tools: Record<string, { description: string; risk: string }>;
+}
+
+let cachedToolRegistry: ToolRegistry | null = null;
+
+export function loadToolRegistry(): ToolRegistry {
+  if (cachedToolRegistry) return cachedToolRegistry;
+  try {
+    cachedToolRegistry = cachedRead<ToolRegistry>("configs/tools.yaml");
+  } catch {
+    cachedToolRegistry = { groups: {}, tools: {} };
+  }
+  return cachedToolRegistry;
+}
+
+export function resolveToolGroup(groupOrTools: string | string[]): string[] {
+  if (Array.isArray(groupOrTools)) return groupOrTools;
+  const registry = loadToolRegistry();
+  const group = registry.groups[groupOrTools];
+  return group?.tools ?? [groupOrTools];
+}
+
 export function loadModelRouting(): {
   budgets?: { max_per_session_usd: number; warn_at_usd: number; max_per_agent_usd: number; max_total_tokens: number };
   aliases?: Record<string, string>;
