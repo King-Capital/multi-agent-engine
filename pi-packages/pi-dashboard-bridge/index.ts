@@ -74,7 +74,7 @@ export default function (pi: any) {
     return;
   }
 
-  console.log(`[dashboard-bridge] Connected: session=${SESSION_ID?.slice(0, 8)} agent=${AGENT_ID}`);
+  console.log(`[dashboard-bridge] Connected to dashboard`);
 
   // Track tool calls
   pi.on("tool_call", async (event: any) => {
