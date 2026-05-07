@@ -251,7 +251,7 @@ templ ToolCallEntry(evt models.Event, sess *models.Session) {
 			</span>
 			<span class="text-neutral-400">{ evt.Data.Tool }</span>
 			if evt.Data.FilePath != "" {
-				<span class="text-neutral-500 truncate max-w-60" title={ evt.Data.FilePath }>{ evt.Data.FilePath }</span>
+				<span class="text-neutral-500 truncate max-w-xs" title={ evt.Data.FilePath }>{ evt.Data.FilePath }</span>
 			}
 			if evt.Timestamp.Unix() > 0 {
 				<span class="text-neutral-700 ml-auto flex-shrink-0">{ evt.Timestamp.In(easternTZ()).Format("3:04:05 PM") }</span>

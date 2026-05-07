@@ -152,19 +152,19 @@ func main() {
 							agentID = *evt.AgentID
 						}
 						if a, ok := sess.Agents[agentID]; ok {
-							if cost, ok := payload["cost_usd"].(float64); ok && cost > 0 {
+							if cost, ok := payload["cost_usd"].(float64); ok && cost > a.CostUSD {
 								a.CostUSD = cost
 							}
-							if tokens, ok := payload["tokens_used"].(float64); ok {
+							if tokens, ok := payload["tokens_used"].(float64); ok && int64(tokens) > a.TokensUsed {
 								a.TokensUsed = int64(tokens)
 							}
-							if ctxTok, ok := payload["context_tokens"].(float64); ok {
+							if ctxTok, ok := payload["context_tokens"].(float64); ok && int64(ctxTok) > a.ContextTokens {
 								a.ContextTokens = int64(ctxTok)
 							}
 							if cost, ok := data["cost_usd"].(float64); ok && cost > a.CostUSD {
 								a.CostUSD = cost
 							}
-							if tokens, ok := data["tokens_used"].(float64); ok {
+							if tokens, ok := data["tokens_used"].(float64); ok && int64(tokens) > a.TokensUsed {
 								a.TokensUsed = int64(tokens)
 							}
 						}

@@ -378,7 +378,7 @@ export class Orchestrator {
       onStreamEvent: (streamEvt) => {
         if (streamEvt.type === "tool_call") {
           this.trackToolCall(leadId, streamEvt.tool ?? "");
-          this.emitter.toolCall(session.id, leadId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running");
+          this.emitter.toolCall(session.id, leadId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
         } else if (streamEvt.type === "cost") {
           this.emitter.costUpdate(session.id, leadId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
         }
@@ -448,7 +448,7 @@ export class Orchestrator {
         onStreamEvent: (streamEvt) => {
           if (streamEvt.type === "tool_call") {
             this.trackToolCall(workerId, streamEvt.tool ?? "");
-            this.emitter.toolCall(session.id, workerId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running");
+            this.emitter.toolCall(session.id, workerId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
           } else if (streamEvt.type === "cost") {
             this.emitter.costUpdate(session.id, workerId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
           }
@@ -623,7 +623,7 @@ export class Orchestrator {
       onStreamEvent: (streamEvt) => {
         if (streamEvt.type === "tool_call") {
           this.trackToolCall(agentId, streamEvt.tool ?? "");
-          this.emitter.toolCall(session.id, agentId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running");
+          this.emitter.toolCall(session.id, agentId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
         } else if (streamEvt.type === "cost") {
           this.emitter.costUpdate(session.id, agentId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
         }

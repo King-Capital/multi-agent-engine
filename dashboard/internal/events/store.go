@@ -179,9 +179,17 @@ func (s *Store) applyEvent(evt models.Event) {
 
 	case models.EventCostUpdate:
 		if a, ok := sess.Agents[evt.AgentID]; ok {
-			a.CostUSD = evt.CostUSD
-			a.TokensUsed = evt.TokensUsed
-			a.ContextTokens = evt.ContextTokens
+			// Only update if new value is higher (cost events are cumulative;
+			// final events sometimes omit cost_usd, defaulting to 0)
+			if evt.CostUSD > a.CostUSD {
+				a.CostUSD = evt.CostUSD
+			}
+			if evt.TokensUsed > a.TokensUsed {
+				a.TokensUsed = evt.TokensUsed
+			}
+			if evt.ContextTokens > a.ContextTokens {
+				a.ContextTokens = evt.ContextTokens
+			}
 		}
 		sess.TotalCost = 0
 		sess.TotalTokens = 0

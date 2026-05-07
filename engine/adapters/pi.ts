@@ -177,9 +177,16 @@ export class PiAdapter implements PlatformAdapter {
                 if (evt.type === "tool_execution_end") {
                   const toolName = evt.toolName ?? "unknown";
                   const isError = evt.isError ?? false;
+                  let toolResult = "";
+                  if (evt.result) {
+                    try {
+                      toolResult = (typeof evt.result === "string" ? evt.result : JSON.stringify(evt.result)).slice(0, 2000);
+                    } catch { /* ignore */ }
+                  }
                   opts.onStreamEvent?.({
                     type: "tool_result",
                     tool: toolName,
+                    toolResult,
                     status: isError ? "error" : "success",
                   });
                 }
@@ -337,13 +344,19 @@ export class PiAdapter implements PlatformAdapter {
       const toolName = (evt.toolName as string) ?? "unknown";
       const args = evt.args as Record<string, unknown> | undefined;
       let filePath = "";
+      let toolArgs = "";
       if (args) {
-        filePath = ((args.file_path ?? args.path ?? args.command ?? "") as string).slice(0, 200);
+        filePath = ((args.file_path ?? args.path ?? args.command ?? "") as string).slice(0, 500);
+        // Capture full args as JSON for detail view
+        try {
+          toolArgs = JSON.stringify(args, null, 2).slice(0, 2000);
+        } catch { /* ignore */ }
       }
       onStream({
         type: "tool_call",
         tool: toolName,
         filePath,
+        toolArgs,
         status: "running",
       });
     }
