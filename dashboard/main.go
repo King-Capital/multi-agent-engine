@@ -88,34 +88,129 @@ func main() {
 					sess.Status = "error"
 				}
 				sess.Agents = make(map[string]*models.Agent)
+
+				// Track timestamps for elapsed calculation
+				var firstEvent, lastEvent time.Time
+
 				for _, evt := range eventsBySession[s.ID] {
-					if evt.EventType == "agent_spawn" {
-						var data map[string]interface{}
-						json.Unmarshal(evt.Payload, &data)
+					// Track event time range
+					if firstEvent.IsZero() || evt.CreatedAt.Before(firstEvent) {
+						firstEvent = evt.CreatedAt
+					}
+					if evt.CreatedAt.After(lastEvent) {
+						lastEvent = evt.CreatedAt
+					}
+
+					var payload map[string]interface{}
+					json.Unmarshal(evt.Payload, &payload)
+					data, _ := payload["data"].(map[string]interface{})
+					if data == nil {
+						data = payload
+					}
+
+					switch evt.EventType {
+					case "session_start":
+						if name, ok := data["session_name"].(string); ok && name != "" {
+							sess.Name = name
+						}
+						if task, ok := data["task_prompt"].(string); ok {
+							sess.TaskPrompt = task
+						}
+						if chain, ok := data["team_config"].(string); ok {
+							sess.TeamConfig = chain
+						}
+
+					case "agent_spawn":
 						agentID := ""
 						if evt.AgentID != nil {
 							agentID = *evt.AgentID
+						}
+						if agentID == "" {
+							if aid, ok := payload["agent_id"].(string); ok {
+								agentID = aid
+							}
 						}
 						name, _ := data["agent_name"].(string)
 						role, _ := data["agent_role"].(string)
 						model, _ := data["model"].(string)
 						teamName, _ := data["team_name"].(string)
 						teamColor, _ := data["team_color"].(string)
+						parentID, _ := payload["parent_id"].(string)
 						sess.Agents[agentID] = &models.Agent{
 							ID: agentID, Name: name, Role: models.AgentRole(role),
 							Model: model, TeamName: teamName, TeamColor: teamColor,
-							Status: models.StatusDone,
+							ParentID:  parentID,
+							Status:    models.StatusDone,
+							StartedAt: evt.CreatedAt,
+						}
+
+					case "cost_update":
+						agentID := ""
+						if evt.AgentID != nil {
+							agentID = *evt.AgentID
+						}
+						if a, ok := sess.Agents[agentID]; ok {
+							if cost, ok := payload["cost_usd"].(float64); ok && cost > 0 {
+								a.CostUSD = cost
+							}
+							if tokens, ok := payload["tokens_used"].(float64); ok {
+								a.TokensUsed = int64(tokens)
+							}
+							if ctxTok, ok := payload["context_tokens"].(float64); ok {
+								a.ContextTokens = int64(ctxTok)
+							}
+							if cost, ok := data["cost_usd"].(float64); ok && cost > a.CostUSD {
+								a.CostUSD = cost
+							}
+							if tokens, ok := data["tokens_used"].(float64); ok {
+								a.TokensUsed = int64(tokens)
+							}
 						}
 					}
 				}
+
+				// Fall back to PG agents table for cost data
+				if pgAgents, err := GetAgentsBySession(ctx, s.ID); err == nil {
+					for _, pa := range pgAgents {
+						if a, ok := sess.Agents[pa.AgentID]; ok {
+							if pa.CostUSD > a.CostUSD {
+								a.CostUSD = pa.CostUSD
+							}
+						} else {
+							sess.Agents[pa.AgentID] = &models.Agent{
+								ID:      pa.AgentID,
+								Name:    pa.AgentID,
+								Role:    models.AgentRole(pa.Role),
+								Status:  models.AgentStatus(pa.Status),
+								CostUSD: pa.CostUSD,
+							}
+							if pa.StartedAt != nil {
+								sess.Agents[pa.AgentID].StartedAt = *pa.StartedAt
+							}
+						}
+					}
+				}
+
+				// Calculate elapsed time from events
+				if !firstEvent.IsZero() && !lastEvent.IsZero() {
+					sess.ElapsedMs = lastEvent.Sub(firstEvent).Milliseconds()
+				} else if s.CompletedAt != nil {
+					sess.ElapsedMs = s.CompletedAt.Sub(s.CreatedAt).Milliseconds()
+				}
+
+				// Aggregate costs
 				sess.TotalCost = 0
+				sess.TotalTokens = 0
 				for _, a := range sess.Agents {
 					sess.TotalCost += a.CostUSD
+					sess.TotalTokens += a.TokensUsed
 				}
+
 				store.InjectSession(sess)
 			}
 			log.Printf("Hydrated %d sessions from PG", len(sessions))
 		}
+
 	}
 
 	port := os.Getenv("DASHBOARD_PORT")
