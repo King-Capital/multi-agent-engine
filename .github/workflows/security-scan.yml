@@ -12,6 +12,10 @@ permissions:
   contents: read
   security-events: write
 
+concurrency:
+  group: security-scan-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   GOPATH: /tmp/go
   GOMODCACHE: /tmp/go/pkg/mod
@@ -40,7 +44,9 @@ jobs:
 
       - name: Build Go
         working-directory: dashboard
-        run: templ generate ./templates/ && go build ./...
+        run: |
+          export PATH=$PATH:/home/mae/go/bin:/root/go/bin
+          templ generate ./templates/ && go build ./...
 
       - name: Run CodeQL analysis
         uses: github/codeql-action/analyze@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4
