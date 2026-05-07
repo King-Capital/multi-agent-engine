@@ -63,7 +63,7 @@ jobs:
         id: healthcheck
         continue-on-error: true
         run: |
-          curl -sf http://localhost:8400/api/users > /dev/null
+          curl -sf http://localhost:8400/api/health > /dev/null
           echo "Reverted to ${{ inputs.tag }} — healthy"
 
       - name: Rollback on failure
@@ -77,7 +77,7 @@ jobs:
           chown -R mae:mae /opt/mae
           systemctl restart mae-dashboard
           sleep 3
-          curl -sf http://localhost:8400/api/users > /dev/null
+          curl -sf http://localhost:8400/api/health > /dev/null
           echo "Rolled back successfully"
           exit 1
 
