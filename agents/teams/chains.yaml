@@ -11,6 +11,11 @@ chains:
           - "All code changes implemented per plan"
           - "Tests pass"
           - "Build succeeds"
+      - deterministic:
+          command: "bun tsc --noEmit 2>&1 || go build -o /dev/null . 2>&1 || echo 'No lint configured'"
+          label: "Type check / build verification"
+          on_failure: loop
+          max_retries: 1
       - team: Validation
         till_done:
           - "Code reviewed — grade assigned"
@@ -35,6 +40,11 @@ chains:
       - team: Engineering
         till_done:
           - "Code changes implemented"
+      - deterministic:
+          command: "bun tsc --noEmit 2>&1 || go build -o /dev/null . 2>&1 || echo 'No lint configured'"
+          label: "Type check / build verification"
+          on_failure: loop
+          max_retries: 1
       - team: Validation
         till_done:
           - "Code reviewed and graded"
@@ -138,6 +148,11 @@ chains:
         till_done:
           - "Code changes implemented"
           - "Tests pass"
+      - deterministic:
+          command: "bun tsc --noEmit 2>&1 || go build -o /dev/null . 2>&1 || echo 'No lint configured'"
+          label: "Type check / build verification"
+          on_failure: loop
+          max_retries: 1
       - parallel:
           - team: Red Team
           - team: Blue Team

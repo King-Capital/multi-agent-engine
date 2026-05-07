@@ -49,6 +49,12 @@ export interface ChainStep {
   team?: string;
   agent?: string;
   parallel?: { team: string }[];
+  deterministic?: {
+    command: string;
+    on_failure?: "loop" | "fail" | "continue";
+    max_retries?: number;
+    label?: string;
+  };
   till_done?: string[];
   on_feedback?: {
     retry_team: string;
