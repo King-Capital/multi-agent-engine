@@ -41,6 +41,7 @@ export class Orchestrator {
   private defaultAdapter: string = "";
   private emitter: EventEmitter;
   private dashboardUrl: string;
+  private apiToken: string | undefined;
   private sessions: Map<string, SessionState> = new Map();
   private agentActivity: Map<string, AgentActivity> = new Map();
   private monitorInterval: ReturnType<typeof setInterval> | null = null;
@@ -49,6 +50,7 @@ export class Orchestrator {
 
   constructor(dashboardUrl?: string, apiToken?: string) {
     this.dashboardUrl = dashboardUrl ?? "http://localhost:8400";
+    this.apiToken = apiToken;
     this.emitter = new EventEmitter(dashboardUrl, apiToken);
   }
 
@@ -135,7 +137,10 @@ export class Orchestrator {
 
     const connect = () => {
       if (!this.sseAbort || this.sseAbort.signal.aborted) return;
-      fetch(url, { signal: this.sseAbort.signal }).then(async (res) => {
+      fetch(url, {
+          signal: this.sseAbort.signal,
+          headers: this.apiToken ? { "Authorization": `Bearer ${this.apiToken}` } : {},
+        }).then(async (res) => {
         if (!res.ok || !res.body) return;
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -268,7 +273,7 @@ export class Orchestrator {
       if (key.startsWith(prefix)) this.messageSenders.delete(key);
     }
     await this.emitter.sessionEnd(sessionId);
-    console.log(`\nSession ${sessionId} ${session.status}. Cost: $${session.totalCost.toFixed(3)}`);
+    console.log(`\nSession ${sessionId} ${session.status}. Cost: $${session.totalCost.toFixed(3)} | Tokens: ${session.totalTokens.toLocaleString()}`);
     return session;
   }
 
@@ -392,6 +397,7 @@ export class Orchestrator {
     session.totalCost += leadResult.costUsd;
     session.totalTokens += leadResult.tokensUsed;
     await this.emitter.costUpdate(session.id, leadId, leadResult.costUsd, leadResult.tokensUsed, 0);
+    await this.emitter.agentDone(session.id, leadId, leadResult.grade);
     this.checkBudget(session, leadId, leadResult.costUsd);
 
     if (leadResult.grade === "FAILED" || !teamConfig.members.length) {
@@ -471,6 +477,7 @@ export class Orchestrator {
       session.totalCost += result.costUsd;
       session.totalTokens += result.tokensUsed;
       await this.emitter.costUpdate(session.id, workerId, result.costUsd, result.tokensUsed, 0);
+      await this.emitter.agentDone(session.id, workerId, result.grade);
       this.checkBudget(session, workerId, result.costUsd);
 
       return result;

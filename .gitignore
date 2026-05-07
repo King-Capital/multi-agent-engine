@@ -15,3 +15,4 @@ dashboard/data/
 # Session data
 data/sessions/
 agent
+dashboard-bin

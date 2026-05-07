@@ -330,7 +330,7 @@ export class PiAdapter implements PlatformAdapter {
           const costTotal = cost?.total ?? 0;
           const tokens = (usage.totalTokens as number) ?? 0;
           const cache = (usage.cacheRead as number) ?? 0;
-          if (costTotal > 0) {
+          if (costTotal > 0 || tokens > 0) {
             onCost(costTotal, tokens, cache);
             onStream({ type: "cost", costUsd: costTotal, tokensUsed: tokens, cacheReadTokens: cache });
           }

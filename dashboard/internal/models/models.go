@@ -116,6 +116,9 @@ type EventData struct {
 	BlockedAction string `json:"blocked_action,omitempty"`
 	BlockReason   string `json:"block_reason,omitempty"`
 
+	// agent_done
+	Grade string `json:"grade,omitempty"`
+
 	// self_heal
 	FailedWorker string `json:"failed_worker,omitempty"`
 	HealAction   string `json:"heal_action,omitempty"`
