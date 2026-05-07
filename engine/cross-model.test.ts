@@ -5,6 +5,8 @@ describe("cross-model pair enforcement", () => {
   describe("getCrossModelVerifier", () => {
     it("returns verifier for opus builder", () => {
       const verifier = getCrossModelVerifier("litellm/opus-nocache");
+      // GPT-5.5 is configured as cross-model pair but goes through Codex sub, not LiteLLM
+      // crossModelPairs in model-routing.yaml defines the pairing
       expect(verifier).toBe("openai/gpt-5.5");
     });
 
@@ -14,7 +16,6 @@ describe("cross-model pair enforcement", () => {
     });
 
     it("returns null for model not in crossModelPairs", () => {
-      // sonnet is not in the current crossModelPairs config
       const verifier = getCrossModelVerifier("litellm/sonnet-nocache");
       expect(verifier).toBeNull();
     });
@@ -25,11 +26,9 @@ describe("cross-model pair enforcement", () => {
     });
 
     it("resolves aliases before matching", () => {
-      // "quality" alias resolves to "litellm/opus-nocache"
       const resolved = resolveModel("quality");
       expect(resolved).toBe("litellm/opus-nocache");
 
-      // The verifier lookup should work with the resolved model
       const verifier = getCrossModelVerifier(resolved);
       expect(verifier).toBe("openai/gpt-5.5");
     });
@@ -49,7 +48,7 @@ describe("cross-model pair enforcement", () => {
     });
 
     it("resolves aliases before comparing", () => {
-      // "quality" = litellm/opus-nocache, "pro" = openai/gpt-5.5 -- different families
+      // quality = litellm/opus-nocache, pro = gpt-5.5 -- different families
       const qualityModel = resolveModel("quality");
       const proModel = resolveModel("pro");
       expect(qualityModel).toBe("litellm/opus-nocache");
@@ -58,27 +57,18 @@ describe("cross-model pair enforcement", () => {
     });
   });
 
-  describe("team config cross-model pairs", () => {
-    it("quality and pro aliases resolve to different model families", () => {
-      // quality = litellm/opus-nocache, pro = openai/gpt-5.5
-      const qualityModel = resolveModel("quality");
-      const proModel = resolveModel("pro");
-
-      // These are different families now (litellm vs openai)
-      expect(isDifferentModelFamily(qualityModel, proModel)).toBe(true);
-
-      // getCrossModelVerifier should find the paired verifier
-      const verifier = getCrossModelVerifier(qualityModel);
-      expect(verifier).toBe("openai/gpt-5.5");
-      expect(isDifferentModelFamily(qualityModel, verifier!)).toBe(true);
-    });
-
+  describe("crossModelPairs config", () => {
     it("crossModelPairs are bidirectional", () => {
-      // opus -> gpt-5.5 and gpt-5.5 -> opus
       const opusVerifier = getCrossModelVerifier("litellm/opus-nocache");
       const gptVerifier = getCrossModelVerifier("openai/gpt-5.5");
       expect(opusVerifier).toBe("openai/gpt-5.5");
       expect(gptVerifier).toBe("litellm/opus-nocache");
+    });
+
+    it("cross-model pair models are different families", () => {
+      // The pairing itself defines different families (litellm vs openai)
+      // Even though GPT-5.5 routing needs Codex adapter, the config is correct
+      expect(isDifferentModelFamily("litellm/opus-nocache", "openai/gpt-5.5")).toBe(true);
     });
   });
 });
