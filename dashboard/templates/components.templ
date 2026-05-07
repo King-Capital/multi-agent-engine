@@ -46,7 +46,11 @@ templ SessionListItems(sessions []*models.Session) {
 				</div>
 				<!-- Chain + platform info -->
 				<div class="ml-3.5 mb-0.5 flex items-center gap-1.5">
-					if sess.TeamConfig != "" {
+					if sess.ChainType != "" {
+						<span class={ "text-xs px-1.5 py-0.5 rounded " + chainBadgeClass(sess.ChainType) }>
+							{ sess.ChainType }
+						</span>
+					} else if sess.TeamConfig != "" {
 						<span class="text-xs px-1 py-0.25 rounded bg-neutral-50/5 text-neutral-400">
 							{ sess.TeamConfig }
 						</span>
@@ -598,4 +602,24 @@ func getChildren(sess *models.Session, parentID string) []*models.Agent {
 		return children[i].StartedAt.Before(children[j].StartedAt)
 	})
 	return children
+}
+
+
+func chainBadgeClass(chain string) string {
+	switch chain {
+	case "review-only":
+		return "bg-blue-500/20 text-blue-400"
+	case "plan-build-review":
+		return "bg-green-500/20 text-green-400"
+	case "build-verify":
+		return "bg-cyan-500/20 text-cyan-400"
+	case "swarm-review", "red-blue":
+		return "bg-red-500/20 text-red-400"
+	case "full-sdlc":
+		return "bg-purple-500/20 text-purple-400"
+	case "scout-then-plan":
+		return "bg-yellow-500/20 text-yellow-400"
+	default:
+		return "bg-neutral-50/10 text-neutral-400"
+	}
 }

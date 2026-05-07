@@ -2,6 +2,7 @@ package events
 
 import (
 	"bufio"
+	"sort"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -215,6 +216,9 @@ func (s *Store) ListSessions() []*models.Session {
 	for _, sess := range s.sessions {
 		result = append(result, sess)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].StartedAt.After(result[j].StartedAt)
+	})
 	return result
 }
 
