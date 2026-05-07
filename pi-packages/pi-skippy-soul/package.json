@@ -1,0 +1,7 @@
+{
+  "name": "pi-skippy-soul",
+  "version": "1.0.0",
+  "description": "Injects Skippy persona from OpenClaw workspace SOUL.md + USER.md",
+  "main": "index.ts",
+  "type": "module"
+}
