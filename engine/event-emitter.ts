@@ -118,6 +118,16 @@ export class EventEmitter {
     });
   }
 
+  agentDone(sessionId: string, agentId: string, grade?: string) {
+    return this.emit({
+      session_id: sessionId,
+      agent_id: agentId,
+      event_type: "agent_done",
+      timestamp: new Date().toISOString(),
+      data: { grade: grade ?? "unknown" },
+    });
+  }
+
   message(sessionId: string, agentId: string, from: string, to: string, content: string) {
     return this.emit({
       session_id: sessionId,
