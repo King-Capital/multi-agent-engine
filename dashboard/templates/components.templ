@@ -27,17 +27,16 @@ templ SessionListItems(sessions []*models.Session) {
 		<p class="text-xs text-neutral-500 p-2">No sessions yet.</p>
 	}
 	for _, sess := range sessions {
-			<div
+			<a
+				href={ templ.SafeURL("/session/" + sess.ID) }
 				id={ "sess-" + sess.ID }
-				class="relative block p-2.5 rounded-md mb-1 hover:bg-neutral-50/5 transition-colors cursor-pointer"
+				class="relative block p-2.5 rounded-md mb-1 hover:bg-neutral-50/5 transition-colors cursor-pointer no-underline text-inherit"
 				data-status={ sess.Status }
 				x-data="{ ctxOpen: false, ctxX: 0, ctxY: 0 }"
 				x-show={ "filters.size === 0 || filters.has('" + sess.Status + "')" }
 				x-transition
 				@contextmenu.prevent="ctxX = $event.offsetX; ctxY = $event.offsetY; ctxOpen = true; window.__ctxMenuOpen = true"
 				@click.away="ctxOpen = false; window.__ctxMenuOpen = false"
-				@click="if (!ctxOpen) window.location.href = '/session/' + $el.dataset.sid"
-				data-sid={ sess.ID }
 			>
 				<!-- Session name with chain type badge -->
 				<div class="flex items-center gap-1.5 mb-0.5">
@@ -75,8 +74,11 @@ templ SessionListItems(sessions []*models.Session) {
 						<i class="ph-bold ph-timer"></i>
 						{ formatDuration(sess.ElapsedMs) }
 					</span>
-					<span class="text-neutral-700">
-						{ sess.ID[:8] }
+					<span class="text-neutral-500" title={ sess.StartedAt.In(easternTZ()).Format("Jan 2, 2006 3:04:05 PM") }>
+						{ sess.StartedAt.In(easternTZ()).Format("3:04 PM") }
+					</span>
+					<span class="text-neutral-700 text-[10px]" title={ sess.ID }>
+						{ sess.ID[:6] }
 					</span>
 				</div>
 				<!-- Right-click context menu -->
@@ -128,7 +130,7 @@ templ SessionListItems(sessions []*models.Session) {
 						</button>
 					</div>
 				</div>
-			</div>
+			</a>
 	}
 }
 
@@ -232,7 +234,7 @@ templ ToolCallEntry(evt models.Event, sess *models.Session) {
 	if agent != nil {
 		{{ color = agentColor(agent) }}
 	}
-	<div class="mb-1 ml-4 text-xs" x-data="{ open: false }">
+	<div class="mb-1 ml-4 text-xs tool-entry" x-data="{ open: false }">
 		<!-- Collapsed header (always visible) -->
 		<button
 			class="flex items-center gap-1.5 text-neutral-500 hover:text-neutral-300 transition-colors w-full text-left"
