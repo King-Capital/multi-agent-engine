@@ -81,6 +81,7 @@ func main() {
 					ID:         s.ID,
 					Name:       s.Name,
 					TeamConfig: chainStr,
+					ChainType:  chainStr,
 					Status:     s.Status,
 					StartedAt:  s.CreatedAt,
 				}
@@ -118,6 +119,7 @@ func main() {
 						}
 						if chain, ok := data["team_config"].(string); ok {
 							sess.TeamConfig = chain
+							sess.ChainType = chain
 						}
 
 					case "agent_spawn":
@@ -231,6 +233,9 @@ func main() {
 	r.Get("/session/{sessionID}", handleSession)
 	r.Get("/agents", handleAgentsList)
 	r.Get("/agents/{slug}", handleAgentDetail)
+
+	// Static files (favicon, etc.)
+	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
 	// Agent persona API
 	r.Route("/api/agents", func(r chi.Router) {
