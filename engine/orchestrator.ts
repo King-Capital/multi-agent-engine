@@ -397,6 +397,7 @@ export class Orchestrator {
     // Emit lead output summary to conversation stream
     const leadSummary = this.summarizeOutput(leadResult.output, 500);
     await this.emitter.message(session.id, leadId, teamConfig.lead.name, "user", leadSummary);
+    await this.emitter.agentDone(session.id, leadId, leadResult.grade);
 
     if (leadResult.grade === "FAILED" || !teamConfig.members.length) {
       const msg = leadResult.grade === "FAILED"
@@ -480,6 +481,7 @@ export class Orchestrator {
       // Emit worker output summary to conversation stream
       const workerSummary = this.summarizeOutput(result.output, 400);
       await this.emitter.message(session.id, workerId, member.name, "user", workerSummary);
+      await this.emitter.agentDone(session.id, workerId, result.grade);
 
       return result;
     });
