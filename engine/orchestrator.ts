@@ -119,7 +119,21 @@ export class Orchestrator {
   }
 
   sendUserMessage(sessionId: string, message: string): void {
-    // Forward to the orchestrator's lead RPC session (first available sender)
+    // Support @agent-name targeting: "@Code Reviewer focus on error handling"
+    const targetMatch = message.match(/^@([\w\s-]+?)\s+(.+)/s);
+    if (targetMatch) {
+      const targetName = (targetMatch[1] ?? '').toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      const actualMessage = targetMatch[2] ?? message;
+      for (const [key, sender] of this.messageSenders) {
+        if (key.startsWith(sessionId) && key.includes(targetName)) {
+          console.log(`[orchestrator] Targeted message to ${targetName}: ${actualMessage.slice(0, 80)}`);
+          sender(actualMessage);
+          return;
+        }
+      }
+      console.warn(`[orchestrator] No active agent matching @${targetName}, broadcasting`);
+    }
+    // Broadcast to first available sender (default behavior)
     for (const [key, sender] of this.messageSenders) {
       if (key.startsWith(sessionId)) {
         sender(message);
@@ -373,6 +387,10 @@ export class Orchestrator {
       : buildSystemPrompt(leadPersona);
     const leadTools = step.tools_override ?? leadPersona.tools;
 
+    // Emit the prompt being sent to the lead
+    await this.emitter.message(session.id, leadId, "Orchestrator", "user",
+      "📋 **Prompt to " + teamConfig.lead.name + ":**\n\n" + leadPrompt.slice(0, 3000));
+
     const leadOpts: DelegateOptions = {
       persona: leadPersona,
       systemPrompt: leadSystemPrompt,
@@ -406,7 +424,7 @@ export class Orchestrator {
     this.checkBudget(session, leadId, leadResult.costUsd);
 
     // Emit lead output summary to conversation stream
-    const leadSummary = this.summarizeOutput(leadResult.output, 500);
+    const leadSummary = this.summarizeOutput(leadResult.output, 2000);
     await this.emitter.message(session.id, leadId, teamConfig.lead.name, "user", leadSummary);
     await this.emitter.agentDone(session.id, leadId, leadResult.grade);
 
@@ -447,6 +465,10 @@ export class Orchestrator {
       const workerPrompt = assignment
         ? `Your assignment from ${teamConfig.lead.name}:\n${assignment}\n\nOriginal task: ${task}`
         : `Brief from ${teamConfig.lead.name}:\n${leadResult.output}\n\nOriginal task: ${task}`;
+
+      // Emit the prompt being sent to the worker
+      await this.emitter.message(session.id, workerId, teamConfig.lead.name, "user",
+        "📋 **Assignment to " + member.name + ":**\n\n" + workerPrompt.slice(0, 3000));
 
       const workerOpts: DelegateOptions = {
         persona: workerPersona,
@@ -490,7 +512,7 @@ export class Orchestrator {
       this.checkBudget(session, workerId, result.costUsd);
 
       // Emit worker output summary to conversation stream
-      const workerSummary = this.summarizeOutput(result.output, 400);
+      const workerSummary = this.summarizeOutput(result.output, 1500);
       await this.emitter.message(session.id, workerId, member.name, "user", workerSummary);
       await this.emitter.agentDone(session.id, workerId, result.grade);
 
@@ -669,7 +691,7 @@ export class Orchestrator {
     this.checkBudget(session, agentId, result.costUsd);
 
     // Emit agent output summary
-    const agentSummary = this.summarizeOutput(result.output, 500);
+    const agentSummary = this.summarizeOutput(result.output, 2000);
     await this.emitter.message(session.id, agentId, persona.name, "user", agentSummary);
 
     return result;

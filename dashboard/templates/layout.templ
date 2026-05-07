@@ -123,7 +123,18 @@ templ Layout(title string) {
 					es.addEventListener('resume', () => updateStatusBadge('active', 'bg-green-500/20 text-green-400'));
 					es.addEventListener('waiting', () => updateStatusBadge('waiting', 'bg-yellow-500/20 text-yellow-400'));
 
-					es.onopen = () => { if (indicator) { indicator.textContent = '●'; indicator.className = 'text-xs text-green-500'; indicator.title = 'SSE connected'; } };
+					es.onopen = () => {
+						if (indicator) { indicator.textContent = '●'; indicator.className = 'text-xs text-green-500'; indicator.title = 'SSE connected'; }
+						// Re-fetch session status on reconnect (catches status changes missed during disconnect)
+						fetch('/api/sessions/' + sessionId).then(r => r.json()).then(s => {
+							if (s.status === 'completed') updateStatusBadge('completed', 'bg-blue-500/20 text-blue-400');
+							else if (s.status === 'error') updateStatusBadge('error', 'bg-red-500/20 text-red-400');
+							else if (s.status === 'paused') updateStatusBadge('paused', 'bg-amber-500/20 text-amber-400');
+							// Also refresh panels
+							htmx.ajax('GET', '/htmx/session/' + sessionId + '/agents', {target:'#agent-tree', swap:'innerHTML'});
+							htmx.ajax('GET', '/htmx/session/' + sessionId + '/costs', {target:'#costs', swap:'innerHTML'});
+						}).catch(() => {});
+					};
 					es.onerror = () => { if (indicator) { indicator.textContent = '●'; indicator.className = 'text-xs text-red-500'; indicator.title = 'SSE reconnecting...'; } };
 				}
 

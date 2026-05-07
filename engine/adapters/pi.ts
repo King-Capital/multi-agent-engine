@@ -111,6 +111,14 @@ export class PiAdapter implements PlatformAdapter {
         stdout: "pipe",
         stderr: "pipe",
         cwd: opts.workingDir,
+        env: {
+          ...process.env,
+          MAE_SESSION_ID: opts.sessionDir?.split("/").pop() ?? "",
+          MAE_AGENT_ID: opts.persona.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+          MAE_PARENT_ID: opts.parentId ?? "",
+          MAE_DASHBOARD_URL: process.env.MAE_DASHBOARD_URL ?? "",
+          MAE_API_TOKEN: process.env.MAE_API_TOKEN ?? "",
+        },
       });
 
       const timer = setTimeout(async () => {
