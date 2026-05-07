@@ -362,6 +362,10 @@ export class Orchestrator {
       step.till_done ? `\nTill done:\n${step.till_done.map((t) => `- [ ] ${t}`).join("\n")}` : "",
     ].join("\n");
 
+    // Emit the prompt being sent to the lead
+    await this.emitter.message(session.id, leadId, "Orchestrator", "user",
+      "📋 **Prompt to " + teamConfig.lead.name + ":**\n\n" + leadPrompt.slice(0, 3000));
+
     const leadOpts: DelegateOptions = {
       persona: leadPersona,
       systemPrompt: buildSystemPrompt(leadPersona),
@@ -436,6 +440,10 @@ export class Orchestrator {
       const workerPrompt = assignment
         ? `Your assignment from ${teamConfig.lead.name}:\n${assignment}\n\nOriginal task: ${task}`
         : `Brief from ${teamConfig.lead.name}:\n${leadResult.output}\n\nOriginal task: ${task}`;
+
+      // Emit the prompt being sent to the worker
+      await this.emitter.message(session.id, workerId, teamConfig.lead.name, "user",
+        "📋 **Assignment to " + member.name + ":**\n\n" + workerPrompt.slice(0, 3000));
 
       const workerOpts: DelegateOptions = {
         persona: workerPersona,
