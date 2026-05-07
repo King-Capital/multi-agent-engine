@@ -6,6 +6,30 @@ import type { PlatformAdapter, DelegateOptions, DelegateResult, StreamEvent } fr
 export class PiAdapter implements PlatformAdapter {
   name = "pi";
 
+  private static MODEL_PRICING: Record<string, { input: number; output: number; cacheRead?: number }> = {
+    // Anthropic (per million tokens)
+    "opus-nocache": { input: 15, output: 75, cacheRead: 1.5 },
+    "sonnet-nocache": { input: 3, output: 15, cacheRead: 0.3 },
+    "claude-opus-4.6": { input: 15, output: 75, cacheRead: 1.5 },
+    "claude-sonnet-4.6": { input: 3, output: 15, cacheRead: 0.3 },
+    // Gemini
+    "gemini-3.1-pro": { input: 1.25, output: 5 },
+    "pro-nocache": { input: 1.25, output: 5 },
+    // OpenAI
+    "gpt-5.5": { input: 2, output: 8 },
+    "o3-mini": { input: 1.1, output: 4.4 },
+  };
+
+  private computeCostFromTokens(model: string, inputTokens: number, outputTokens: number, cacheReadTokens: number): number {
+    const mapped = this.mapModel(model);
+    const pricing = PiAdapter.MODEL_PRICING[mapped];
+    if (!pricing) return 0;
+    const inputCost = (inputTokens - cacheReadTokens) * pricing.input / 1_000_000;
+    const outputCost = outputTokens * pricing.output / 1_000_000;
+    const cacheCost = cacheReadTokens * (pricing.cacheRead ?? pricing.input * 0.1) / 1_000_000;
+    return inputCost + outputCost + cacheCost;
+  }
+
   async isAvailable(): Promise<boolean> {
     try {
       const result = await $`which pi`.text();
@@ -163,6 +187,14 @@ export class PiAdapter implements PlatformAdapter {
                     if (usage) {
                       totalCost = messages.reduce((sum: number, m: { usage?: { cost?: { total?: number } } }) =>
                         sum + (m.usage?.cost?.total ?? 0), 0);
+                    // If no cost reported, compute from token counts
+                    if (totalCost === 0 && totalTokens > 0) {
+                      const inputTokens = messages.reduce((sum: number, m: { usage?: { inputTokens?: number; input_tokens?: number } }) =>
+                        sum + (m.usage?.inputTokens ?? m.usage?.input_tokens ?? 0), 0);
+                      const outputTokens = messages.reduce((sum: number, m: { usage?: { outputTokens?: number; output_tokens?: number } }) =>
+                        sum + (m.usage?.outputTokens ?? m.usage?.output_tokens ?? 0), 0);
+                      totalCost = this.computeCostFromTokens(opts.model, inputTokens, outputTokens, cacheReadTokens);
+                    }
                     }
                   }
                   opts.onStreamEvent?.({ type: "cost", costUsd: totalCost, tokensUsed: totalTokens, cacheReadTokens });
@@ -330,9 +362,19 @@ export class PiAdapter implements PlatformAdapter {
           const costTotal = cost?.total ?? 0;
           const tokens = (usage.totalTokens as number) ?? 0;
           const cache = (usage.cacheRead as number) ?? 0;
-          if (costTotal > 0) {
-            onCost(costTotal, tokens, cache);
-            onStream({ type: "cost", costUsd: costTotal, tokensUsed: tokens, cacheReadTokens: cache });
+          let finalCost = costTotal;
+          if (finalCost === 0 && tokens > 0) {
+            // Pi/LiteLLM didn't report cost -- compute from token counts
+            const inputTokens = (usage.inputTokens as number) ?? (usage.input_tokens as number) ?? 0;
+            const outputTokens = (usage.outputTokens as number) ?? (usage.output_tokens as number) ?? 0;
+            finalCost = this.computeCostFromTokens(
+              (msg as Record<string, unknown>).model as string ?? "opus-nocache",
+              inputTokens, outputTokens, cache
+            );
+          }
+          if (finalCost > 0 || tokens > 0) {
+            onCost(finalCost, tokens, cache);
+            onStream({ type: "cost", costUsd: finalCost, tokensUsed: tokens, cacheReadTokens: cache });
           }
         }
       }
