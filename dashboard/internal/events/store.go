@@ -141,6 +141,7 @@ func (s *Store) applyEvent(evt models.Event) {
 	case models.EventSessionStart:
 		sess.Name = evt.Data.SessionName
 		sess.TeamConfig = evt.Data.TeamConfig
+		sess.ChainType = evt.Data.TeamConfig
 		sess.TaskPrompt = evt.Data.TaskPrompt
 
 	case models.EventSessionEnd:
