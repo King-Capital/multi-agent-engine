@@ -367,13 +367,19 @@ export class Orchestrator {
       step.till_done ? `\nTill done:\n${step.till_done.map((t) => `- [ ] ${t}`).join("\n")}` : "",
     ].join("\n");
 
+    // Apply per-step overrides from chain config
+    const leadSystemPrompt = step.system_prompt_append
+      ? buildSystemPrompt(leadPersona) + "\n\n" + step.system_prompt_append
+      : buildSystemPrompt(leadPersona);
+    const leadTools = step.tools_override ?? leadPersona.tools;
+
     const leadOpts: DelegateOptions = {
       persona: leadPersona,
-      systemPrompt: buildSystemPrompt(leadPersona),
+      systemPrompt: leadSystemPrompt,
       userPrompt: leadPrompt,
       model: resolveModel(teamConfig.lead.model),
       thinking: "high" as const,
-      tools: leadPersona.tools,
+      tools: leadTools,
       domain: leadPersona.domain,
       workingDir: session.workingDir,
       sessionDir: `data/sessions/${session.id}`,

@@ -55,6 +55,8 @@ export interface ChainStep {
     max_retries?: number;
     label?: string;
   };
+  tools_override?: string[];
+  system_prompt_append?: string;
   till_done?: string[];
   on_feedback?: {
     retry_team: string;
