@@ -1,0 +1,45 @@
+# Tool Registry -- centralized tool definitions for agent personas
+# Personas reference groups instead of listing individual tools
+
+groups:
+  read-only:
+    description: "Read and explore codebases"
+    tools: [read, grep, find]
+
+  builder:
+    description: "Full code implementation"
+    tools: [read, write, bash, grep, find]
+
+  reviewer:
+    description: "Read and analyze code"
+    tools: [read, grep, find, bash]
+
+  scout:
+    description: "Fast codebase exploration"
+    tools: [read, grep, find]
+
+  orchestrator:
+    description: "Session management only"
+    tools: []
+
+  full:
+    description: "All available tools"
+    tools: [read, write, bash, grep, find]
+
+# Tool definitions
+tools:
+  read:
+    description: "Read file contents"
+    risk: low
+  write:
+    description: "Write/overwrite file contents"
+    risk: medium
+  bash:
+    description: "Execute shell commands"
+    risk: high
+  grep:
+    description: "Search file contents with regex"
+    risk: low
+  find:
+    description: "Find files by name/pattern"
+    risk: low
