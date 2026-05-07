@@ -20,14 +20,24 @@ export class PiAdapter implements PlatformAdapter {
     "o3-mini": { input: 1.1, output: 4.4 },
   };
 
-  private computeCostFromTokens(model: string, inputTokens: number, outputTokens: number, cacheReadTokens: number): number {
+  private computeCostFromTokens(model: string, inputTokens: number, outputTokens: number, cacheReadTokens: number, totalTokens?: number): number {
     const mapped = this.mapModel(model);
     const pricing = PiAdapter.MODEL_PRICING[mapped];
     if (!pricing) return 0;
-    const inputCost = (inputTokens - cacheReadTokens) * pricing.input / 1_000_000;
-    const outputCost = outputTokens * pricing.output / 1_000_000;
-    const cacheCost = cacheReadTokens * (pricing.cacheRead ?? pricing.input * 0.1) / 1_000_000;
-    return inputCost + outputCost + cacheCost;
+    // If we have granular token counts, use them
+    if (inputTokens > 0 || outputTokens > 0) {
+      const inputCost = (inputTokens - cacheReadTokens) * pricing.input / 1_000_000;
+      const outputCost = outputTokens * pricing.output / 1_000_000;
+      const cacheCost = cacheReadTokens * (pricing.cacheRead ?? pricing.input * 0.1) / 1_000_000;
+      return inputCost + outputCost + cacheCost;
+    }
+    // Fallback: only totalTokens available -- estimate 70% input, 30% output
+    if (totalTokens && totalTokens > 0) {
+      const estInput = Math.round(totalTokens * 0.7);
+      const estOutput = totalTokens - estInput;
+      return (estInput * pricing.input + estOutput * pricing.output) / 1_000_000;
+    }
+    return 0;
   }
 
   async isAvailable(): Promise<boolean> {
@@ -369,7 +379,7 @@ export class PiAdapter implements PlatformAdapter {
             const outputTokens = (usage.outputTokens as number) ?? (usage.output_tokens as number) ?? 0;
             finalCost = this.computeCostFromTokens(
               (msg as Record<string, unknown>).model as string ?? "opus-nocache",
-              inputTokens, outputTokens, cache
+              inputTokens, outputTokens, cache, tokens
             );
           }
           if (finalCost > 0 || tokens > 0) {
