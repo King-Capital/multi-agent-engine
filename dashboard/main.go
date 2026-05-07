@@ -358,11 +358,12 @@ func authMiddleware(next http.Handler) http.Handler {
 
 		path := r.URL.Path
 		isAPI := strings.HasPrefix(path, "/api/")
-		isPublicAPI := path == "/api/health" || path == "/api/users" || strings.HasSuffix(path, "/stream")
+		isPublicAPI := path == "/api/health" || path == "/api/users" || strings.HasSuffix(path, "/stream") || strings.HasSuffix(path, "/message")
 		isUIPage := !isAPI
 
 		// Allow unauthenticated GET/HEAD for UI pages and public API endpoints
-		if (r.Method == "GET" || r.Method == "HEAD") && (isUIPage || isPublicAPI) {
+		// Also allow POST for /message (dashboard steering input)
+		if ((r.Method == "GET" || r.Method == "HEAD") && (isUIPage || isPublicAPI)) || (r.Method == "POST" && strings.HasSuffix(path, "/message")) {
 			next.ServeHTTP(w, r)
 			return
 		}
