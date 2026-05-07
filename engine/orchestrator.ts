@@ -395,7 +395,7 @@ export class Orchestrator {
     this.checkBudget(session, leadId, leadResult.costUsd);
 
     // Emit lead output summary to conversation stream
-    const leadSummary = this.summarizeOutput(leadResult.output, 500);
+    const leadSummary = this.summarizeOutput(leadResult.output, 2000);
     await this.emitter.message(session.id, leadId, teamConfig.lead.name, "user", leadSummary);
     await this.emitter.agentDone(session.id, leadId, leadResult.grade);
 
@@ -479,7 +479,7 @@ export class Orchestrator {
       this.checkBudget(session, workerId, result.costUsd);
 
       // Emit worker output summary to conversation stream
-      const workerSummary = this.summarizeOutput(result.output, 400);
+      const workerSummary = this.summarizeOutput(result.output, 1500);
       await this.emitter.message(session.id, workerId, member.name, "user", workerSummary);
       await this.emitter.agentDone(session.id, workerId, result.grade);
 
@@ -658,7 +658,7 @@ export class Orchestrator {
     this.checkBudget(session, agentId, result.costUsd);
 
     // Emit agent output summary
-    const agentSummary = this.summarizeOutput(result.output, 500);
+    const agentSummary = this.summarizeOutput(result.output, 2000);
     await this.emitter.message(session.id, agentId, persona.name, "user", agentSummary);
 
     return result;
