@@ -1,0 +1,7 @@
+{
+  "name": "pi-dashboard-bridge",
+  "version": "1.0.0",
+  "description": "Streams Pi agent events to the MAE dashboard via HTTP",
+  "main": "index.ts",
+  "type": "module"
+}
