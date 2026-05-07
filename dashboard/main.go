@@ -81,6 +81,7 @@ func main() {
 					ID:         s.ID,
 					Name:       s.Name,
 					TeamConfig: chainStr,
+					ChainType:  chainStr,
 					Status:     s.Status,
 					StartedAt:  s.CreatedAt,
 				}
@@ -118,6 +119,7 @@ func main() {
 						}
 						if chain, ok := data["team_config"].(string); ok {
 							sess.TeamConfig = chain
+							sess.ChainType = chain
 						}
 
 					case "agent_spawn":
@@ -150,19 +152,19 @@ func main() {
 							agentID = *evt.AgentID
 						}
 						if a, ok := sess.Agents[agentID]; ok {
-							if cost, ok := payload["cost_usd"].(float64); ok && cost > 0 {
+							if cost, ok := payload["cost_usd"].(float64); ok && cost > a.CostUSD {
 								a.CostUSD = cost
 							}
-							if tokens, ok := payload["tokens_used"].(float64); ok {
+							if tokens, ok := payload["tokens_used"].(float64); ok && int64(tokens) > a.TokensUsed {
 								a.TokensUsed = int64(tokens)
 							}
-							if ctxTok, ok := payload["context_tokens"].(float64); ok {
+							if ctxTok, ok := payload["context_tokens"].(float64); ok && int64(ctxTok) > a.ContextTokens {
 								a.ContextTokens = int64(ctxTok)
 							}
 							if cost, ok := data["cost_usd"].(float64); ok && cost > a.CostUSD {
 								a.CostUSD = cost
 							}
-							if tokens, ok := data["tokens_used"].(float64); ok {
+							if tokens, ok := data["tokens_used"].(float64); ok && int64(tokens) > a.TokensUsed {
 								a.TokensUsed = int64(tokens)
 							}
 						}
@@ -231,6 +233,9 @@ func main() {
 	r.Get("/session/{sessionID}", handleSession)
 	r.Get("/agents", handleAgentsList)
 	r.Get("/agents/{slug}", handleAgentDetail)
+
+	// Static files (favicon, etc.)
+	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
 	// Agent persona API
 	r.Route("/api/agents", func(r chi.Router) {
@@ -353,7 +358,7 @@ func authMiddleware(next http.Handler) http.Handler {
 
 		path := r.URL.Path
 		isAPI := strings.HasPrefix(path, "/api/")
-		isPublicAPI := path == "/api/health" || strings.HasSuffix(path, "/stream")
+		isPublicAPI := path == "/api/health" || path == "/api/users" || strings.HasSuffix(path, "/stream")
 		isUIPage := !isAPI
 
 		// Allow unauthenticated GET/HEAD for UI pages and public API endpoints

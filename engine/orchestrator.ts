@@ -378,7 +378,7 @@ export class Orchestrator {
       onStreamEvent: (streamEvt) => {
         if (streamEvt.type === "tool_call") {
           this.trackToolCall(leadId, streamEvt.tool ?? "");
-          this.emitter.toolCall(session.id, leadId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running");
+          this.emitter.toolCall(session.id, leadId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
         } else if (streamEvt.type === "cost") {
           this.emitter.costUpdate(session.id, leadId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
         }
@@ -393,6 +393,10 @@ export class Orchestrator {
     session.totalTokens += leadResult.tokensUsed;
     await this.emitter.costUpdate(session.id, leadId, leadResult.costUsd, leadResult.tokensUsed, 0);
     this.checkBudget(session, leadId, leadResult.costUsd);
+
+    // Emit lead output summary to conversation stream
+    const leadSummary = this.summarizeOutput(leadResult.output, 500);
+    await this.emitter.message(session.id, leadId, teamConfig.lead.name, "user", leadSummary);
 
     if (leadResult.grade === "FAILED" || !teamConfig.members.length) {
       const msg = leadResult.grade === "FAILED"
@@ -448,7 +452,7 @@ export class Orchestrator {
         onStreamEvent: (streamEvt) => {
           if (streamEvt.type === "tool_call") {
             this.trackToolCall(workerId, streamEvt.tool ?? "");
-            this.emitter.toolCall(session.id, workerId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running");
+            this.emitter.toolCall(session.id, workerId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
           } else if (streamEvt.type === "cost") {
             this.emitter.costUpdate(session.id, workerId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
           }
@@ -472,6 +476,10 @@ export class Orchestrator {
       session.totalTokens += result.tokensUsed;
       await this.emitter.costUpdate(session.id, workerId, result.costUsd, result.tokensUsed, 0);
       this.checkBudget(session, workerId, result.costUsd);
+
+      // Emit worker output summary to conversation stream
+      const workerSummary = this.summarizeOutput(result.output, 400);
+      await this.emitter.message(session.id, workerId, member.name, "user", workerSummary);
 
       return result;
     });
@@ -623,7 +631,7 @@ export class Orchestrator {
       onStreamEvent: (streamEvt) => {
         if (streamEvt.type === "tool_call") {
           this.trackToolCall(agentId, streamEvt.tool ?? "");
-          this.emitter.toolCall(session.id, agentId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running");
+          this.emitter.toolCall(session.id, agentId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
         } else if (streamEvt.type === "cost") {
           this.emitter.costUpdate(session.id, agentId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
         }
@@ -646,6 +654,10 @@ export class Orchestrator {
     session.totalCost += result.costUsd;
     session.totalTokens += result.tokensUsed;
     this.checkBudget(session, agentId, result.costUsd);
+
+    // Emit agent output summary
+    const agentSummary = this.summarizeOutput(result.output, 500);
+    await this.emitter.message(session.id, agentId, persona.name, "user", agentSummary);
 
     return result;
   }
@@ -737,6 +749,26 @@ export class Orchestrator {
     if (session.totalTokens >= this.budgets.max_total_tokens) {
       throw new Error(`Token budget exceeded: ${session.totalTokens} >= limit ${this.budgets.max_total_tokens}`);
     }
+  }
+
+
+  private summarizeOutput(output: string, maxLen: number): string {
+    if (!output || output.length === 0) return "(no output)";
+    // Try to extract a grade line if present
+    const gradeLine = output.match(/GRADE:\s*\w+.*/i)?.[0] ?? "";
+    // Try to extract findings
+    const findings = output.split("\n")
+      .filter(l => /^\s*-\s*P[0-3]:/.test(l) || /^\s*\d+\./.test(l) || /^##\s/.test(l))
+      .slice(0, 5)
+      .join("\n");
+    
+    if (gradeLine || findings) {
+      const parts = [gradeLine, findings].filter(Boolean).join("\n\n");
+      return parts.length <= maxLen ? parts : parts.slice(0, maxLen) + "...";
+    }
+    
+    // Fallback: first N chars
+    return output.length <= maxLen ? output : output.slice(0, maxLen) + "...";
   }
 
   private getAdapter(name?: string): PlatformAdapter {

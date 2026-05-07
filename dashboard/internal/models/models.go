@@ -132,6 +132,8 @@ type Session struct {
 	Name        string             `json:"name"`
 	TeamConfig  string             `json:"team_config"`
 	TaskPrompt  string             `json:"task_prompt"`
+	ChainType   string             `json:"chain_type"`
+	Tags        []string           `json:"tags,omitempty"`
 	Status      string             `json:"status"`
 	StartedAt   time.Time          `json:"started_at"`
 	ElapsedMs   int64              `json:"elapsed_ms"`

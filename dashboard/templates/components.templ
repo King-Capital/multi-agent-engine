@@ -27,17 +27,16 @@ templ SessionListItems(sessions []*models.Session) {
 		<p class="text-xs text-neutral-500 p-2">No sessions yet.</p>
 	}
 	for _, sess := range sessions {
-			<div
+			<a
+				href={ templ.SafeURL("/session/" + sess.ID) }
 				id={ "sess-" + sess.ID }
-				class="relative block p-2.5 rounded-md mb-1 hover:bg-neutral-50/5 transition-colors cursor-pointer"
+				class="relative block p-2.5 rounded-md mb-1 hover:bg-neutral-50/5 transition-colors cursor-pointer no-underline text-inherit"
 				data-status={ sess.Status }
 				x-data="{ ctxOpen: false, ctxX: 0, ctxY: 0 }"
 				x-show={ "filters.size === 0 || filters.has('" + sess.Status + "')" }
 				x-transition
 				@contextmenu.prevent="ctxX = $event.offsetX; ctxY = $event.offsetY; ctxOpen = true; window.__ctxMenuOpen = true"
 				@click.away="ctxOpen = false; window.__ctxMenuOpen = false"
-				@click="if (!ctxOpen) window.location.href = '/session/' + $el.dataset.sid"
-				data-sid={ sess.ID }
 			>
 				<!-- Session name with chain type badge -->
 				<div class="flex items-center gap-1.5 mb-0.5">
@@ -46,7 +45,11 @@ templ SessionListItems(sessions []*models.Session) {
 				</div>
 				<!-- Chain + platform info -->
 				<div class="ml-3.5 mb-0.5 flex items-center gap-1.5">
-					if sess.TeamConfig != "" {
+					if sess.ChainType != "" {
+						<span class={ "text-xs px-1.5 py-0.5 rounded " + chainBadgeClass(sess.ChainType) }>
+							{ sess.ChainType }
+						</span>
+					} else if sess.TeamConfig != "" {
 						<span class="text-xs px-1 py-0.25 rounded bg-neutral-50/5 text-neutral-400">
 							{ sess.TeamConfig }
 						</span>
@@ -71,8 +74,11 @@ templ SessionListItems(sessions []*models.Session) {
 						<i class="ph-bold ph-timer"></i>
 						{ formatDuration(sess.ElapsedMs) }
 					</span>
-					<span class="text-neutral-700">
-						{ sess.ID[:8] }
+					<span class="text-neutral-500" title={ sess.StartedAt.In(easternTZ()).Format("Jan 2, 2006 3:04:05 PM") }>
+						{ sess.StartedAt.In(easternTZ()).Format("3:04 PM") }
+					</span>
+					<span class="text-neutral-700 text-[10px]" title={ sess.ID }>
+						{ sess.ID[:6] }
 					</span>
 				</div>
 				<!-- Right-click context menu -->
@@ -124,7 +130,7 @@ templ SessionListItems(sessions []*models.Session) {
 						</button>
 					</div>
 				</div>
-			</div>
+			</a>
 	}
 }
 
@@ -195,6 +201,29 @@ templ ConversationStream(sess *models.Session) {
 				@ErrorEntry(evt, sess)
 		}
 	}
+	if sess.Status == "active" || sess.Status == "waiting" {
+		<div class="mt-4 border-t border-neutral-800 pt-3" x-data={ "{ msg: \"\" , sid: \"" + sess.ID + "\" }" }>
+			<form class="flex gap-2"
+				@submit.prevent="
+					if (!msg.trim()) return;
+					fetch('/api/sessions/' + encodeURIComponent(sid) + '/message', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+						body: 'content=' + encodeURIComponent(msg)
+					});
+					msg = '';
+				"
+			>
+				<input type="text" x-model="msg"
+					placeholder="Steer the orchestrator..."
+					class="flex-1 bg-neutral-900 border border-neutral-700 rounded-md px-3 py-1.5 text-sm text-neutral-200 placeholder-neutral-600 focus:outline-none focus:border-cyan-500/50"
+				/>
+				<button type="submit"
+					class="px-3 py-1.5 bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-300 text-sm rounded-md transition-colors"
+				>Send</button>
+			</form>
+		</div>
+	}
 }
 
 templ MessageBubble(evt models.Event, sess *models.Session) {
@@ -228,7 +257,7 @@ templ ToolCallEntry(evt models.Event, sess *models.Session) {
 	if agent != nil {
 		{{ color = agentColor(agent) }}
 	}
-	<div class="mb-1 ml-4 text-xs" x-data="{ open: false }">
+	<div class="mb-1 ml-4 text-xs tool-entry" x-data="{ open: false }">
 		<!-- Collapsed header (always visible) -->
 		<button
 			class="flex items-center gap-1.5 text-neutral-500 hover:text-neutral-300 transition-colors w-full text-left"
@@ -245,7 +274,7 @@ templ ToolCallEntry(evt models.Event, sess *models.Session) {
 			</span>
 			<span class="text-neutral-400">{ evt.Data.Tool }</span>
 			if evt.Data.FilePath != "" {
-				<span class="text-neutral-500 truncate max-w-60" title={ evt.Data.FilePath }>{ evt.Data.FilePath }</span>
+				<span class="text-neutral-500 truncate max-w-xs" title={ evt.Data.FilePath }>{ evt.Data.FilePath }</span>
 			}
 			if evt.Timestamp.Unix() > 0 {
 				<span class="text-neutral-700 ml-auto flex-shrink-0">{ evt.Timestamp.In(easternTZ()).Format("3:04:05 PM") }</span>
@@ -598,4 +627,24 @@ func getChildren(sess *models.Session, parentID string) []*models.Agent {
 		return children[i].StartedAt.Before(children[j].StartedAt)
 	})
 	return children
+}
+
+
+func chainBadgeClass(chain string) string {
+	switch chain {
+	case "review-only":
+		return "bg-blue-500/20 text-blue-400"
+	case "plan-build-review":
+		return "bg-green-500/20 text-green-400"
+	case "build-verify":
+		return "bg-cyan-500/20 text-cyan-400"
+	case "swarm-review", "red-blue":
+		return "bg-red-500/20 text-red-400"
+	case "full-sdlc":
+		return "bg-purple-500/20 text-purple-400"
+	case "scout-then-plan":
+		return "bg-yellow-500/20 text-yellow-400"
+	default:
+		return "bg-neutral-50/10 text-neutral-400"
+	}
 }

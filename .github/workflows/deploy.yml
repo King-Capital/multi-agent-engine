@@ -72,7 +72,10 @@ jobs:
         run: cd /opt/mae/engine && bun install
 
       - name: Run migrations
-        run: sudo -u postgres psql -d mae -f /opt/mae/dashboard/migrations/001_initial.sql 2>/dev/null || true
+        run: |
+          for f in /opt/mae/dashboard/migrations/*.sql; do
+            PGPASSWORD=mae psql -h localhost -U mae -d mae -f "$f" 2>/dev/null || true
+          done
 
       - name: Build dashboard
         run: cd /opt/mae/dashboard && templ generate ./templates/ && go build -o mae-dashboard .
@@ -82,9 +85,19 @@ jobs:
 
       - name: Restart dashboard
         run: |
-          systemctl restart mae-dashboard
-          sleep 2
-          systemctl is-active mae-dashboard
+          pkill mae-dashboard || true
+          sleep 3
+          # systemd Restart=always will restart the service
+          # Verify it came back up
+          for i in 1 2 3 4 5; do
+            if curl -sf http://localhost:8400/api/health > /dev/null 2>&1; then
+              echo "Dashboard restarted successfully"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Dashboard failed to restart"
+          exit 1
 
       - name: Health check
         run: |

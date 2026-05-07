@@ -133,14 +133,16 @@ export class EventEmitter {
     agentId: string,
     tool: string,
     filePath: string,
-    status: string
+    status: string,
+    toolArgs?: string,
+    toolResult?: string
   ) {
     return this.emit({
       session_id: sessionId,
       agent_id: agentId,
       event_type: "tool_call",
       timestamp: new Date().toISOString(),
-      data: { tool, file_path: filePath, tool_status: status },
+      data: { tool, file_path: filePath, tool_status: status, tool_args: toolArgs ?? "", tool_result: toolResult ?? "" },
     });
   }
 

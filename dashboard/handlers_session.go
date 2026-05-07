@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"sort"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -324,6 +325,23 @@ func writeSSEHTML(w io.Writer, eventType, html string) {
 
 func handleHTMXSessions(w http.ResponseWriter, r *http.Request) {
 	sessions := store.ListSessions()
+	sortBy := r.URL.Query().Get("sort")
+	switch sortBy {
+	case "oldest":
+		sort.Slice(sessions, func(i, j int) bool {
+			return sessions[i].StartedAt.Before(sessions[j].StartedAt)
+		})
+	case "cost":
+		sort.Slice(sessions, func(i, j int) bool {
+			return sessions[i].TotalCost > sessions[j].TotalCost
+		})
+	case "duration":
+		sort.Slice(sessions, func(i, j int) bool {
+			return sessions[i].ElapsedMs > sessions[j].ElapsedMs
+		})
+	default: // "newest" or empty
+		// Already sorted newest-first from ListSessions()
+	}
 	templates.SessionListItems(sessions).Render(r.Context(), w)
 }
 

@@ -143,6 +143,8 @@ export interface StreamEvent {
   type: "tool_call" | "tool_result" | "assistant_text" | "cost";
   tool?: string;
   filePath?: string;
+  toolArgs?: string;
+  toolResult?: string;
   status?: string;
   content?: string;
   costUsd?: number;

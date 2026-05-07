@@ -8,6 +8,7 @@ templ Layout(title string) {
 		<head>
 			<meta charset="UTF-8"/>
 			<title>{ title } | Agent Dashboard</title>
+			<link rel="icon" type="image/svg+xml" href="/static/favicon.svg"/>
 			@uiImport.HeadTagsMinimalCss()
 			@uiImport.HeadTagsFullJs()
 			<script src="https://cdn.jsdelivr.net/npm/idiomorph@0.3.0/dist/idiomorph-ext.min.js"></script>
@@ -42,6 +43,9 @@ templ Layout(title string) {
 				.msg-md table { border-collapse:collapse; width:100%; margin:0.5em 0; font-size:0.85em; }
 				.msg-md th,.msg-md td { border:1px solid rgba(255,255,255,0.1); padding:0.25em 0.5em; text-align:left; }
 				.msg-md th { background:rgba(255,255,255,0.05); font-weight:600; }
+				/* Fix white bar artifacts in tool call entries */
+				.tool-entry, .tool-entry * { border: none; outline: none; }
+				.tool-entry button { background: transparent; }
 			</style>
 		</head>
 		<body class="h-full bg-[#0a0e17] text-neutral-200">

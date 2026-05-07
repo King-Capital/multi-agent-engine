@@ -1,0 +1,10 @@
+{
+  "name": "pi-context-workflow",
+  "version": "1.0.0",
+  "description": "Context-isolated workflow -- write/test/review/fix with context compaction before review",
+  "main": "index.ts",
+  "type": "module",
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.0"
+  }
+}

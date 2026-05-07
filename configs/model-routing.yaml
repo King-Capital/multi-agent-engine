@@ -49,10 +49,10 @@ tiers:
 # Model aliases used in persona frontmatter
 aliases:
   quality: litellm/opus-nocache
-  main: openai/gpt-5.5
-  fast: openai/gpt-5.5
-  pro: openai/gpt-5.5
-  free: openai/gpt-5.5
+  main: litellm/sonnet-nocache
+  fast: litellm/sonnet-nocache
+  pro: litellm/opus-nocache
+  free: litellm/sonnet-nocache
 
 # Role → tier mapping (always push leaders HIGH)
 roleDefaults:
