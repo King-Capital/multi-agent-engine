@@ -1,0 +1,7 @@
+{
+  "name": "pi-safety-gate",
+  "version": "1.0.0",
+  "description": "Permission gate + git checkpoint -- blocks dangerous commands, auto-stashes before turns",
+  "main": "index.ts",
+  "type": "module"
+}
