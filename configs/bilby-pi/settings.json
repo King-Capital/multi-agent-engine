@@ -1,0 +1,15 @@
+{
+  "name": "Bilby",
+  "description": "OpenClaw test agent -- evaluating Pi as coding backend",
+  "model": "litellm/opus-nocache",
+  "extensions": [
+    "../pi-packages/pi-safety-gate",
+    "../pi-packages/pi-context-workflow",
+    "../pi-packages/pi-dashboard-bridge",
+    "../pi-packages/pi-open-brain"
+  ],
+  "permissions": {
+    "allow": ["bash", "read", "write", "grep", "find"],
+    "deny": []
+  }
+}
