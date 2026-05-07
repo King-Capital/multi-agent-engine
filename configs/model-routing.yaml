@@ -51,7 +51,7 @@ aliases:
   quality: litellm/opus-nocache
   main: litellm/sonnet-nocache
   fast: litellm/sonnet-nocache
-  pro: litellm/opus-nocache
+  pro: openai/gpt-5.5
   free: litellm/sonnet-nocache
 
 # Role → tier mapping (always push leaders HIGH)
