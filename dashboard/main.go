@@ -358,7 +358,7 @@ func authMiddleware(next http.Handler) http.Handler {
 
 		path := r.URL.Path
 		isAPI := strings.HasPrefix(path, "/api/")
-		isPublicAPI := path == "/api/health" || path == "/api/users" || strings.HasSuffix(path, "/stream") || strings.HasSuffix(path, "/message")
+		isPublicAPI := path == "/api/health" || path == "/api/users" || strings.HasSuffix(path, "/stream") || strings.HasSuffix(path, "/message") || strings.HasPrefix(path, "/api/sessions/")
 		isUIPage := !isAPI
 
 		// Allow unauthenticated GET/HEAD for UI pages and public API endpoints
