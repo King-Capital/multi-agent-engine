@@ -17,5 +17,5 @@ jobs:
       - name: Health check
         run: |
           sleep 3
-          curl -sf http://localhost:8400/api/users > /dev/null
+          curl -sf http://localhost:8400/api/health > /dev/null
           echo "Dashboard restarted and healthy"

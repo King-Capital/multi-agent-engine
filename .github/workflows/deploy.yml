@@ -88,5 +88,5 @@ jobs:
 
       - name: Health check
         run: |
-          curl -sf http://localhost:8400/api/users > /dev/null
+          curl -sf http://localhost:8400/api/health > /dev/null
           echo "Dashboard healthy"
