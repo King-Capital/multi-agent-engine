@@ -300,7 +300,12 @@ export class Orchestrator {
       await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
         `Starting step ${i + 1}/${steps.length}: ${stepLabel}.`);
 
-      if (step.parallel) {
+      if (step.deterministic) {
+        const detResult = await this.runDeterministicStep(session, step, i);
+        if (detResult) {
+          previousOutput = detResult;
+        }
+      } else if (step.parallel) {
         parallelResults = await this.runParallelStep(session, step, task, previousOutput, adapterName);
         previousOutput = parallelResults.map((r) => `[${r.agentName}]: ${r.output}`).join("\n\n");
       } else if (step.team) {
@@ -376,17 +381,23 @@ export class Orchestrator {
       step.till_done ? `\nTill done:\n${step.till_done.map((t) => `- [ ] ${t}`).join("\n")}` : "",
     ].join("\n");
 
+    // Apply per-step overrides from chain config
+    const leadSystemPrompt = step.system_prompt_append
+      ? buildSystemPrompt(leadPersona) + "\n\n" + step.system_prompt_append
+      : buildSystemPrompt(leadPersona);
+    const leadTools = step.tools_override ?? leadPersona.tools;
+
     // Emit the prompt being sent to the lead
     await this.emitter.message(session.id, leadId, "Orchestrator", "user",
       "📋 **Prompt to " + teamConfig.lead.name + ":**\n\n" + leadPrompt.slice(0, 3000));
 
     const leadOpts: DelegateOptions = {
       persona: leadPersona,
-      systemPrompt: buildSystemPrompt(leadPersona),
+      systemPrompt: leadSystemPrompt,
       userPrompt: leadPrompt,
       model: resolveModel(teamConfig.lead.model),
       thinking: "high" as const,
-      tools: leadPersona.tools,
+      tools: leadTools,
       domain: leadPersona.domain,
       workingDir: session.workingDir,
       sessionDir: `data/sessions/${session.id}`,
@@ -793,6 +804,60 @@ export class Orchestrator {
     
     // Fallback: first N chars
     return output.length <= maxLen ? output : output.slice(0, maxLen) + "...";
+  }
+
+
+  private async runDeterministicStep(session: SessionState, step: ChainStep, stepIndex: number): Promise<string | null> {
+    const det = step.deterministic!;
+    const label = det.label ?? det.command.slice(0, 40);
+    const maxRetries = det.max_retries ?? 3;
+    const onFailure = det.on_failure ?? "fail";
+
+    await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+      `🔧 Running deterministic step: ${label}`);
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const proc = Bun.spawn(["bash", "-c", det.command], {
+          cwd: session.workingDir,
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+
+        const stdout = await new Response(proc.stdout).text();
+        const stderr = await new Response(proc.stderr).text();
+        const exitCode = await proc.exited;
+
+        if (exitCode === 0) {
+          await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+            `✅ Deterministic step passed: ${label}`);
+          return stdout.slice(0, 2000);
+        }
+
+        const errorMsg = (stderr || stdout).slice(0, 1000);
+        console.warn(`[orchestrator] Deterministic step failed (attempt ${attempt + 1}/${maxRetries + 1}): ${errorMsg.slice(0, 200)}`);
+
+        if (onFailure === "continue") {
+          await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+            `⚠️ Deterministic step failed but continuing: ${label}\n${errorMsg.slice(0, 500)}`);
+          return null;
+        }
+
+        if (onFailure === "loop" && attempt < maxRetries) {
+          await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+            `🔄 Retrying deterministic step (${attempt + 1}/${maxRetries}): ${label}\n${errorMsg.slice(0, 300)}`);
+          continue;
+        }
+
+        // Fail
+        await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+          `❌ Deterministic step failed: ${label}\n${errorMsg.slice(0, 500)}`);
+        throw new Error(`Deterministic step failed after ${attempt + 1} attempts: ${label}`);
+      } catch (err) {
+        if (attempt >= maxRetries || onFailure === "fail") throw err;
+      }
+    }
+    return null;
   }
 
   private getAdapter(name?: string): PlatformAdapter {

@@ -13,7 +13,7 @@ describe("config loading", () => {
   test("loads chains.yaml", () => {
     const chains = loadChains();
     expect(chains.chains["plan-build-review"]).toBeDefined();
-    expect(chains.chains["plan-build-review"]!.steps.length).toBe(3);
+    expect(chains.chains["plan-build-review"]!.steps.length).toBe(4); // 3 teams + 1 deterministic lint
   });
 
   test("loads all personas", () => {
@@ -43,9 +43,9 @@ describe("config loading", () => {
 
   test("gets specific chain", () => {
     const chain = getChain("build-verify");
-    expect(chain.steps.length).toBe(2);
-    expect(chain.steps[1]!.on_feedback).toBeDefined();
-    expect(chain.steps[1]!.on_feedback!.max_attempts).toBe(3);
+    expect(chain.steps.length).toBe(3); // 2 teams + 1 deterministic lint
+    expect(chain.steps[2]!.on_feedback).toBeDefined();
+    expect(chain.steps[2]!.on_feedback!.max_attempts).toBe(3);
   });
 
   test("loads prompts", () => {

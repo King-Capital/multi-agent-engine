@@ -61,6 +61,31 @@ export async function delegateWithHealing(ctx: SelfHealContext): Promise<Delegat
 
   if (!isFailed(result)) return result;
 
+  // Attempt 1.5: Try deterministic autofix before burning tokens on retry
+  if (opts.workingDir) {
+    console.log(`[self-heal] Attempting deterministic autofix in ${opts.workingDir}`);
+    try {
+      // Run common autofixers -- they either fix the issue or no-op harmlessly
+      const fixProc = Bun.spawn(["bash", "-c", [
+        // TypeScript/JS projects
+        "[ -f tsconfig.json ] && bunx tsc --noEmit 2>&1 | head -20",
+        // Go projects
+        "[ -f go.mod ] && go vet ./... 2>&1 | head -20",
+        // General lint --fix
+        "[ -f .eslintrc* ] && bunx eslint --fix . 2>/dev/null || true",
+      ].join("; ")], {
+        cwd: opts.workingDir,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const fixOutput = await new Response(fixProc.stdout).text();
+      const fixExit = await fixProc.exited;
+      if (fixExit === 0 && fixOutput.trim()) {
+        console.log(`[self-heal] Autofix output: ${fixOutput.slice(0, 200)}`);
+      }
+    } catch { /* autofix is best-effort */ }
+  }
+
   // Attempt 2: Same model, more context
   console.log(`[self-heal] Attempt 2: retry with error context`);
   await onEvent("self_heal", {
