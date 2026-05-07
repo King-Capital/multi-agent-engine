@@ -119,7 +119,21 @@ export class Orchestrator {
   }
 
   sendUserMessage(sessionId: string, message: string): void {
-    // Forward to the orchestrator's lead RPC session (first available sender)
+    // Support @agent-name targeting: "@Code Reviewer focus on error handling"
+    const targetMatch = message.match(/^@([\w\s-]+?)\s+(.+)/s);
+    if (targetMatch) {
+      const targetName = (targetMatch[1] ?? '').toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      const actualMessage = targetMatch[2] ?? message;
+      for (const [key, sender] of this.messageSenders) {
+        if (key.startsWith(sessionId) && key.includes(targetName)) {
+          console.log(`[orchestrator] Targeted message to ${targetName}: ${actualMessage.slice(0, 80)}`);
+          sender(actualMessage);
+          return;
+        }
+      }
+      console.warn(`[orchestrator] No active agent matching @${targetName}, broadcasting`);
+    }
+    // Broadcast to first available sender (default behavior)
     for (const [key, sender] of this.messageSenders) {
       if (key.startsWith(sessionId)) {
         sender(message);
