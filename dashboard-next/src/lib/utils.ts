@@ -119,12 +119,19 @@ export function formatCost(usd: number): string {
 
 // ─── Agent display colors ─────────────────────────────────────────────────────
 
-/** 
- * High-contrast agent color based on role.
- * Ignores engine team_color (often low-contrast cyan on dark bg).
- * Used by both agent tree panel and stream tab.
+/**
+ * Agent display color. Prefers the engine's team_color when set and readable.
+ * Falls back to role-based palette for missing or low-contrast colors.
  */
-export function agentColor(role?: string): string {
+export function agentColor(role?: string, teamColor?: string): string {
+  // Use team_color if it's set and not one of the known low-contrast cyans
+  if (teamColor && /^#[0-9a-f]{3,8}$/i.test(teamColor)) {
+    const LOW_CONTRAST = new Set([
+      "#22d3ee", "#36f9f6", "#00d4ff", "#00b4d8", "#0090b0", "#94a3b8",
+    ]);
+    if (!LOW_CONTRAST.has(teamColor.toLowerCase())) return teamColor;
+  }
+  // Role-based fallback
   switch (role) {
     case "orchestrator": return "#a78bfa"; // violet
     case "lead":         return "#60a5fa"; // blue

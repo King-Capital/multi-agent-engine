@@ -73,7 +73,7 @@ function AgentRow({
 	showTokens?: boolean;
 	onClick: () => void;
 }) {
-	const teamColor = agentColor(agent.role);
+	const teamColor = agentColor(agent.role, agent.team_color);
 
 	return (
 		<button
