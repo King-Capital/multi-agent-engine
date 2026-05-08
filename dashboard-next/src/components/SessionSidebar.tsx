@@ -13,9 +13,9 @@
 
 import * as React from "react";
 import { Zap } from "lucide-react";
-import { apiFetch } from "@/lib/api";
-import type { DBSession, DBUser } from "@/lib/types";
-import { cn, shortId, statusColor } from "@/lib/utils";
+import { apiFetch, api } from "@/lib/api";
+import type { DBSession, DBUser, HistoryEntry } from "@/lib/types";
+import { cn, formatCurrency, shortId, statusColor } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -166,6 +166,18 @@ export function SessionSidebar({
 			.catch(() => {});
 	}, []);
 
+	// Fetch history for cost data (keyed by session ID)
+	const [costMap, setCostMap] = React.useState<Map<string, { cost: number; agents: number }>>(new Map());
+	React.useEffect(() => {
+		api.history(500)
+			.then((h) => {
+				const m = new Map<string, { cost: number; agents: number }>();
+				for (const e of h) m.set(e.id, { cost: e.total_cost, agents: e.agent_count });
+				setCostMap(m);
+			})
+			.catch(() => {});
+	}, []);
+
 	// Filter toggle
 	function toggleFilter(f: StatusFilter) {
 		setFilters((prev) => {
@@ -228,12 +240,11 @@ export function SessionSidebar({
 				);
 				break;
 			case "cost":
-				// We don't have cost on DBSession directly, so sort by updated_at as proxy
-				// (sessions with more activity tend to be costlier — good enough for now)
-				sorted.sort(
-					(a, b) =>
-						new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-				);
+				sorted.sort((a, b) => {
+					const ca = costMap.get(a.id)?.cost ?? 0;
+					const cb = costMap.get(b.id)?.cost ?? 0;
+					return cb - ca;
+				});
 				break;
 		}
 
@@ -343,7 +354,15 @@ export function SessionSidebar({
 									{s.status}
 								</Badge>
 								{s.chain && <Badge variant="secondary" className="text-[10px]">{s.chain}</Badge>}
-								<span className="text-[10px] text-slate-500">{s.platform}</span>
+								{(() => {
+									const info = costMap.get(s.id);
+									if (!info || info.cost === 0) return null;
+									return (
+										<span className="text-[10px] text-emerald-400 font-mono">
+											{formatCurrency(info.cost)}
+										</span>
+									);
+								})()}
 							</div>
 						</button>
 					))}
