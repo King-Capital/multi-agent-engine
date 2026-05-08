@@ -2,12 +2,14 @@ package main
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 	"time"
+	"mae.local/dashboard/templates"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -400,4 +402,50 @@ func handleAPISessionHistory(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(history)
+}
+
+// GET /history -- render history page
+func handleHistoryPage(w http.ResponseWriter, r *http.Request) {
+	var entries []templates.HistoryEntry
+
+	if db != nil {
+		rows, err := db.QueryContext(r.Context(), `
+			SELECT 
+				s.id, s.name, COALESCE(s.chain, ''), s.status, 
+				s.created_at, s.completed_at,
+				COALESCE(SUM(a.cost_usd), 0) as total_cost,
+				COUNT(DISTINCT a.id) as agent_count,
+				EXTRACT(EPOCH FROM COALESCE(s.completed_at, NOW()) - s.created_at) as duration_secs
+			FROM sessions s
+			LEFT JOIN agents a ON a.session_id = s.id
+			GROUP BY s.id
+			ORDER BY s.created_at DESC
+			LIMIT 100`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var e templates.HistoryEntry
+				var createdAt, completedAt sql.NullTime
+				var cost float64
+				var agents int
+				var duration float64
+				if err := rows.Scan(&e.ID, &e.Name, &e.Chain, &e.Status,
+					&createdAt, &completedAt, &cost, &agents, &duration); err != nil {
+					continue
+				}
+				e.TotalCost = cost
+				e.AgentCount = agents
+				e.DurationSec = duration
+				if createdAt.Valid {
+					e.CreatedAt = createdAt.Time.Format("Jan 2 15:04")
+				}
+				if completedAt.Valid {
+					e.CompletedAt = completedAt.Time.Format("Jan 2 15:04")
+				}
+				entries = append(entries, e)
+			}
+		}
+	}
+
+	templates.HistoryPage(entries).Render(r.Context(), w)
 }

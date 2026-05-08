@@ -49,7 +49,9 @@ async function loadSdk(): Promise<{
 } | null> {
   if (piModule) return piModule;
   try {
-    piModule = await import("@earendil-works/pi-coding-agent");
+    // Use variable to prevent tsc from resolving the module at compile time
+    const sdkName = "@earendil-works/pi-coding-agent";
+    piModule = await import(/* webpackIgnore: true */ sdkName);
     return piModule;
   } catch {
     return null;
