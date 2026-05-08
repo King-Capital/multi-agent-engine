@@ -721,11 +721,8 @@ function StreamTab({
 		});
 	}
 
-	// Visible sections based on filters
-	const visibleSections = React.useMemo(() => {
-		if (activeFilters.size === 0) return agentSections;
-		return agentSections.filter((s) => activeFilters.has(s.info.name));
-	}, [agentSections, activeFilters]);
+	// Show all agent sections (filtering now via agent tree panel)
+	const visibleSections = agentSections;
 
 	return (
 		<div className="flex flex-col h-full min-h-0">
@@ -735,14 +732,7 @@ function StreamTab({
 				</p>
 			)}
 
-			{/* Agent filter pills */}
-			{allAgents.length > 0 && (
-				<AgentFilterPills
-					agents={allAgents}
-					activeFilters={activeFilters}
-					onToggle={handleFilterToggle}
-				/>
-			)}
+			{/* Agent filter pills removed -- agent tree panel replaces them */}
 
 			<ScrollArea className="flex-1">
 				<div className="p-3">

@@ -332,22 +332,18 @@ export function SessionSidebar({
 									: "border-white/10 bg-white/[0.02]",
 							)}
 						>
-							<div className="flex items-start justify-between gap-2">
-								<div className="min-w-0">
-									<div className="truncate text-sm font-semibold text-zinc-200">
-										{s.name}
-									</div>
-									<div className="mt-1 text-xs text-slate-500">
-										{shortId(s.id)} · {new Date(s.created_at).toLocaleString()}
-									</div>
-								</div>
-								<Badge className={cn(statusColor(s.status), "shrink-0 text-[10px]")} variant="outline">
+							<div className="truncate text-sm font-semibold text-zinc-200">
+								{s.name}
+							</div>
+							<div className="mt-1 text-xs text-slate-500">
+								{shortId(s.id)} · {new Date(s.created_at).toLocaleString()}
+							</div>
+							<div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+								<Badge className={cn(statusColor(s.status), "text-[10px]")} variant="outline">
 									{s.status}
 								</Badge>
-							</div>
-							<div className="mt-2 flex items-center gap-2 text-xs text-slate-400">
-								{s.chain && <Badge variant="secondary" className="truncate max-w-[100px] text-[10px]">{s.chain}</Badge>}
-								<span className="truncate">{s.platform}</span>
+								{s.chain && <Badge variant="secondary" className="text-[10px]">{s.chain}</Badge>}
+								<span className="text-[10px] text-slate-500">{s.platform}</span>
 							</div>
 						</button>
 					))}

@@ -79,7 +79,7 @@ function AgentRow({
 					? "bg-cyan-500/10 border border-cyan-500/30"
 					: "hover:bg-white/5 border border-transparent",
 			)}
-			style={{ paddingLeft: `${12 + depth * 16}px` }}
+			style={{ paddingLeft: `${12 + Math.min(depth, 3) * 12}px` }}
 		>
 			{/* Status dot */}
 			<span
@@ -91,7 +91,7 @@ function AgentRow({
 
 			{/* Name + model */}
 			<div className="flex-1 min-w-0">
-				<div className="truncate text-xs font-semibold text-zinc-200">
+				<div className="text-xs font-semibold text-zinc-200 break-words leading-tight">
 					{agent.name}
 				</div>
 				<div className="truncate text-[10px] text-zinc-600">{agent.model}</div>
