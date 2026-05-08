@@ -4,24 +4,56 @@
  * Uses the Pi SDK's createAgentSession() directly instead of spawning
  * a pi subprocess. Lower latency, better control, direct event streaming.
  * 
- * Requires:
- * - @earendil-works/pi-coding-agent SDK
- * - AuthStorage with API keys configured
- * - ModelRegistry with providers/models configured
+ * Requires @earendil-works/pi-coding-agent to be installed separately.
+ * The adapter gracefully degrades (isAvailable() returns false) if the
+ * SDK is not present.
  */
 
 import { join } from "path";
 import { mkdirSync } from "fs";
-import type { PlatformAdapter, DelegateOptions, DelegateResult, StreamEvent } from "../types";
+import type { PlatformAdapter, DelegateOptions, DelegateResult } from "../types";
 
-// Dynamic import for the Pi SDK (only loaded when adapter is used)
-let piModule: typeof import("@earendil-works/pi-coding-agent") | null = null;
+// Pi SDK types -- kept loose to avoid hard compile-time dependency.
+// The SDK is loaded dynamically at runtime; CI can type-check without it.
+interface PiAuthStorage {
+  setRuntimeApiKey(provider: string, key: string): void;
+}
+interface PiModel {
+  provider: string;
+  id: string;
+}
+interface PiModelRegistry {
+  find(provider: string, id: string): PiModel | undefined;
+}
+interface PiSessionStats {
+  cost: number;
+  tokens: { total: number };
+}
+interface PiAgentSession {
+  prompt(msg: string): Promise<void>;
+  steer(msg: string): void;
+  subscribe(listener: (event: any) => void): () => void;
+  dispose(): void;
+  isStreaming: boolean;
+  getLastAssistantText(): string | undefined;
+  getSessionStats(): PiSessionStats;
+}
 
-async function loadSdk() {
-  if (!piModule) {
+// Dynamic loader for Pi SDK
+let piModule: any = null;
+
+async function loadSdk(): Promise<{
+  createAgentSession: (opts: any) => Promise<{ session: PiAgentSession }>;
+  AuthStorage: { inMemory(): PiAuthStorage };
+  ModelRegistry: { create(auth: PiAuthStorage, path: string): PiModelRegistry };
+} | null> {
+  if (piModule) return piModule;
+  try {
     piModule = await import("@earendil-works/pi-coding-agent");
+    return piModule;
+  } catch {
+    return null;
   }
-  return piModule;
 }
 
 export class PiEmbeddedAdapter implements PlatformAdapter {
@@ -34,40 +66,44 @@ export class PiEmbeddedAdapter implements PlatformAdapter {
   }
 
   async isAvailable(): Promise<boolean> {
-    try {
-      await loadSdk();
-      return true;
-    } catch {
-      return false;
-    }
+    const sdk = await loadSdk();
+    return sdk !== null;
   }
 
   async delegate(opts: DelegateOptions): Promise<DelegateResult> {
     const pi = await loadSdk();
-    const agentId = `pi-emb-${opts.persona.name.toLowerCase().replace(/\s+/g, "-")}`;
+    if (!pi) {
+      return {
+        agentId: "pi-emb-unavailable",
+        agentName: opts.persona.name,
+        output: "ERROR: @earendil-works/pi-coding-agent SDK not installed",
+        grade: "FAILED",
+        findings: ["sdk_not_installed"],
+        costUsd: 0,
+        tokensUsed: 0,
+      };
+    }
 
+    const agentId = `pi-emb-${opts.persona.name.toLowerCase().replace(/\s+/g, "-")}`;
     mkdirSync(opts.sessionDir, { recursive: true });
 
     // Create auth storage with API keys from environment
     const authStorage = pi.AuthStorage.inMemory();
-    
-    // Set API keys from environment
     if (process.env.ANTHROPIC_API_KEY) {
       authStorage.setRuntimeApiKey("anthropic", process.env.ANTHROPIC_API_KEY);
     }
     if (process.env.OPENAI_API_KEY) {
       authStorage.setRuntimeApiKey("openai", process.env.OPENAI_API_KEY);
     }
-    // LiteLLM proxy key
     if (process.env.LITELLM_API_KEY) {
       authStorage.setRuntimeApiKey("litellm", process.env.LITELLM_API_KEY);
     }
 
-    // Create model registry
+    // Create model registry from config
     const modelsJsonPath = join(this.configDir, "models.json");
     const modelRegistry = pi.ModelRegistry.create(authStorage, modelsJsonPath);
 
-    // Resolve the model string to a Model object
+    // Resolve model string to SDK Model object
     const modelParts = opts.model.split("/");
     const provider = modelParts.length > 1 ? modelParts[0]! : "anthropic";
     const modelId = modelParts.length > 1 ? modelParts[1]! : modelParts[0]!;
@@ -92,42 +128,36 @@ export class PiEmbeddedAdapter implements PlatformAdapter {
       const { session } = await pi.createAgentSession({
         cwd: opts.workingDir,
         model,
-        thinkingLevel: opts.thinking as any,
+        thinkingLevel: opts.thinking,
         authStorage,
         modelRegistry,
-        tools: opts.tools.filter(t => t !== "delegate"),
+        tools: opts.tools.filter((t: string) => t !== "delegate"),
       });
 
-      // Set system prompt
-      // Note: AgentSession builds its own system prompt, but we can influence it
-      // through the session's settings
-
-      let finalText = "";
       let totalCost = 0;
       let totalTokens = 0;
 
-      // Subscribe to events for streaming
+      // Subscribe to events for streaming to dashboard
       const unsubscribe = session.subscribe((event: any) => {
         switch (event.type) {
           case "tool_use_begin":
             opts.onStreamEvent?.({
               type: "tool_call",
-              tool: (event as any).tool?.name ?? "unknown",
+              tool: event.tool?.name ?? "unknown",
               status: "running",
             });
             break;
           case "tool_use_end":
             opts.onStreamEvent?.({
               type: "tool_result",
-              tool: (event as any).tool?.name ?? "unknown",
+              tool: event.tool?.name ?? "unknown",
               status: "success",
             });
             break;
           case "message_end": {
-            const msg = event as any;
-            if (msg.usage) {
-              totalCost += msg.usage.cost?.total ?? 0;
-              totalTokens += msg.usage.totalTokens ?? 0;
+            if (event.usage) {
+              totalCost += event.usage.cost?.total ?? 0;
+              totalTokens += event.usage.totalTokens ?? 0;
               opts.onStreamEvent?.({
                 type: "cost",
                 costUsd: totalCost,
@@ -139,27 +169,23 @@ export class PiEmbeddedAdapter implements PlatformAdapter {
         }
       });
 
-      // Register message sender for steering
+      // Register steering callback
       if (opts.sendMessage) {
         opts.sendMessage((msg: string) => {
           session.steer(msg);
         });
       }
 
-      // Send the prompt and wait for completion
+      // Send prompt and wait for completion
       await session.prompt(opts.userPrompt);
 
-      // Wait for agent to finish (it processes tool calls automatically)
-      // The agent loop runs until no more tool calls are pending
+      // Wait for agent to finish processing tool calls
       while (session.isStreaming) {
         await new Promise(r => setTimeout(r, 100));
       }
 
-      // Extract final output
-      const lastAssistant = session.getLastAssistantText();
-      finalText = lastAssistant ?? "";
-
-      // Get session stats for cost
+      // Extract results
+      const finalText = session.getLastAssistantText() ?? "";
       const stats = session.getSessionStats();
       totalCost = stats.cost;
       totalTokens = stats.tokens.total;
