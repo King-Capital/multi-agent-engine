@@ -235,8 +235,8 @@ function SessionListPage() {
 				/>
 			</ResizablePanel>
 
-			{/* Middle panel: Agent tree (when session selected) */}
-			{selected && (
+			{/* Middle + Right panels: single SSE provider */}
+			{selected ? (
 				<SessionSSEProvider sessionId={selected.id}>
 					<ResizablePanel
 						storageKey="mae-agent-panel-width"
@@ -251,12 +251,6 @@ function SessionListPage() {
 							onAgentSelect={setSelectedAgentId}
 						/>
 					</ResizablePanel>
-				</SessionSSEProvider>
-			)}
-
-			{/* Right panel: Session detail or placeholder */}
-			{selected ? (
-				<SessionSSEProvider sessionId={selected.id}>
 					<div className="flex-1 min-w-0 flex flex-col overflow-hidden">
 						<Detail session={selected} />
 					</div>
