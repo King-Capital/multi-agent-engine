@@ -341,13 +341,13 @@ export function SessionSidebar({
 										{shortId(s.id)} · {new Date(s.created_at).toLocaleString()}
 									</div>
 								</div>
-								<Badge className={statusColor(s.status)} variant="outline">
+								<Badge className={cn(statusColor(s.status), "shrink-0 text-[10px]")} variant="outline">
 									{s.status}
 								</Badge>
 							</div>
 							<div className="mt-2 flex items-center gap-2 text-xs text-slate-400">
-								{s.chain && <Badge variant="secondary">{s.chain}</Badge>}
-								<span>{s.platform}</span>
+								{s.chain && <Badge variant="secondary" className="truncate max-w-[100px] text-[10px]">{s.chain}</Badge>}
+								<span className="truncate">{s.platform}</span>
 							</div>
 						</button>
 					))}

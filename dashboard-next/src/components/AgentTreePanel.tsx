@@ -156,12 +156,15 @@ interface AgentTreePanelProps {
 	session: DBSession;
 	selectedAgentId?: string | null;
 	onAgentSelect?: (agentId: string | null) => void;
+	/** Hide the back button (used when inline on session list page) */
+	hideBack?: boolean;
 }
 
 export function AgentTreePanel({
 	session,
 	selectedAgentId,
 	onAgentSelect,
+	hideBack,
 }: AgentTreePanelProps) {
 	const navigate = useNavigate();
 	const [agents, setAgents] = React.useState<LiveAgent[]>([]);
@@ -256,13 +259,15 @@ export function AgentTreePanel({
 		<div className="flex h-full w-full flex-col">
 			{/* Back + Session header */}
 			<div className="shrink-0 p-4 border-b border-white/5">
-				<button
-					onClick={() => navigate("/")}
-					className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors mb-2"
-				>
-					<ArrowLeft className="w-3.5 h-3.5" />
-					Sessions
-				</button>
+				{!hideBack && (
+					<button
+						onClick={() => navigate("/")}
+						className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors mb-2"
+					>
+						<ArrowLeft className="w-3.5 h-3.5" />
+						Sessions
+					</button>
+				)}
 				<h2 className="text-sm font-bold text-zinc-100 truncate">
 					{session.name}
 				</h2>
