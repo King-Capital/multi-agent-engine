@@ -13,6 +13,7 @@ import { EventEmitter } from "./event-emitter";
 import { sanitizeAgentInput, validateAgentOutput } from "./security";
 import { isGitRepo, createWorktree, mergeWorktree, cleanupWorktree } from "./worktree";
 import { delegateWithHealing } from "./self-healing";
+import { PipelineTracker } from "./pipeline-state";
 import type {
   PlatformAdapter,
   DelegateResult,
@@ -45,6 +46,7 @@ export class Orchestrator {
   private agentActivity: Map<string, AgentActivity> = new Map();
   private monitorInterval: ReturnType<typeof setInterval> | null = null;
   private messageSenders: Map<string, (msg: string) => void> = new Map();
+  private pipelines: Map<string, PipelineTracker> = new Map();
   private sseAbort: AbortController | null = null;
 
   constructor(dashboardUrl?: string, apiToken?: string) {
@@ -201,6 +203,36 @@ export class Orchestrator {
     this.sseAbort = null;
   }
 
+
+  async resume(sessionId: string, opts?: { adapter?: string }): Promise<SessionState | null> {
+    const pipeline = PipelineTracker.resume(sessionId);
+    if (!pipeline) {
+      console.error(`[orchestrator] No pipeline state found for session ${sessionId}`);
+      return null;
+    }
+
+    const state = pipeline.getState();
+    console.log(`[orchestrator] Resuming session ${sessionId} (${state.name}) from stage ${state.currentStage}`);
+    console.log(`[orchestrator] Pipeline status: ${state.status}, stages: ${state.stages.length}`);
+
+    // Find the next pending or failed stage
+    const nextStage = state.stages.findIndex(s => s.status === "pending" || s.status === "failed");
+    if (nextStage === -1) {
+      console.log(`[orchestrator] All stages complete or no pending stages found`);
+      return null;
+    }
+
+    console.log(`[orchestrator] Resuming from stage ${nextStage}: ${state.stages[nextStage]?.name}`);
+
+    // Re-run from the failed/pending stage
+    return this.run({
+      task: state.task,
+      chain: state.chain,
+      adapter: opts?.adapter,
+      sessionName: `${state.name} (resumed)`,
+    });
+  }
+
   async run(opts: {
     prompt?: string;
     chain?: string;
@@ -246,6 +278,10 @@ export class Orchestrator {
     };
     this.sessions.set(sessionId, session);
 
+    // Create pipeline state tracker for checkpoint/resume
+    const pipeline = new PipelineTracker(sessionId, sessionName, chainName, taskBody);
+    this.pipelines.set(sessionId, pipeline);
+
     await this.emitter.sessionStart(sessionId, sessionName, chainName, opts.task);
     await this.emitter.pgCreateSession({ id: sessionId, name: sessionName, chain: chainName, team: chainName });
 
@@ -269,8 +305,10 @@ export class Orchestrator {
     try {
       await this.runChain(session, chain, taskBody, opts.adapter);
       session.status = "completed";
+      pipeline?.complete();
     } catch (err) {
       session.status = "error";
+      pipeline?.fail(String(err));
       console.error(`[orchestrator] Session failed:`, err);
       await this.emitter.pgUpdateSession(sessionId, { status: "failed" });
     }
@@ -297,6 +335,15 @@ export class Orchestrator {
       if (!step) continue;
 
       const stepLabel = step.team ?? step.agent ?? "parallel teams";
+      const pipeline = this.pipelines.get(session.id);
+      const stageIdx = pipeline?.addStage({
+        name: stepLabel,
+        type: step.parallel ? "parallel" : step.team ? "team" : "agent",
+        team: step.team,
+        agent: step.agent,
+        parallelTeams: step.parallel?.map(p => p.team),
+      }) ?? -1;
+      pipeline?.startStage(stageIdx);
       await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
         `Starting step ${i + 1}/${steps.length}: ${stepLabel}.`);
 
@@ -340,6 +387,22 @@ export class Orchestrator {
 
       // Issue #65: Only mark till_done if the step didn't FAIL
       const stepGrade = stepResult?.grade ?? (parallelResults ? this.worstGrade(parallelResults.map((r) => r.grade)) : undefined);
+      // Update pipeline state
+      if (stepResult) {
+        pipeline?.completeStage(stageIdx, {
+          grade: stepResult.grade,
+          cost: stepResult.costUsd,
+          tokens: stepResult.tokensUsed,
+          output: stepResult.output,
+        });
+      } else if (parallelResults) {
+        pipeline?.completeStage(stageIdx, {
+          grade: stepGrade,
+          cost: parallelResults.reduce((s, r) => s + r.costUsd, 0),
+          tokens: parallelResults.reduce((s, r) => s + r.tokensUsed, 0),
+        });
+      }
+
       if (stepGrade !== "FAILED") {
         this.markTillDone(session, i);
       }

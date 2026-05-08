@@ -44,7 +44,7 @@ export interface PipelineState {
   completedAt?: string;
 }
 
-const STATE_DIR = join(process.env.MAE_ROOT ?? ".", "data", "pipelines");
+const STATE_DIR = join(process.env.MAE_ROOT ?? join(import.meta.dir, ".."), "data", "pipelines");
 
 export class PipelineTracker {
   private state: PipelineState;
