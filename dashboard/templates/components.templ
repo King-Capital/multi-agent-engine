@@ -721,3 +721,307 @@ func chainBadgeClass(chain string) string {
 		return "bg-neutral-50/10 text-neutral-400"
 	}
 }
+// --- Agent Graph Visualization ---
+
+// graphNode holds layout info for rendering an agent in the SVG graph.
+type graphNode struct {
+	Agent *models.Agent
+	X     int
+	Y     int
+	Level int // 0=orchestrator, 1=lead, 2=worker
+}
+
+// graphEdge connects two nodes.
+type graphEdge struct {
+	FromX, FromY int
+	ToX, ToY     int
+}
+
+// buildGraphLayout computes node positions for the agent hierarchy.
+func buildGraphLayout(sess *models.Session) ([]graphNode, []graphEdge) {
+	var nodes []graphNode
+	var edges []graphEdge
+
+	// Collect agents by role/level
+	var orchestrators []*models.Agent
+	var leads []*models.Agent
+	var workers []*models.Agent
+
+	for _, a := range sess.Agents {
+		switch a.Role {
+		case models.RoleOrchestrator:
+			orchestrators = append(orchestrators, a)
+		case models.RoleLead:
+			leads = append(leads, a)
+		case models.RoleWorker:
+			workers = append(workers, a)
+		}
+	}
+
+	// Sort each group by start time for stable layout
+	sort.Slice(orchestrators, func(i, j int) bool { return orchestrators[i].StartedAt.Before(orchestrators[j].StartedAt) })
+	sort.Slice(leads, func(i, j int) bool { return leads[i].StartedAt.Before(leads[j].StartedAt) })
+	sort.Slice(workers, func(i, j int) bool { return workers[i].StartedAt.Before(workers[j].StartedAt) })
+
+	// Node dimensions
+	nodeW := 180
+	nodeH := 50
+	hGap := 40
+	vGap := 80
+
+	// Position index maps
+	posMap := make(map[string]graphNode)
+
+	// Place orchestrators (level 0)
+	totalOrchW := len(orchestrators)*nodeW + (len(orchestrators)-1)*hGap
+	orchStartX := 0
+	if totalOrchW > 0 {
+		orchStartX = -totalOrchW / 2
+	}
+	for i, a := range orchestrators {
+		x := orchStartX + i*(nodeW+hGap) + nodeW/2
+		y := nodeH / 2
+		n := graphNode{Agent: a, X: x, Y: y, Level: 0}
+		nodes = append(nodes, n)
+		posMap[a.ID] = n
+	}
+
+	// Place leads (level 1)
+	totalLeadW := len(leads)*nodeW + (len(leads)-1)*hGap
+	leadStartX := 0
+	if totalLeadW > 0 {
+		leadStartX = -totalLeadW / 2
+	}
+	for i, a := range leads {
+		x := leadStartX + i*(nodeW+hGap) + nodeW/2
+		y := nodeH/2 + nodeH + vGap
+		n := graphNode{Agent: a, X: x, Y: y, Level: 1}
+		nodes = append(nodes, n)
+		posMap[a.ID] = n
+
+		// Edge from parent (orchestrator) to lead
+		if parent, ok := posMap[a.ParentID]; ok {
+			edges = append(edges, graphEdge{
+				FromX: parent.X, FromY: parent.Y + nodeH/2,
+				ToX: x, ToY: y - nodeH/2,
+			})
+		}
+	}
+
+	// Group workers by parent lead
+	workersByLead := make(map[string][]*models.Agent)
+	var orphanWorkers []*models.Agent
+	for _, w := range workers {
+		if _, ok := posMap[w.ParentID]; ok {
+			workersByLead[w.ParentID] = append(workersByLead[w.ParentID], w)
+		} else {
+			orphanWorkers = append(orphanWorkers, w)
+		}
+	}
+
+	// Place workers under their leads (level 2)
+	workerY := nodeH/2 + 2*(nodeH+vGap)
+	allWorkers := make([]*models.Agent, 0)
+
+	// Interleave: place workers grouped under leads, centered on lead X
+	for _, lead := range leads {
+		wList := workersByLead[lead.ID]
+		if len(wList) == 0 {
+			continue
+		}
+		allWorkers = append(allWorkers, wList...)
+	}
+	allWorkers = append(allWorkers, orphanWorkers...)
+
+	totalWorkerW := len(allWorkers)*nodeW + (len(allWorkers)-1)*hGap
+	workerStartX := 0
+	if totalWorkerW > 0 {
+		workerStartX = -totalWorkerW / 2
+	}
+
+	workerIdx := 0
+	for _, w := range allWorkers {
+		x := workerStartX + workerIdx*(nodeW+hGap) + nodeW/2
+		n := graphNode{Agent: w, X: x, Y: workerY, Level: 2}
+		nodes = append(nodes, n)
+		posMap[w.ID] = n
+		workerIdx++
+
+		// Edge from parent to worker
+		if parent, ok := posMap[w.ParentID]; ok {
+			edges = append(edges, graphEdge{
+				FromX: parent.X, FromY: parent.Y + nodeH/2,
+				ToX: x, ToY: workerY - nodeH/2,
+			})
+		}
+	}
+
+	// Normalize positions so min X is at a padding offset
+	if len(nodes) > 0 {
+		minX := nodes[0].X - nodeW/2
+		for _, n := range nodes[1:] {
+			if n.X-nodeW/2 < minX {
+				minX = n.X - nodeW/2
+			}
+		}
+		offsetX := -minX + 20 // 20px left padding
+		for i := range nodes {
+			nodes[i].X += offsetX
+		}
+		for i := range edges {
+			edges[i].FromX += offsetX
+			edges[i].ToX += offsetX
+		}
+	}
+
+	return nodes, edges
+}
+
+func graphViewBox(nodes []graphNode) string {
+	if len(nodes) == 0 {
+		return "0 0 400 200"
+	}
+	nodeW := 180
+	nodeH := 50
+	maxX := 0
+	maxY := 0
+	for _, n := range nodes {
+		right := n.X + nodeW/2 + 20
+		bottom := n.Y + nodeH/2 + 20
+		if right > maxX {
+			maxX = right
+		}
+		if bottom > maxY {
+			maxY = bottom
+		}
+	}
+	return fmt.Sprintf("0 0 %d %d", maxX, maxY)
+}
+
+func graphNodeFill(status models.AgentStatus) string {
+	switch status {
+	case models.StatusRunning:
+		return "#0e7490" // cyan-700
+	case models.StatusDone:
+		return "#166534" // green-800
+	case models.StatusError:
+		return "#991b1b" // red-800
+	case models.StatusBlocked:
+		return "#854d0e" // yellow-800
+	default:
+		return "#374151" // gray-700
+	}
+}
+
+func graphNodeStroke(status models.AgentStatus) string {
+	switch status {
+	case models.StatusRunning:
+		return "#22d3ee" // cyan-400
+	case models.StatusDone:
+		return "#4ade80" // green-400
+	case models.StatusError:
+		return "#f87171" // red-400
+	case models.StatusBlocked:
+		return "#facc15" // yellow-400
+	default:
+		return "#6b7280" // gray-500
+	}
+}
+
+func graphRoleLabel(role models.AgentRole) string {
+	switch role {
+	case models.RoleOrchestrator:
+		return "ORCH"
+	case models.RoleLead:
+		return "LEAD"
+	case models.RoleWorker:
+		return "WORK"
+	default:
+		return "?"
+	}
+}
+
+func isRunning(status models.AgentStatus) bool {
+	return status == models.StatusRunning
+}
+
+templ AgentGraph(sess *models.Session) {
+	if len(sess.Agents) == 0 {
+		<p class="text-xs text-neutral-500">No agents to graph.</p>
+	} else {
+		{{ nodes, edges := buildGraphLayout(sess) }}
+		{{ vb := graphViewBox(nodes) }}
+		<svg viewBox={ vb } xmlns="http://www.w3.org/2000/svg" class="w-full" style="min-height: 200px; max-height: 500px;">
+			<defs>
+				<style>
+					@keyframes graphPulse {
+						0%, 100% { opacity: 1; }
+						50% { opacity: 0.5; }
+					}
+					.graph-pulse {
+						animation: graphPulse 2s ease-in-out infinite;
+					}
+				</style>
+				<!-- Arrow marker for edges -->
+				<marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+					<polygon points="0 0, 8 3, 0 6" fill="#4b5563"/>
+				</marker>
+			</defs>
+			<!-- Edges -->
+			for _, e := range edges {
+				<line
+					x1={ fmt.Sprintf("%d", e.FromX) }
+					y1={ fmt.Sprintf("%d", e.FromY) }
+					x2={ fmt.Sprintf("%d", e.ToX) }
+					y2={ fmt.Sprintf("%d", e.ToY) }
+					stroke="#4b5563"
+					stroke-width="2"
+					marker-end="url(#arrowhead)"
+				/>
+			}
+			<!-- Nodes -->
+			for _, n := range nodes {
+				<g
+					if isRunning(n.Agent.Status) {
+						class="graph-pulse"
+					}
+				>
+					<rect
+						x={ fmt.Sprintf("%d", n.X-90) }
+						y={ fmt.Sprintf("%d", n.Y-25) }
+						width="180"
+						height="50"
+						rx="8"
+						ry="8"
+						fill={ graphNodeFill(n.Agent.Status) }
+						stroke={ graphNodeStroke(n.Agent.Status) }
+						stroke-width="2"
+					/>
+					<!-- Role badge -->
+					<text
+						x={ fmt.Sprintf("%d", n.X) }
+						y={ fmt.Sprintf("%d", n.Y-6) }
+						text-anchor="middle"
+						fill={ graphNodeStroke(n.Agent.Status) }
+						font-size="10"
+						font-family="monospace"
+						font-weight="bold"
+					>
+						{ graphRoleLabel(n.Agent.Role) }
+					</text>
+					<!-- Agent name -->
+					<text
+						x={ fmt.Sprintf("%d", n.X) }
+						y={ fmt.Sprintf("%d", n.Y+12) }
+						text-anchor="middle"
+						fill="#e5e7eb"
+						font-size="11"
+						font-family="system-ui, sans-serif"
+					>
+						{ truncateText(n.Agent.Name, 22) }
+					</text>
+				</g>
+			}
+		</svg>
+	}
+}

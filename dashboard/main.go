@@ -266,6 +266,7 @@ func main() {
 		// PG-backed endpoints
 		r.Get("/users", handleAPIGetUsers)
 		r.Get("/pg/history", handleAPISessionHistory)
+		r.Get("/pg/stats", handleAPIStats)
 		r.Route("/pg/sessions", func(r chi.Router) {
 			r.Get("/", handleAPIGetSessions)
 			r.Post("/", handleAPICreateSession)
@@ -286,6 +287,7 @@ func main() {
 	r.Get("/htmx/session/{sessionID}/conversation", handleHTMXConversation)
 	r.Get("/htmx/session/{sessionID}/tilldone", handleHTMXTillDone)
 	r.Get("/htmx/session/{sessionID}/costs", handleHTMXCosts)
+	r.Get("/htmx/session/{sessionID}/graph", handleHTMXAgentGraph)
 	r.Get("/htmx/session/{sessionID}/stream", handleHTMXSSE)
 
 	srv := &http.Server{

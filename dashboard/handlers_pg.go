@@ -547,3 +547,102 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintf(w, "mae_events_total %d\n", eventCount)
 }
+
+// GET /api/pg/stats -- aggregated stats for dashboard history page
+func handleAPIStats(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+
+	ctx := r.Context()
+
+	type DayCost struct {
+		Day  string  `json:"day"`
+		Cost float64 `json:"cost"`
+	}
+	type ChainCost struct {
+		Chain    string  `json:"chain"`
+		Cost     float64 `json:"cost"`
+		Sessions int     `json:"sessions"`
+	}
+	type StatsResponse struct {
+		TotalSessions int         `json:"total_sessions"`
+		TotalAgents   int         `json:"total_agents"`
+		TotalCost     float64     `json:"total_cost"`
+		TotalEvents   int64       `json:"total_events"`
+		CostPerDay    []DayCost   `json:"cost_per_day"`
+		TopChains     []ChainCost `json:"top_chains"`
+	}
+
+	var resp StatsResponse
+
+	// Total sessions
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions`).Scan(&resp.TotalSessions); err != nil {
+		resp.TotalSessions = 0
+	}
+
+	// Total agents
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agents`).Scan(&resp.TotalAgents); err != nil {
+		resp.TotalAgents = 0
+	}
+
+	// Total cost
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd), 0) FROM agents`).Scan(&resp.TotalCost); err != nil {
+		resp.TotalCost = 0
+	}
+
+	// Total events
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&resp.TotalEvents); err != nil {
+		resp.TotalEvents = 0
+	}
+
+	// Cost per day (last 30 days)
+	rows, err := db.QueryContext(ctx, `
+		SELECT DATE(s.created_at) as day, COALESCE(SUM(a.cost_usd), 0) as cost
+		FROM sessions s
+		LEFT JOIN agents a ON a.session_id = s.id
+		WHERE s.created_at > NOW() - INTERVAL '30 days'
+		GROUP BY day
+		ORDER BY day`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var d DayCost
+			var dayTime time.Time
+			if err := rows.Scan(&dayTime, &d.Cost); err == nil {
+				d.Day = dayTime.Format("2006-01-02")
+				resp.CostPerDay = append(resp.CostPerDay, d)
+			}
+		}
+		rows.Close()
+	}
+	if resp.CostPerDay == nil {
+		resp.CostPerDay = []DayCost{}
+	}
+
+	// Top 5 chains by cost
+	rows2, err := db.QueryContext(ctx, `
+		SELECT s.chain, COALESCE(SUM(a.cost_usd), 0) as cost, COUNT(DISTINCT s.id) as sessions
+		FROM sessions s
+		JOIN agents a ON a.session_id = s.id
+		WHERE s.chain IS NOT NULL
+		GROUP BY s.chain
+		ORDER BY cost DESC
+		LIMIT 5`)
+	if err == nil {
+		defer rows2.Close()
+		for rows2.Next() {
+			var c ChainCost
+			if err := rows2.Scan(&c.Chain, &c.Cost, &c.Sessions); err == nil {
+				resp.TopChains = append(resp.TopChains, c)
+			}
+		}
+		rows2.Close()
+	}
+	if resp.TopChains == nil {
+		resp.TopChains = []ChainCost{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
