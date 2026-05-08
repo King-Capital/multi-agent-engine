@@ -200,3 +200,25 @@ export function isDifferentModelFamily(modelA: string, modelB: string): boolean 
 
   return familyA !== familyB;
 }
+
+// Model fallback chain -- if primary fails, try next
+export function getModelFallbacks(model: string): string[] {
+  const routing = loadModelRouting();
+  const fallbacks: string[] = [];
+  
+  // Check each tier for the model and return alternatives
+  for (const [, tier] of Object.entries(routing.tiers ?? {})) {
+    const options = (tier as { options?: { model: string }[] }).options ?? [];
+    const hasModel = options.some(o => o.model === model);
+    if (hasModel) {
+      for (const opt of options) {
+        if (opt.model !== model) {
+          fallbacks.push(opt.model);
+        }
+      }
+      break;
+    }
+  }
+  
+  return fallbacks;
+}
