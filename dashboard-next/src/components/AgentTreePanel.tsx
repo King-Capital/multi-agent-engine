@@ -72,42 +72,62 @@ function AgentRow({
 	showTokens?: boolean;
 	onClick: () => void;
 }) {
+	const teamColor = agent.team_color && /^#[0-9a-f]{3,8}$/i.test(agent.team_color)
+		? agent.team_color
+		: agent.role === "orchestrator" ? "#a78bfa"
+		: agent.role === "lead" ? "#60a5fa"
+		: "#34d399";
+
 	return (
 		<button
 			onClick={onClick}
 			className={cn(
-				"w-full flex items-center gap-2 px-3 py-2 text-left rounded-lg transition-colors",
+				"w-full text-left rounded-lg transition-colors overflow-hidden",
 				selected
-					? "bg-cyan-500/10 border border-cyan-500/30"
-					: "hover:bg-white/5 border border-transparent",
+					? "ring-1 ring-white/20 bg-white/[0.06]"
+					: "hover:bg-white/[0.04]",
 			)}
-			style={{ paddingLeft: `${12 + Math.min(depth, 3) * 12}px` }}
+			style={{ marginLeft: `${Math.min(depth, 3) * 10}px` }}
 		>
-			{/* Status dot */}
-			<span
-				className={cn("w-2 h-2 rounded-full shrink-0", statusDot(agent.status))}
-			/>
+			{/* Color bar (like the graph nodes) */}
+			<div className="h-1 rounded-t-lg" style={{ backgroundColor: teamColor }} />
 
-			{/* Role badge */}
-			<RoleBadge role={agent.role} />
+			<div className="flex items-center gap-2 px-2.5 py-1.5">
+				{/* Status dot */}
+				<span
+					className={cn("w-2 h-2 rounded-full shrink-0", statusDot(agent.status))}
+				/>
 
-			{/* Name + model */}
-			<div className="flex-1 min-w-0">
-				<div className="text-xs font-semibold text-zinc-200 break-words leading-tight">
-					{agent.name}
+				{/* Role badge -- uses team color */}
+				<span
+					className="inline-flex items-center justify-center w-5 h-5 rounded text-[9px] font-bold shrink-0"
+					style={{
+						backgroundColor: `${teamColor}30`,
+						color: teamColor,
+						border: `1px solid ${teamColor}50`,
+					}}
+				>
+					{agent.role === "orchestrator" ? "O" : agent.role === "lead" ? "L" : "W"}
+				</span>
+
+				{/* Name + model */}
+				<div className="flex-1 min-w-0">
+					<div className="text-xs font-semibold text-zinc-200 break-words leading-tight">
+						{agent.name}
+					</div>
+					<div className="truncate text-[10px] text-zinc-500">{agent.model}</div>
 				</div>
-				<div className="truncate text-[10px] text-zinc-600">{agent.model}</div>
-			</div>
 
-			{/* Cost / Tokens bubble */}
-			<span className={cn(
-				"text-[10px] font-mono font-bold shrink-0 px-1.5 py-0.5 rounded-full",
-				showTokens
-					? "bg-amber-500/20 text-amber-300"
-					: "bg-emerald-500/20 text-emerald-300",
-			)}>
-				{showTokens ? formatNumber(agent.tokens_used) : formatCurrency(agent.cost_usd)}
-			</span>
+				{/* Cost / Tokens bubble */}
+				<span className={cn(
+					"text-[10px] font-mono font-bold shrink-0 px-1.5 py-0.5 rounded-full",
+					showTokens
+						? "bg-amber-500/20 text-amber-300"
+						: "bg-emerald-500/20 text-emerald-300",
+				)}>
+					{showTokens ? formatNumber(agent.tokens_used) : formatCurrency(agent.cost_usd)}
+				</span>
+			</div>
 		</button>
 	);
 }
