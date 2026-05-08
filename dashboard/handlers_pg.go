@@ -547,3 +547,231 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintf(w, "mae_events_total %d\n", eventCount)
 }
+
+// GET /api/pg/stats -- aggregated stats for dashboard history page
+func handleAPIStats(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+
+	ctx := r.Context()
+
+	type DayCost struct {
+		Day  string  `json:"day"`
+		Cost float64 `json:"cost"`
+	}
+	type ChainCost struct {
+		Chain    string  `json:"chain"`
+		Cost     float64 `json:"cost"`
+		Sessions int     `json:"sessions"`
+	}
+	type StatsResponse struct {
+		TotalSessions int         `json:"total_sessions"`
+		TotalAgents   int         `json:"total_agents"`
+		TotalCost     float64     `json:"total_cost"`
+		TotalEvents   int64       `json:"total_events"`
+		CostPerDay    []DayCost   `json:"cost_per_day"`
+		TopChains     []ChainCost `json:"top_chains"`
+	}
+
+	var resp StatsResponse
+
+	// Total sessions
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions`).Scan(&resp.TotalSessions); err != nil {
+		resp.TotalSessions = 0
+	}
+
+	// Total agents
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agents`).Scan(&resp.TotalAgents); err != nil {
+		resp.TotalAgents = 0
+	}
+
+	// Total cost
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd), 0) FROM agents`).Scan(&resp.TotalCost); err != nil {
+		resp.TotalCost = 0
+	}
+
+	// Total events
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&resp.TotalEvents); err != nil {
+		resp.TotalEvents = 0
+	}
+
+	// Cost per day (last 30 days)
+	rows, err := db.QueryContext(ctx, `
+		SELECT DATE(s.created_at) as day, COALESCE(SUM(a.cost_usd), 0) as cost
+		FROM sessions s
+		LEFT JOIN agents a ON a.session_id = s.id
+		WHERE s.created_at > NOW() - INTERVAL '30 days'
+		GROUP BY day
+		ORDER BY day`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var d DayCost
+			var dayTime time.Time
+			if err := rows.Scan(&dayTime, &d.Cost); err == nil {
+				d.Day = dayTime.Format("2006-01-02")
+				resp.CostPerDay = append(resp.CostPerDay, d)
+			}
+		}
+		rows.Close()
+	}
+	if resp.CostPerDay == nil {
+		resp.CostPerDay = []DayCost{}
+	}
+
+	// Top 5 chains by cost
+	rows2, err := db.QueryContext(ctx, `
+		SELECT s.chain, COALESCE(SUM(a.cost_usd), 0) as cost, COUNT(DISTINCT s.id) as sessions
+		FROM sessions s
+		JOIN agents a ON a.session_id = s.id
+		WHERE s.chain IS NOT NULL
+		GROUP BY s.chain
+		ORDER BY cost DESC
+		LIMIT 5`)
+	if err == nil {
+		defer rows2.Close()
+		for rows2.Next() {
+			var c ChainCost
+			if err := rows2.Scan(&c.Chain, &c.Cost, &c.Sessions); err == nil {
+				resp.TopChains = append(resp.TopChains, c)
+			}
+		}
+		rows2.Close()
+	}
+	if resp.TopChains == nil {
+		resp.TopChains = []ChainCost{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// GET /api/pg/sessions/:id/diff -- files touched during a session
+func handleAPIGetSessionDiff(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+	sessionID := chi.URLParam(r, "id")
+	if sessionID == "" {
+		http.Error(w, "session id required", http.StatusBadRequest)
+		return
+	}
+
+	rows, err := db.QueryContext(r.Context(),
+		`SELECT payload
+		 FROM events
+		 WHERE session_id = $1
+		   AND event_type IN ('tool_call', 'tool_result')
+		 ORDER BY created_at ASC`,
+		sessionID)
+	if err != nil {
+		dbError(w, "query diff events", err)
+		return
+	}
+	defer rows.Close()
+
+	seen := make(map[string]bool)
+	var files []string
+
+	for rows.Next() {
+		var raw json.RawMessage
+		if err := rows.Scan(&raw); err != nil {
+			continue
+		}
+
+		// Extract file paths from payload JSON recursively
+		extractPaths(raw, seen, &files)
+	}
+
+	type DiffResponse struct {
+		Files []string `json:"files"`
+		Count int      `json:"count"`
+	}
+
+	resp := DiffResponse{
+		Files: files,
+		Count: len(files),
+	}
+	if resp.Files == nil {
+		resp.Files = []string{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// extractPaths walks a JSON value looking for file path fields.
+func extractPaths(raw json.RawMessage, seen map[string]bool, files *[]string) {
+	var obj map[string]interface{}
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		extractPathsFromMap(obj, seen, files)
+		return
+	}
+
+	var arr []interface{}
+	if err := json.Unmarshal(raw, &arr); err == nil {
+		for _, item := range arr {
+			if m, ok := item.(map[string]interface{}); ok {
+				extractPathsFromMap(m, seen, files)
+			}
+		}
+	}
+}
+
+func extractPathsFromMap(obj map[string]interface{}, seen map[string]bool, files *[]string) {
+	pathKeys := []string{"path", "file", "filename", "file_path", "filePath", "filepath"}
+	for _, key := range pathKeys {
+		if val, ok := obj[key]; ok {
+			if s, ok := val.(string); ok && s != "" && !seen[s] && looksLikeFilePath(s) {
+				seen[s] = true
+				*files = append(*files, s)
+			}
+		}
+	}
+
+	// Recurse into nested objects
+	for _, val := range obj {
+		switch v := val.(type) {
+		case map[string]interface{}:
+			extractPathsFromMap(v, seen, files)
+		case []interface{}:
+			for _, item := range v {
+				if m, ok := item.(map[string]interface{}); ok {
+					extractPathsFromMap(m, seen, files)
+				}
+			}
+		}
+	}
+}
+
+// looksLikeFilePath returns true if the string looks like a file path
+// (has an extension or starts with /, ./, or contains a path separator).
+func looksLikeFilePath(s string) bool {
+	if len(s) > 500 || len(s) < 2 {
+		return false
+	}
+	// Must contain a dot (extension) or a slash (path separator)
+	hasDot := false
+	hasSlash := false
+	for _, c := range s {
+		if c == '.' {
+			hasDot = true
+		}
+		if c == '/' {
+			hasSlash = true
+		}
+		// Reject if it contains newlines or looks like prose
+		if c == '\n' || c == '\r' {
+			return false
+		}
+	}
+	return hasDot || hasSlash
+}
+
+// GET /compare -- render model comparison page
+func handleComparePage(w http.ResponseWriter, r *http.Request) {
+	sessionA := r.URL.Query().Get("a")
+	sessionB := r.URL.Query().Get("b")
+	templates.ComparePage(sessionA, sessionB).Render(r.Context(), w)
+}

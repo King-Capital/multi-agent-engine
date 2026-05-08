@@ -382,3 +382,13 @@ func handleHTMXCosts(w http.ResponseWriter, r *http.Request) {
 	}
 	templates.CostTracker(sess).Render(r.Context(), w)
 }
+
+func handleHTMXAgentGraph(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "sessionID")
+	sess := store.GetSession(sessionID)
+	if sess == nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	templates.AgentGraph(sess).Render(r.Context(), w)
+}

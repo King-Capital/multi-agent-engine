@@ -1,0 +1,343 @@
+package templates
+
+import (
+	"fmt"
+)
+
+templ ComparePage(sessionA string, sessionB string) {
+	@Layout("Compare Models") {
+		<div class="p-6 max-w-7xl mx-auto" x-data={ fmt.Sprintf(`{
+			a: null, b: null, loadingA: true, loadingB: true, errA: '', errB: '',
+			async init() {
+				const idA = '%s';
+				const idB = '%s';
+				if (idA) {
+					try {
+						const [hist, agents, events] = await Promise.all([
+							fetch('/api/pg/sessions/' + idA + '/agents').then(r => r.json()),
+							fetch('/api/pg/sessions/' + idA + '/events').then(r => r.json()),
+							fetch('/api/pg/history?limit=200').then(r => r.json())
+						]);
+						const sess = (events || []).length > 0 ? events : [];
+						const h = (hist || []);
+						// Find session in history
+						const allHist = await fetch('/api/pg/history?limit=200').then(r => r.json());
+						const found = (allHist || []).find(s => s.id === idA);
+						this.a = {
+							id: idA,
+							name: found ? found.name : idA.substring(0,8),
+							chain: found ? (found.chain || '-') : '-',
+							status: found ? found.status : 'unknown',
+							total_cost: found ? found.total_cost : 0,
+							agent_count: found ? found.agent_count : 0,
+							duration_secs: found ? found.duration_secs : 0,
+							created_at: found ? found.created_at : '',
+							agents: h || [],
+							model: this.extractModel(h),
+							tokens: this.sumTokens(h),
+							output: this.extractOutput(sess)
+						};
+					} catch(e) { this.errA = e.message; }
+					this.loadingA = false;
+				} else { this.loadingA = false; }
+				if (idB) {
+					try {
+						const [hist, agents, events] = await Promise.all([
+							fetch('/api/pg/sessions/' + idB + '/agents').then(r => r.json()),
+							fetch('/api/pg/sessions/' + idB + '/events').then(r => r.json()),
+							fetch('/api/pg/history?limit=200').then(r => r.json())
+						]);
+						const sess = (events || []).length > 0 ? events : [];
+						const h = (hist || []);
+						const allHist = await fetch('/api/pg/history?limit=200').then(r => r.json());
+						const found = (allHist || []).find(s => s.id === idB);
+						this.b = {
+							id: idB,
+							name: found ? found.name : idB.substring(0,8),
+							chain: found ? (found.chain || '-') : '-',
+							status: found ? found.status : 'unknown',
+							total_cost: found ? found.total_cost : 0,
+							agent_count: found ? found.agent_count : 0,
+							duration_secs: found ? found.duration_secs : 0,
+							created_at: found ? found.created_at : '',
+							agents: h || [],
+							model: this.extractModel(h),
+							tokens: this.sumTokens(h),
+							output: this.extractOutput(sess)
+						};
+					} catch(e) { this.errB = e.message; }
+					this.loadingB = false;
+				} else { this.loadingB = false; }
+			},
+			extractModel(agents) {
+				if (!agents || agents.length === 0) return '-';
+				// Try to find model from agent config
+				for (const a of agents) {
+					if (a.config) {
+						try {
+							const cfg = typeof a.config === 'string' ? JSON.parse(a.config) : a.config;
+							if (cfg.model) return cfg.model;
+						} catch(_) {}
+					}
+					if (a.role) return a.role;
+				}
+				return '-';
+			},
+			sumTokens(agents) {
+				if (!agents || agents.length === 0) return 0;
+				let total = 0;
+				for (const a of agents) {
+					if (a.config) {
+						try {
+							const cfg = typeof a.config === 'string' ? JSON.parse(a.config) : a.config;
+							if (cfg.tokens_used) total += cfg.tokens_used;
+						} catch(_) {}
+					}
+				}
+				return total;
+			},
+			extractOutput(events) {
+				if (!events || events.length === 0) return 'No output captured';
+				// Find last message or agent_done event
+				for (let i = events.length - 1; i >= 0; i--) {
+					const ev = events[i];
+					if (ev.event_type === 'session_end' || ev.event_type === 'agent_done') {
+						try {
+							const p = typeof ev.payload === 'string' ? JSON.parse(ev.payload) : ev.payload;
+							if (p.data && p.data.result) return p.data.result.substring(0, 500);
+							if (p.result) return p.result.substring(0, 500);
+							if (p.data && p.data.content) return p.data.content.substring(0, 500);
+							if (p.content) return p.content.substring(0, 500);
+						} catch(_) {}
+					}
+				}
+				return 'No output captured';
+			},
+			fmtDuration(secs) {
+				if (!secs || secs <= 0) return '0s';
+				if (secs < 60) return Math.round(secs) + 's';
+				if (secs < 3600) return Math.floor(secs/60) + 'm ' + Math.round(secs%%60) + 's';
+				return Math.floor(secs/3600) + 'h ' + Math.floor((secs%%3600)/60) + 'm';
+			},
+			winner(metric) {
+				if (!this.a || !this.b) return 'n/a';
+				switch(metric) {
+					case 'cost':
+						if (this.a.total_cost < this.b.total_cost) return 'A';
+						if (this.b.total_cost < this.a.total_cost) return 'B';
+						return 'tie';
+					case 'duration':
+						if (this.a.duration_secs < this.b.duration_secs) return 'A';
+						if (this.b.duration_secs < this.a.duration_secs) return 'B';
+						return 'tie';
+					case 'agents':
+						if (this.a.agent_count < this.b.agent_count) return 'A';
+						if (this.b.agent_count < this.a.agent_count) return 'B';
+						return 'tie';
+					default: return 'n/a';
+				}
+			},
+			winClass(metric, side) {
+				const w = this.winner(metric);
+				if (w === side) return 'text-emerald-400 font-bold';
+				if (w === 'tie') return 'text-amber-400';
+				return 'text-neutral-400';
+			}
+		}`, sessionA, sessionB) }>
+
+			<!-- Header -->
+			<div class="flex items-center justify-between mb-6">
+				<div>
+					<h1 class="text-2xl font-bold flex items-center gap-2">
+						<i class="ph-bold ph-scales text-2xl neon-green"></i>
+						Compare Models
+					</h1>
+					<p class="text-sm text-neutral-400 mt-1">Side-by-side comparison of two chain runs</p>
+				</div>
+				<a href="/history" class="text-sm text-neutral-400 hover:text-neutral-200 flex items-center gap-1">
+					<i class="ph-bold ph-arrow-left"></i> Back to History
+				</a>
+			</div>
+
+			if sessionA == "" || sessionB == "" {
+				<div class="text-center text-neutral-500 py-16">
+					<i class="ph-bold ph-warning text-4xl mb-3 block neon-yellow"></i>
+					<p class="text-lg mb-2">Two session IDs required</p>
+					<p class="text-sm">Use <code class="bg-neutral-800 px-2 py-0.5 rounded">/compare?a=&lt;session-id&gt;&amp;b=&lt;session-id&gt;</code></p>
+					<p class="text-sm text-neutral-600 mt-2">Or select two runs from the <a href="/history" class="text-cyan-400 hover:underline">History page</a></p>
+				</div>
+			} else {
+				<!-- Two Column Comparison -->
+				<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+					<!-- Session A -->
+					<div class="border border-neutral-50/5 rounded-lg bg-neutral-50/3">
+						<div class="border-b border-neutral-50/5 p-4">
+							<div class="flex items-center gap-2 mb-1">
+								<span class="text-xs font-bold px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">SESSION A</span>
+								<template x-if="a">
+									<span class="text-xs px-2 py-0.5 rounded border" :class="{
+										'bg-emerald-500/20 text-emerald-400 border-emerald-500/30': a.status === 'completed',
+										'bg-red-500/20 text-red-400 border-red-500/30': a.status === 'failed',
+										'bg-cyan-500/20 text-cyan-400 border-cyan-500/30': a.status === 'active',
+										'bg-neutral-500/20 text-neutral-400 border-neutral-500/30': !['completed','failed','active'].includes(a.status)
+									}" x-text="a.status"></span>
+								</template>
+							</div>
+							<template x-if="loadingA"><p class="text-sm text-neutral-500"><i class="ph-bold ph-spinner animate-spin"></i> Loading...</p></template>
+							<template x-if="errA"><p class="text-sm text-red-400" x-text="errA"></p></template>
+							<template x-if="a">
+								<div>
+									<h2 class="text-lg font-semibold truncate" x-text="a.name"></h2>
+									<p class="text-xs text-neutral-500 font-mono" x-text="a.id"></p>
+								</div>
+							</template>
+						</div>
+						<template x-if="a">
+							<div class="p-4 space-y-4">
+								<div class="grid grid-cols-2 gap-3">
+									<div>
+										<div class="text-xs text-neutral-500 uppercase tracking-wider mb-1">Chain</div>
+										<div class="text-sm font-medium" x-text="a.chain"></div>
+									</div>
+									<div>
+										<div class="text-xs text-neutral-500 uppercase tracking-wider mb-1">Model</div>
+										<div class="text-sm font-medium" x-text="a.model"></div>
+									</div>
+								</div>
+								<div class="grid grid-cols-3 gap-3">
+									<div>
+										<div class="text-xs text-neutral-500 uppercase tracking-wider mb-1">Cost</div>
+										<div class="text-lg font-bold" :class="winClass('cost', 'A')" x-text="'$' + a.total_cost.toFixed(4)"></div>
+									</div>
+									<div>
+										<div class="text-xs text-neutral-500 uppercase tracking-wider mb-1">Duration</div>
+										<div class="text-lg font-bold" :class="winClass('duration', 'A')" x-text="fmtDuration(a.duration_secs)"></div>
+									</div>
+									<div>
+										<div class="text-xs text-neutral-500 uppercase tracking-wider mb-1">Agents</div>
+										<div class="text-lg font-bold" :class="winClass('agents', 'A')" x-text="a.agent_count"></div>
+									</div>
+								</div>
+								<div>
+									<div class="text-xs text-neutral-500 uppercase tracking-wider mb-1">Output Summary</div>
+									<div class="text-sm text-neutral-300 bg-black/20 rounded p-3 max-h-48 overflow-y-auto font-mono text-xs" x-text="a.output"></div>
+								</div>
+							</div>
+						</template>
+					</div>
+
+					<!-- Session B -->
+					<div class="border border-neutral-50/5 rounded-lg bg-neutral-50/3">
+						<div class="border-b border-neutral-50/5 p-4">
+							<div class="flex items-center gap-2 mb-1">
+								<span class="text-xs font-bold px-2 py-0.5 rounded bg-violet-500/20 text-violet-400 border border-violet-500/30">SESSION B</span>
+								<template x-if="b">
+									<span class="text-xs px-2 py-0.5 rounded border" :class="{
+										'bg-emerald-500/20 text-emerald-400 border-emerald-500/30': b.status === 'completed',
+										'bg-red-500/20 text-red-400 border-red-500/30': b.status === 'failed',
+										'bg-cyan-500/20 text-cyan-400 border-cyan-500/30': b.status === 'active',
+										'bg-neutral-500/20 text-neutral-400 border-neutral-500/30': !['completed','failed','active'].includes(b.status)
+									}" x-text="b.status"></span>
+								</template>
+							</div>
+							<template x-if="loadingB"><p class="text-sm text-neutral-500"><i class="ph-bold ph-spinner animate-spin"></i> Loading...</p></template>
+							<template x-if="errB"><p class="text-sm text-red-400" x-text="errB"></p></template>
+							<template x-if="b">
+								<div>
+									<h2 class="text-lg font-semibold truncate" x-text="b.name"></h2>
+									<p class="text-xs text-neutral-500 font-mono" x-text="b.id"></p>
+								</div>
+							</template>
+						</div>
+						<template x-if="b">
+							<div class="p-4 space-y-4">
+								<div class="grid grid-cols-2 gap-3">
+									<div>
+										<div class="text-xs text-neutral-500 uppercase tracking-wider mb-1">Chain</div>
+										<div class="text-sm font-medium" x-text="b.chain"></div>
+									</div>
+									<div>
+										<div class="text-xs text-neutral-500 uppercase tracking-wider mb-1">Model</div>
+										<div class="text-sm font-medium" x-text="b.model"></div>
+									</div>
+								</div>
+								<div class="grid grid-cols-3 gap-3">
+									<div>
+										<div class="text-xs text-neutral-500 uppercase tracking-wider mb-1">Cost</div>
+										<div class="text-lg font-bold" :class="winClass('cost', 'B')" x-text="'$' + b.total_cost.toFixed(4)"></div>
+									</div>
+									<div>
+										<div class="text-xs text-neutral-500 uppercase tracking-wider mb-1">Duration</div>
+										<div class="text-lg font-bold" :class="winClass('duration', 'B')" x-text="fmtDuration(b.duration_secs)"></div>
+									</div>
+									<div>
+										<div class="text-xs text-neutral-500 uppercase tracking-wider mb-1">Agents</div>
+										<div class="text-lg font-bold" :class="winClass('agents', 'B')" x-text="b.agent_count"></div>
+									</div>
+								</div>
+								<div>
+									<div class="text-xs text-neutral-500 uppercase tracking-wider mb-1">Output Summary</div>
+									<div class="text-sm text-neutral-300 bg-black/20 rounded p-3 max-h-48 overflow-y-auto font-mono text-xs" x-text="b.output"></div>
+								</div>
+							</div>
+						</template>
+					</div>
+				</div>
+
+				<!-- Verdict Section -->
+				<template x-if="a && b">
+					<div class="border border-neutral-50/5 rounded-lg bg-neutral-50/3 p-6">
+						<h2 class="text-lg font-bold mb-4 flex items-center gap-2">
+							<i class="ph-bold ph-trophy neon-yellow"></i>
+							Verdict
+						</h2>
+						<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+							<div class="text-center p-4 rounded-lg bg-black/20">
+								<div class="text-xs text-neutral-500 uppercase tracking-wider mb-2">Cheaper</div>
+								<div class="text-2xl font-bold" :class="{
+									'neon-green': winner('cost') !== 'tie',
+									'neon-yellow': winner('cost') === 'tie'
+								}">
+									<span x-show="winner('cost') === 'A'" x-text="'Session A'"></span>
+									<span x-show="winner('cost') === 'B'" x-text="'Session B'"></span>
+									<span x-show="winner('cost') === 'tie'">Tie</span>
+								</div>
+								<div class="text-xs text-neutral-500 mt-1" x-show="winner('cost') !== 'tie'">
+									<span x-text="winner('cost') === 'A' ? ('$' + (b.total_cost - a.total_cost).toFixed(4) + ' cheaper') : ('$' + (a.total_cost - b.total_cost).toFixed(4) + ' cheaper')"></span>
+								</div>
+							</div>
+							<div class="text-center p-4 rounded-lg bg-black/20">
+								<div class="text-xs text-neutral-500 uppercase tracking-wider mb-2">Faster</div>
+								<div class="text-2xl font-bold" :class="{
+									'neon-green': winner('duration') !== 'tie',
+									'neon-yellow': winner('duration') === 'tie'
+								}">
+									<span x-show="winner('duration') === 'A'" x-text="'Session A'"></span>
+									<span x-show="winner('duration') === 'B'" x-text="'Session B'"></span>
+									<span x-show="winner('duration') === 'tie'">Tie</span>
+								</div>
+								<div class="text-xs text-neutral-500 mt-1" x-show="winner('duration') !== 'tie'">
+									<span x-text="winner('duration') === 'A' ? (fmtDuration(b.duration_secs - a.duration_secs) + ' faster') : (fmtDuration(a.duration_secs - b.duration_secs) + ' faster')"></span>
+								</div>
+							</div>
+							<div class="text-center p-4 rounded-lg bg-black/20">
+								<div class="text-xs text-neutral-500 uppercase tracking-wider mb-2">Fewer Agents</div>
+								<div class="text-2xl font-bold" :class="{
+									'neon-green': winner('agents') !== 'tie',
+									'neon-yellow': winner('agents') === 'tie'
+								}">
+									<span x-show="winner('agents') === 'A'" x-text="'Session A'"></span>
+									<span x-show="winner('agents') === 'B'" x-text="'Session B'"></span>
+									<span x-show="winner('agents') === 'tie'">Tie</span>
+								</div>
+								<div class="text-xs text-neutral-500 mt-1" x-show="winner('agents') !== 'tie'">
+									<span x-text="winner('agents') === 'A' ? ((b.agent_count - a.agent_count) + ' fewer') : ((a.agent_count - b.agent_count) + ' fewer')"></span>
+								</div>
+							</div>
+						</div>
+					</div>
+				</template>
+			}
+		</div>
+	}
+}

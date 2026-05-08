@@ -233,6 +233,7 @@ func main() {
 	r.Get("/session/{sessionID}", handleSession)
 	r.Get("/agents", handleAgentsList)
 	r.Get("/history", handleHistoryPage)
+	r.Get("/compare", handleComparePage)
 	r.Get("/agents/{slug}", handleAgentDetail)
 
 	// Static files (favicon, etc.)
@@ -266,12 +267,14 @@ func main() {
 		// PG-backed endpoints
 		r.Get("/users", handleAPIGetUsers)
 		r.Get("/pg/history", handleAPISessionHistory)
+		r.Get("/pg/stats", handleAPIStats)
 		r.Route("/pg/sessions", func(r chi.Router) {
 			r.Get("/", handleAPIGetSessions)
 			r.Post("/", handleAPICreateSession)
 			r.Patch("/{id}", handleAPIPatchSession)
 			r.Get("/{id}/agents", handleAPIGetAgents)
 			r.Get("/{id}/events", handleAPIGetSessionEvents)
+			r.Get("/{id}/diff", handleAPIGetSessionDiff)
 			r.Post("/{id}/agents", handleAPICreateAgent)
 		})
 		r.Patch("/pg/agents/{id}", handleAPIPatchAgent)
@@ -286,6 +289,7 @@ func main() {
 	r.Get("/htmx/session/{sessionID}/conversation", handleHTMXConversation)
 	r.Get("/htmx/session/{sessionID}/tilldone", handleHTMXTillDone)
 	r.Get("/htmx/session/{sessionID}/costs", handleHTMXCosts)
+	r.Get("/htmx/session/{sessionID}/graph", handleHTMXAgentGraph)
 	r.Get("/htmx/session/{sessionID}/stream", handleHTMXSSE)
 
 	srv := &http.Server{
