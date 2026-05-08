@@ -20,6 +20,28 @@ export class PiAdapter implements PlatformAdapter {
     "o3-mini": { input: 1.1, output: 4.4 },
   };
 
+
+  private static MODEL_TIMEOUTS: Record<string, number> = {
+    "opus-nocache": 600_000,
+    "claude-opus-4.6": 600_000,
+    "sonnet-nocache": 300_000,
+    "claude-sonnet-4.6": 300_000,
+    "gpt-5.5": 300_000,
+    "pro-nocache": 300_000,
+    "o3-mini": 180_000,
+  };
+
+  private getModelTimeout(model: string): number {
+    const mapped = this.mapModel(model);
+    return PiAdapter.MODEL_TIMEOUTS[mapped] ?? 300_000;
+  }
+
+  private isTransientError(output: string): boolean {
+    const transient = ["rate_limit", "429", "503", "overloaded", "context_length", "server_error", "connection", "timeout"];
+    const lower = output.toLowerCase();
+    return transient.some(t => lower.includes(t));
+  }
+
   private computeCostFromTokens(model: string, inputTokens: number, outputTokens: number, cacheReadTokens: number, totalTokens?: number): number {
     const mapped = this.mapModel(model);
     const pricing = PiAdapter.MODEL_PRICING[mapped];
@@ -90,7 +112,7 @@ export class PiAdapter implements PlatformAdapter {
 
     console.log(`[pi-rpc] Spawning ${opts.persona.name} (${this.mapModel(opts.model)}) [${opts.persona.skills.length} skills] in ${opts.workingDir}`);
 
-    const timeout = opts.timeoutMs ?? 300_000;
+    const timeout = opts.timeoutMs ?? this.getModelTimeout(opts.model);
 
     let totalCost = 0;
     let totalTokens = 0;
