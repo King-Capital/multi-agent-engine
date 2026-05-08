@@ -181,3 +181,61 @@ describe("steering", () => {
     expect(received[0]).toBe("how's progress?");
   });
 });
+
+import { SandboxPool } from "./sandbox-pool";
+
+describe("sandbox pool", () => {
+  test("assigns and releases sandboxes", async () => {
+    const pool = new SandboxPool({ poolSize: 2 });
+    
+    const sb1 = await pool.assign("agent-1");
+    expect(sb1).not.toBeNull();
+    expect(sb1!.id).toBe(1);
+    expect(sb1!.ip).toBe("10.71.20.81");
+    expect(sb1!.active).toBe(true);
+
+    const sb2 = await pool.assign("agent-2");
+    expect(sb2).not.toBeNull();
+    expect(sb2!.id).toBe(2);
+
+    // No more sandboxes available
+    const sb3 = await pool.assign("agent-3");
+    expect(sb3).toBeNull();
+
+    // Release one
+    await pool.release("agent-1");
+    
+    // Now it's available again
+    const sb4 = await pool.assign("agent-4");
+    expect(sb4).not.toBeNull();
+    expect(sb4!.id).toBe(1);
+  });
+
+  test("tracks pool status", async () => {
+    const pool = new SandboxPool({ poolSize: 4 });
+    
+    let status = pool.status();
+    expect(status.total).toBe(4);
+    expect(status.available).toBe(4);
+    expect(status.active).toBe(0);
+
+    await pool.assign("agent-1");
+    await pool.assign("agent-2");
+
+    status = pool.status();
+    expect(status.available).toBe(2);
+    expect(status.active).toBe(2);
+  });
+
+  test("getAssigned returns correct sandbox", async () => {
+    const pool = new SandboxPool({ poolSize: 2 });
+    
+    await pool.assign("agent-1");
+    
+    const sb = pool.getAssigned("agent-1");
+    expect(sb).toBeDefined();
+    expect(sb!.vmid).toBe(801);
+
+    expect(pool.getAssigned("agent-99")).toBeUndefined();
+  });
+});

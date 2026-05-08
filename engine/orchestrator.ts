@@ -14,6 +14,7 @@ import { sanitizeAgentInput, validateAgentOutput } from "./security";
 import { isGitRepo, createWorktree, mergeWorktree, cleanupWorktree } from "./worktree";
 import { delegateWithHealing } from "./self-healing";
 import { PipelineTracker } from "./pipeline-state";
+import { SandboxPool } from "./sandbox-pool";
 import type {
   PlatformAdapter,
   DelegateResult,
@@ -47,6 +48,7 @@ export class Orchestrator {
   private monitorInterval: ReturnType<typeof setInterval> | null = null;
   private messageSenders: Map<string, (msg: string) => void> = new Map();
   private pipelines: Map<string, PipelineTracker> = new Map();
+  private sandboxPool: SandboxPool | null = null;
   private sseAbort: AbortController | null = null;
 
   constructor(dashboardUrl?: string, apiToken?: string) {
@@ -104,6 +106,11 @@ export class Orchestrator {
       this.monitorInterval = null;
     }
     this.agentActivity.clear();
+  }
+
+  enableSandboxPool(opts?: { pveApi?: string; pveToken?: string; poolSize?: number }): void {
+    this.sandboxPool = new SandboxPool(opts);
+    console.log(`[orchestrator] Sandbox pool enabled (${this.sandboxPool.status().total} sandboxes)`);
   }
 
   registerAdapter(adapter: PlatformAdapter): void {
@@ -528,6 +535,15 @@ export class Orchestrator {
       this.trackActivity(workerId, member.name, "worker");
 
       let workerDir = session.workingDir;
+      
+      // Assign sandbox if pool is enabled
+      const sandbox = this.sandboxPool ? await this.sandboxPool.assign(workerId) : null;
+      if (sandbox) {
+        console.log(`[orchestrator] Agent ${member.name} assigned to sandbox ${sandbox.id} (${sandbox.ip})`);
+        // TODO: SSH into sandbox and use it as working dir
+        // For now, just track the assignment
+      }
+      
       if (useWorktrees) {
         const wtId = `${session.id.slice(0, 8)}-${workerId}`;
         workerDir = await createWorktree(session.workingDir, wtId);
@@ -587,6 +603,11 @@ export class Orchestrator {
       session.totalTokens += result.tokensUsed;
       await this.emitter.costUpdate(session.id, workerId, result.costUsd, result.tokensUsed, 0);
       this.checkBudget(session, workerId, result.costUsd);
+
+      // Release sandbox if assigned
+      if (this.sandboxPool) {
+        await this.sandboxPool.release(workerId);
+      }
 
       // Emit worker output summary to conversation stream
       const workerSummary = this.summarizeOutput(result.output, 1500);
