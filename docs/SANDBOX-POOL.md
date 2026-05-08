@@ -25,7 +25,7 @@ MAE Orchestrator
 | RAM/container | 2 GB | Sufficient for agent work |
 | Disk/container | 16 GB | Repos + node_modules + caches |
 | VMID range | 400-409 | Reserved for sandbox pool |
-| Base OS | Debian 12 | Standard Proxmox template |
+| Base OS | Debian 13 | Standard Proxmox template |
 
 ## Usage
 
@@ -67,6 +67,6 @@ is cleaned (git reset, temp files removed) and returned to the pool.
 
 ## Prerequisites
 
-1. Debian 12 template on proxmox05: `pveam download local debian-12-standard_12.7-1_amd64.tar.zst`
+1. Debian 13 template on proxmox05: `Template already on TN01_lxc_nvme (NFS shared across all nodes)`
 2. VLAN 20 network access (vmbr0 bridge)
 3. Proxmox MCP token with AllocateTemplate permission (for automated template downloads)

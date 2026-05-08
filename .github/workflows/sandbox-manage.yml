@@ -1,0 +1,95 @@
+name: Sandbox Management
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - provision
+          - warm
+          - create
+          - destroy
+      target_ip:
+        description: 'Sandbox IP (default: 10.71.1.230)'
+        required: false
+        default: '10.71.1.230'
+      vmid:
+        description: 'VMID for create/destroy (default: 403)'
+        required: false
+        default: '403'
+
+permissions:
+  contents: read
+
+jobs:
+  sandbox:
+    name: "Sandbox: ${{ inputs.action }}"
+    runs-on: [self-hosted, mae]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install Ansible
+        if: inputs.action == 'provision' || inputs.action == 'warm'
+        run: |
+          pip install ansible --break-system-packages 2>/dev/null || pip install ansible
+
+      - name: Write inventory
+        if: inputs.action == 'provision' || inputs.action == 'warm'
+        run: |
+          cat > /tmp/sandbox-inventory.yml << EOF
+          all:
+            children:
+              sandboxes:
+                hosts:
+                  sandbox:
+                    ansible_host: ${{ inputs.target_ip }}
+                    ansible_user: root
+                    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+          EOF
+
+      - name: Run provisioning playbook
+        if: inputs.action == 'provision'
+        run: |
+          ansible-playbook -i /tmp/sandbox-inventory.yml scripts/ansible/sandbox-playbook.yml -v
+
+      - name: Warm sandbox (update repos + deps)
+        if: inputs.action == 'warm'
+        run: |
+          ansible sandboxes -i /tmp/sandbox-inventory.yml -m shell -a "
+            cd /home/mae/repos && for d in */; do
+              cd /home/mae/repos/\$d && git pull --ff-only 2>/dev/null
+              cd /home/mae/repos
+            done
+          " --become --become-user mae
+
+      - name: Create sandbox LXC
+        if: inputs.action == 'create'
+        env:
+          PVE_TOKEN: ${{ secrets.PROXMOX_API_TOKEN }}
+        run: |
+          curl -sk -X POST "https://10.71.1.5:8006/api2/json/nodes/proxmox05/lxc" \
+            -H "Authorization: PVEAPIToken=$PVE_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "vmid": ${{ inputs.vmid }},
+              "ostemplate": "TN01_lxc_nvme:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst",
+              "hostname": "mae-sandbox-${{ inputs.vmid }}",
+              "cores": 2, "memory": 2048, "swap": 512,
+              "rootfs": "px05_zfs_disk:16",
+              "net0": "name=eth0,bridge=vmbr0,ip=${{ inputs.target_ip }}/24,gw=10.71.1.1",
+              "unprivileged": 1, "features": "nesting=1", "start": 1
+            }'
+
+      - name: Destroy sandbox LXC
+        if: inputs.action == 'destroy'
+        env:
+          PVE_TOKEN: ${{ secrets.PROXMOX_API_TOKEN }}
+        run: |
+          curl -sk -X POST "https://10.71.1.5:8006/api2/json/nodes/proxmox05/lxc/${{ inputs.vmid }}/status/stop" \
+            -H "Authorization: PVEAPIToken=$PVE_TOKEN"
+          sleep 5
+          curl -sk -X DELETE "https://10.71.1.5:8006/api2/json/nodes/proxmox05/lxc/${{ inputs.vmid }}?force=1&purge=1" \
+            -H "Authorization: PVEAPIToken=$PVE_TOKEN"

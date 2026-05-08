@@ -7,8 +7,8 @@ set -euo pipefail
 
 POOL_PREFIX="mae-sandbox"
 NODE="${NODE:-proxmox05}"
-TEMPLATE="${TEMPLATE:-local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst}"
-STORAGE="${STORAGE:-px05_zfs_disk}"
+TEMPLATE="${TEMPLATE:-TN01_lxc_nvme:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst}"
+STORAGE="${STORAGE:-TN01_lxc_nvme}"
 BRIDGE="${BRIDGE:-vmbr0}"
 CORES="${CORES:-2}"
 MEMORY="${MEMORY:-2048}"

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # MAE Dev Sandbox Provisioner
-# Run on a fresh Debian 12/13 LXC to set up a fully warmed dev environment
+# Run on a fresh Debian 13 (trixie) LXC to set up a fully warmed dev environment
 
 echo "=== MAE Dev Sandbox Provisioner ==="
 export DEBIAN_FRONTEND=noninteractive
