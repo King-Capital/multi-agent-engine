@@ -90,7 +90,7 @@ templ DashboardPage(sessions []*models.Session) {
 								</select>
 							</div>
 						</div>
-						<div class="flex-1 overflow-y-auto scrollbar-thin p-2" id="session-list">
+						<div class="flex-1 overflow-y-auto scrollbar-thin p-2" id="session-list" hx-get="/htmx/sessions" hx-trigger="every 5s" hx-swap="innerHTML">
 							@SessionListItems(sessions)
 						</div>
 					</div>

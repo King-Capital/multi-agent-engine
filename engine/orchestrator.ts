@@ -314,7 +314,7 @@ export class Orchestrator {
 
     console.log(`\n[orchestrator] Session: ${sessionName}`);
     console.log(`[orchestrator] Chain: ${chainName}`);
-    console.log(`[orchestrator] Dashboard: http://localhost:8400/session/${sessionId}`);
+    console.log(`[orchestrator] Dashboard: ${this.dashboardUrl}/session/${sessionId}`);
     console.log(`[orchestrator] Task: ${opts.task}\n`);
 
     this.loadBudgets();

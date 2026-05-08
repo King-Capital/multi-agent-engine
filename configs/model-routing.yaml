@@ -5,7 +5,7 @@ tiers:
       - model: litellm/opus-nocache
         thinking: high
         note: "Max intelligence, full reasoning"
-      - model: openai/gpt-5.5
+      - model: openai-codex/gpt-5.5
         thinking: high
         note: "Cross-model validation partner"
     default: litellm/opus-nocache
@@ -18,23 +18,23 @@ tiers:
       - model: litellm/opus-nocache
         thinking: low
         note: "Opus with low thinking = fast but still smart"
-      - model: openai/gpt-5.5
+      - model: openai-codex/gpt-5.5
         thinking: medium
         note: "GPT-5.5 medium thinking"
-    default: openai/gpt-5.5
+    default: openai-codex/gpt-5.5
     default_thinking: medium
     context: 1000000
 
   fast:
     description: "Scouts, triage, quick exploration, cheap passes"
     options:
-      - model: openai/gpt-5.5
+      - model: openai-codex/gpt-5.5
         thinking: low
         note: "GPT-5.5 low thinking for fast passes"
       - model: litellm/opus-nocache
         thinking: low
         note: "Opus low thinking"
-    default: openai/gpt-5.5
+    default: openai-codex/gpt-5.5
     default_thinking: low
     context: 200000
 
@@ -51,7 +51,7 @@ aliases:
   quality: litellm/opus-nocache
   main: litellm/sonnet-nocache
   fast: litellm/sonnet-nocache
-  pro: openai/gpt-5.5
+  pro: openai-codex/gpt-5.5
   free: litellm/sonnet-nocache
 
 # Role → tier mapping (always push leaders HIGH)
@@ -71,8 +71,8 @@ roleDefaults:
 
 crossModelPairs:
   - builder: litellm/opus-nocache
-    verifier: openai/gpt-5.5
-  - builder: openai/gpt-5.5
+    verifier: openai-codex/gpt-5.5
+  - builder: openai-codex/gpt-5.5
     verifier: litellm/opus-nocache
 
 budgets:
