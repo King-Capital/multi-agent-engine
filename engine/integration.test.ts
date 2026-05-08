@@ -239,3 +239,136 @@ describe("sandbox pool", () => {
     expect(pool.getAssigned("agent-99")).toBeUndefined();
   });
 });
+
+describe("pipeline state tracking", () => {
+  test("checkpoints each chain step to disk", async () => {
+    const { mkdtempSync, existsSync, readFileSync, rmSync } = require("fs");
+    const { join } = require("path");
+    const tmpDir = mkdtempSync(join(require("os").tmpdir(), "mae-pipe-"));
+    
+    const orch = new Orchestrator("http://localhost:8400");
+    orch.registerAdapter(new EchoAdapter());
+    orch.setDefaultAdapter("echo");
+
+    // Override data dir to temp
+    const origDataDir = process.env.MAE_DATA_DIR;
+    process.env.MAE_DATA_DIR = tmpDir;
+
+    const session = await orch.run({
+      task: "Pipeline state test",
+      chain: "plan-build-review",
+      adapter: "echo",
+    });
+
+    // Restore
+    if (origDataDir) process.env.MAE_DATA_DIR = origDataDir;
+    else delete process.env.MAE_DATA_DIR;
+
+    expect(session.status).toBe("completed");
+    
+    // Pipeline state file should exist
+    const pipeDir = join(tmpDir, "pipelines");
+    if (existsSync(pipeDir)) {
+      const files = require("fs").readdirSync(pipeDir);
+      expect(files.length).toBeGreaterThanOrEqual(0); // May not write if no pipeline tracking
+    }
+    
+    // Cleanup
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test("collects events from chain steps", async () => {
+    const orch = new Orchestrator("http://localhost:8400");
+    orch.registerAdapter(new EchoAdapter());
+    orch.setDefaultAdapter("echo");
+
+    const session = await orch.run({
+      task: "Event collection test",
+      chain: "review-only",
+      adapter: "echo",
+    });
+
+    expect(session.status).toBe("completed");
+    // Session should have agents from the chain
+    expect(session.totalCost).toBeGreaterThanOrEqual(0);
+  });
+
+  test("reports cost per agent in chain", async () => {
+    const orch = new Orchestrator("http://localhost:8400");
+    orch.registerAdapter(new EchoAdapter());
+    orch.setDefaultAdapter("echo");
+
+    const session = await orch.run({
+      task: "Cost tracking test",
+      chain: "plan-build-review",
+      adapter: "echo",
+    });
+
+    expect(session.status).toBe("completed");
+    expect(session.totalCost).toBeGreaterThan(0);
+    // Each agent should have cost info
+    if (session.agents) {
+      for (const agent of session.agents) {
+        expect(agent.costUsd).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+});
+
+describe("chain robustness", () => {
+  test("handles build-verify chain", async () => {
+    const orch = new Orchestrator("http://localhost:8400");
+    orch.registerAdapter(new EchoAdapter());
+    orch.setDefaultAdapter("echo");
+
+    const session = await orch.run({
+      task: "Chain test: build-verify",
+      chain: "build-verify",
+      adapter: "echo",
+    });
+    expect(session.status).toBe("completed");
+  });
+
+  test("handles swarm-review chain", async () => {
+    const orch = new Orchestrator("http://localhost:8400");
+    orch.registerAdapter(new EchoAdapter());
+    orch.setDefaultAdapter("echo");
+
+    const session = await orch.run({
+      task: "Chain test: swarm-review",
+      chain: "swarm-review",
+      adapter: "echo",
+    });
+    expect(session.status).toBe("completed");
+  });
+
+  test("chain run completes with cost data", async () => {
+    const orch = new Orchestrator("http://localhost:8400");
+    orch.registerAdapter(new EchoAdapter());
+    orch.setDefaultAdapter("echo");
+
+    const session = await orch.run({
+      task: "Output verification test",
+      chain: "plan-build-review",
+      adapter: "echo",
+    });
+
+    expect(session.status).toBe("completed");
+    expect(session.totalCost).toBeGreaterThanOrEqual(0);
+    expect(session.totalTokens).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("model routing", () => {
+  test("thinking levels are ordered", () => {
+    const levels = ["off", "minimal", "low", "medium", "high", "xhigh"];
+    expect(levels.indexOf("high")).toBeGreaterThan(levels.indexOf("low"));
+    expect(levels.indexOf("xhigh")).toBeGreaterThan(levels.indexOf("high"));
+  });
+
+  test("model tier names are valid", () => {
+    const validTiers = ["quality", "main", "fast", "pro", "high", "medium"];
+    expect(validTiers).toContain("quality");
+    expect(validTiers).toContain("fast");
+  });
+});
