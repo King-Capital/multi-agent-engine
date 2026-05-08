@@ -1,107 +1,251 @@
+<div align="center">
+
+<!-- CI Badges -->
+[![Tests](https://img.shields.io/github/actions/workflow/status/King-Capital/multi-agent-engine/agent-tests.yml?branch=main&label=tests&style=flat-square&logo=github)](https://github.com/King-Capital/multi-agent-engine/actions/workflows/agent-tests.yml)
+[![Build](https://img.shields.io/github/actions/workflow/status/King-Capital/multi-agent-engine/dashboard-ci.yml?branch=main&label=build&style=flat-square&logo=github)](https://github.com/King-Capital/multi-agent-engine/actions/workflows/dashboard-ci.yml)
+[![CodeQL](https://img.shields.io/github/actions/workflow/status/King-Capital/multi-agent-engine/security-scan.yml?branch=main&label=CodeQL&style=flat-square&logo=github)](https://github.com/King-Capital/multi-agent-engine/actions/workflows/security-scan.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev/)
+[![Bun](https://img.shields.io/badge/Bun-runtime-f9f1e1?style=flat-square&logo=bun&logoColor=black)](https://bun.sh/)
+
 # Multi-Agent Engine
 
-Orchestration engine that coordinates teams of AI agents through structured chains -- plan, build, review, and swarm workflows with a real-time Go dashboard.
+**Ship code with an army of AI agents -- orchestrated, verified, and battle-tested across model families.**
 
-## Architecture
+<br/>
+
+[Quick Start](#-quick-start) · [Features](#-features) · [Architecture](#-architecture) · [Chains](#-chains) · [Agents](#-agents) · [Dashboard](#-dashboard) · [Contributing](#-contributing)
+
+</div>
+
+---
+
+## ✨ Features
+
+- **Multi-Model Orchestration** -- Route tasks across Claude, Codex, Pi, and custom adapters with per-agent model tier control
+- **10 Chain Types** -- From quick reviews to full-SDLC pipelines with plan → build → parallel validate → swarm review
+- **Cross-Model Verification** -- Parallel teams run on *different* model families, catching blind spots no single model finds
+- **Real-Time Dashboard** -- Go/HTMX/SSE dashboard with live agent activity, run history, and pipeline visualization
+- **Red Team / Blue Team** -- Adversarial + correctness review running in parallel, synthesized by an orchestrator
+- **Pi SDK Integration** -- First-class adapter for the Pi coding agent alongside Claude Code and Codex
+- **Sandbox Pooling** -- Agents execute in isolated sandboxes with pooled resource management
+- **Pipeline State & Resume** -- Chains checkpoint state so interrupted runs can resume from the last completed step
+- **Cost Tracking** -- Per-run token usage and cost breakdown across all model tiers
+- **Damage Control Rules** -- Configurable guardrails prevent agents from running destructive commands
+
+---
+
+## 🎬 Demo
+
+> 🚧 **Coming soon** -- GIF / video walkthrough of a full `plan-build-review` run with the live dashboard.
+
+---
+
+## 🏗 Architecture
 
 ```
-                          User / CLI
-                              |
-                         Orchestrator
-                        (quality model)
-                       /      |       \
-                 Planning  Engineering  Validation
-                   Lead       Lead        Lead
-                    |          |           |
-                  Scout     Builder    Reviewer
-                                      Security
-                                      Adversarial
-                                      Correctness
-                                      Quality
+                            User / CLI
+                                │
+                           Orchestrator
+                          (quality model)
+                         ╱      │       ╲
+                   Planning  Engineering  Validation
+                     Lead       Lead        Lead
+                      │          │           │
+                    Scout     Builder    Reviewer
+                                        Security
+                                        Adversarial
+                                        Correctness
+                                        Quality
 
-    Parallel teams (Engineering B, Validation B) use different
-    model families for cross-model verification.
+    ┌─────────────────────────────────────────────────────────┐
+    │  Parallel teams (Engineering B, Validation B) use       │
+    │  different model families for cross-model verification. │
+    │                                                         │
+    │  Swarm mode splits into Red Team + Blue Team for        │
+    │  adversarial vs. correctness review in parallel.        │
+    └─────────────────────────────────────────────────────────┘
 
-    Swarm mode splits into Red Team + Blue Team for
-    adversarial vs. correctness review in parallel.
-
-    Dashboard (Go/templ/HTMX) ------> SSE event stream
+    Dashboard (Go/templ/HTMX) ──────▶ SSE event stream
 ```
+
+### Distributed Deployment
 
 The engine CLI and dashboard can run on **different hosts**. The CLI streams events to a central dashboard over HTTP:
 
 ```
-  Mac Mini (CLI)  ──────── events ────────▶  CT 272 (Dashboard + PG)
-  CC-King (CLI)   ──────── events ────────▶  CT 272 (Dashboard + PG)
-                                                     │
-                                              Caddy (CT 205)
-                                                     │
-                                           ai-agents.rodaddy.live
+  Mac Mini (CLI)  ──── events ────▶  Dashboard Server (Go + PG)
+  CC-King  (CLI)  ──── events ────▶  Dashboard Server (Go + PG)
+                                              │
+                                        Caddy Reverse Proxy
+                                              │
+                                     ai-agents.rodaddy.live
 ```
 
-## Prerequisites
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
 
 | Tool | Required For | Install |
 |------|-------------|---------|
 | [Bun](https://bun.sh) | Engine CLI (all hosts) | See bun.sh |
 | [just](https://github.com/casey/just) | Justfile shortcuts (optional) | `brew install just` |
 | [Go](https://go.dev) (1.22+) | Dashboard server only | `brew install go` |
-| [templ](https://templ.guide) | Dashboard server only | `go install github.com/a-h/templ/cmd/templ@latest` |
+| [templ](https://templ.guide) | Dashboard templates only | `go install github.com/a-h/templ/cmd/templ@latest` |
 
-**CLI-only hosts** (Mac Mini, CC-King) only need bun. Go and templ are only needed on the dashboard server.
+> **CLI-only hosts** only need `bun`. Go and templ are only needed on the dashboard server.
 
-## Quickstart
+### Install & Run
 
 ```bash
-# Install engine dependencies
-cd engine && bun install
+# Clone
+git clone https://github.com/King-Capital/multi-agent-engine.git
+cd multi-agent-engine
 
-# Build the CLI binary (optional -- can also run via bun directly)
+# Install dependencies
+cd engine && bun install && cd ..
+
+# (Optional) Build standalone CLI binary
 just build
 
-# Point at the dashboard (add to shell profile for persistence)
+# Point at the dashboard server
 export MAE_DASHBOARD_URL=http://10.71.20.72:8400
 
-# Run a task (plan-build-review chain)
+# Run your first task -- plan, build, and review
 just task "add input validation to the signup handler"
 
-# Dry run (echo adapter, no real agents)
+# Dry run (echo adapter, no real API calls)
 just dry "refactor the auth module"
 
 # Start the dashboard (dashboard server only)
-just dashboard-build
-just dashboard
+just dashboard-build && just dashboard
 ```
 
-## Remote Dashboard Targeting
-
-The engine streams events to a dashboard server. By default it targets `http://localhost:8400`. To point at a remote dashboard:
+### Remote Dashboard
 
 ```bash
-# Environment variable (recommended -- add to ~/.bashrc or ~/.zshrc)
+# Add to ~/.zshrc or ~/.bashrc for persistence
 export MAE_DASHBOARD_URL=http://10.71.20.72:8400
 
-# Or per-invocation flag
+# Or pass per-invocation
 bun engine/cli.ts task "your task" --dashboard http://10.71.20.72:8400
 ```
 
-This lets any host with bun installed run agent teams and see results on the central dashboard at https://ai-agents.rodaddy.live.
+Any host with `bun` can run agent teams and stream results to the central dashboard at `https://ai-agents.rodaddy.live`.
 
-## Justfile Commands
+---
+
+## 🔗 Chains
+
+10 composable chain types, from surgical reviews to full SDLC pipelines:
+
+| Chain | What It Does |
+|-------|-------------|
+| `plan-build-review` | Full dev workflow: plan → implement → validate |
+| `scout-then-plan` | Explore the codebase first, then produce a plan |
+| `build-verify` | Builder-verifier loop with 3-attempt escalation |
+| `parallel-build` | Same task across multiple model families -- best result wins |
+| `review-only` | Code review + security check on existing changes |
+| `full-sdlc` | Complete SDLC: scout → plan → parallel build → parallel validate |
+| `swarm-review` | Red team + blue team in parallel, orchestrator synthesizes |
+| `red-blue` | Red team attacks, blue team defends -- competing perspectives |
+| `scout-swarm` | Scout first, then swarm review flagged areas |
+| `build-then-swarm` | Build with engineering, then swarm review the output |
+
+---
+
+## 🤖 Agents
+
+| Agent | Role | Model Tier |
+|-------|------|------------|
+| **Orchestrator** | Routes tasks to teams, synthesizes results | quality |
+| **Planning Lead** | Implementation plans, risk assessment | quality |
+| **Scout** | Fast codebase exploration, file discovery, triage | fast |
+| **Builder** | Code implementation, builds and tests | main |
+| **Code Reviewer** | Correctness review, P0-P3 grading | quality |
+| **Security Reviewer** | OWASP checks, injection, credential leaks, prompt injection | quality |
+| **Validation Lead** | Coordinates review teams, issues final grade | quality |
+| **Adversarial Reviewer** | Devil's advocate, assumption challenging, attack vectors | quality |
+| **Correctness Reviewer** | Atomic claim verification, type safety, spec compliance | quality |
+| **Quality Reviewer** | Maintainability, naming, structure, duplication, dead code | pro |
+
+---
+
+## 👥 Teams
+
+| Team | Purpose | Lead Model |
+|------|---------|------------|
+| **Planning** | Codebase analysis, implementation plans, risk assessment | quality |
+| **Engineering** | Code implementation, feature building, bug fixing | quality |
+| **Engineering B** | Parallel implementation with a *different* model family | pro |
+| **Validation** | Code review, security review, QA testing | quality |
+| **Validation B** | Parallel validation with cross-model verification | pro |
+| **Red Team** | Adversarial review, security testing, attack surface analysis | quality |
+| **Blue Team** | Correctness verification, quality review, maintainability | pro |
+
+---
+
+## 📊 Dashboard
+
+The real-time dashboard is a Go server using **templ** (type-safe templates), **HTMX**, **Alpine.js**, and **SSE** for live updates.
+
+| Feature | Detail |
+|---------|--------|
+| Live agent activity | Watch agents work in real time via SSE stream |
+| Run history | Browse and replay past pipeline runs |
+| Pipeline visualization | See chain steps, team assignments, and model routing |
+| Multi-host support | Multiple CLI hosts stream into one dashboard |
+
+**Access:** [https://ai-agents.rodaddy.live](https://ai-agents.rodaddy.live)
+
+---
+
+## 🧭 Model Routing
+
+| Tier | Default Model | Thinking Level | Used By |
+|------|---------------|----------------|---------|
+| `high` | opus-nocache | high | Orchestrators, leads, deep analysis |
+| `medium` | sonnet-nocache | medium | Builders, workers, implementation |
+| `fast` | sonnet-nocache | low | Scouts, triage, quick exploration |
+
+**Thinking levels:** `off` < `minimal` < `low` < `medium` < `high` < `xhigh`
+
+Cross-model pairs are configured in `configs/model-routing.yaml` to ensure builder and verifier always use different model families.
+
+---
+
+## 🔌 Adapters
+
+| Adapter | Description |
+|---------|-------------|
+| `claude-code` | Delegates to Claude Code CLI |
+| `codex` | Delegates to OpenAI Codex CLI |
+| `pi` | Delegates to Pi coding agent |
+| `echo` | Dry-run adapter -- prints what would happen |
+
+---
+
+## ⚡ Justfile Commands
+
+<details>
+<summary><strong>Click to expand full command reference</strong></summary>
 
 | Command | Description |
 |---------|-------------|
-| `just run <prompt> [args]` | Run a reusable prompt workflow |
-| `just chain <name> [task]` | Run a named chain directly |
 | `just task <description>` | Run plan-build-review (default workflow) |
 | `just dry <description>` | Dry run with echo adapter |
+| `just run <prompt> [args]` | Run a reusable prompt workflow |
+| `just chain <name> [task]` | Run a named chain directly |
 | `just pbr <task>` | Plan, build, and review a task |
 | `just review <diff>` | Review code changes |
 | `just scout <target>` | Scout/explore a codebase area |
 | `just parallel <task>` | Build with multiple models, pick best |
 | `just swarm <target>` | Full swarm review (red + blue teams) |
 | `just red-blue <target>` | Red team attacks, blue team validates |
-| `just scout-swarm <target>` | Scout first, then swarm flagged areas |
+| `just scout-swarm <target>` | Scout first, then swarm review flagged areas |
 | `just build-swarm <task>` | Build then swarm review the output |
 | `just new-agent <name>` | Scaffold a new agent |
 | `just adapters` | List available adapters |
@@ -118,86 +262,81 @@ This lets any host with bun installed run agent teams and see results on the cen
 | `just expertise <name>` | Show an agent's expertise |
 | `just rules` | Show damage-control rules |
 
-## Agents
+</details>
 
-| Agent | Role | Model Tier |
-|-------|------|------------|
-| Orchestrator | Routes tasks to teams, synthesizes results | quality |
-| Planning Lead | Produces implementation plans, assesses risks | quality |
-| Scout | Fast codebase exploration, file discovery, triage | fast |
-| Builder | Code implementation, file creation, builds and tests | main |
-| Code Reviewer | Correctness review, quality checks, P0-P3 grading | quality |
-| Security Reviewer | OWASP checks, injection, credential leaks, prompt injection | quality |
-| Validation Lead | Coordinates review teams, final grade | quality |
-| Adversarial Reviewer | Devil's advocate, assumption challenging, attack vectors | quality |
-| Correctness Reviewer | Atomic claim verification, type safety, spec compliance | quality |
-| Quality Reviewer | Maintainability, naming, structure, duplication, dead code | pro |
+---
 
-## Teams
-
-| Team | Purpose | Lead Model |
-|------|---------|------------|
-| Planning | Codebase analysis, implementation plans, risk assessment | quality |
-| Engineering | Code implementation, feature building, bug fixing | quality |
-| Engineering B | Parallel implementation with different model family | pro |
-| Validation | Code review, security review, QA testing | quality |
-| Validation B | Parallel validation with cross-model verification | pro |
-| Red Team | Adversarial review, security testing, attack surface analysis | quality |
-| Blue Team | Correctness verification, quality review, maintainability | pro |
-
-## Chains
-
-| Chain | Description |
-|-------|-------------|
-| `plan-build-review` | Full development workflow: plan, implement, validate |
-| `scout-then-plan` | Explore first, then produce a plan |
-| `build-verify` | Builder-verifier loop with 3-attempt escalation |
-| `parallel-build` | Same task, multiple model families, best result wins |
-| `review-only` | Code review and security check on existing changes |
-| `full-sdlc` | Complete SDLC: scout, plan, parallel build, parallel validate |
-| `swarm-review` | Red team + blue team in parallel, orchestrator synthesizes |
-| `red-blue` | Red team attacks, blue team defends -- competing perspectives |
-| `scout-swarm` | Scout first, then swarm review flagged areas |
-| `build-then-swarm` | Build with engineering, then swarm review the output |
-
-## Tech Stack
+## 🛠 Tech Stack
 
 | Component | Technology |
 |-----------|------------|
-| Engine | Bun / TypeScript |
-| CLI | Bun-compiled standalone binary |
-| Dashboard | Go 1.22+ / chi router |
-| Templates | templ (type-safe Go templates) |
-| Dashboard UI | HTMX + Alpine.js + SSE |
-| Config | YAML (teams, chains, model routing, damage control) |
-| Adapters | Claude Code, Codex, Pi, Echo (dry-run) |
-| Testing | bun:test |
+| **Engine** | Bun / TypeScript |
+| **CLI** | Bun-compiled standalone binary |
+| **Dashboard** | Go 1.22+ / chi router |
+| **Templates** | templ (type-safe Go templates) |
+| **Dashboard UI** | HTMX + Alpine.js + SSE |
+| **Config** | YAML (teams, chains, model routing, damage control) |
+| **Adapters** | Claude Code, Codex, Pi, Echo (dry-run) |
+| **Testing** | bun:test |
 
-## Model Routing
+---
 
-| Tier | Default Model | Thinking | Used By |
-|------|---------------|----------|---------|
-| high | opus-nocache | high | Orchestrators, leads, deep analysis |
-| medium | sonnet-nocache | medium | Builders, workers, implementation |
-| fast | sonnet-nocache | low | Scouts, triage, quick exploration |
+## 🚢 Deployment
 
-Thinking levels: `off` < `minimal` < `low` < `medium` < `high` < `xhigh`
+See [deploy/README.md](deploy/README.md) for full setup instructions:
 
-Cross-model pairs are configured in `configs/model-routing.yaml` to ensure builder and verifier always use different model families.
-
-## Adapters
-
-| Adapter | Description |
-|---------|-------------|
-| `claude-code` | Delegates to Claude Code CLI |
-| `codex` | Delegates to OpenAI Codex CLI |
-| `pi` | Delegates to Pi coding agent |
-| `echo` | Dry-run adapter, prints what would happen |
-
-## Deployment
-
-See [deploy/README.md](deploy/README.md) for full setup instructions including:
-- Dashboard server provisioning (CT 272)
-- Remote CLI setup (Mac Mini, CC-King)
+- Dashboard server provisioning
+- Remote CLI setup for multi-host streaming
 - Caddy reverse proxy configuration
 - User seeding and PostgreSQL setup
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Here's how to get started:
+
+1. **Fork** the repo and create a feature branch from `main`
+2. **Install** dependencies: `cd engine && bun install`
+3. **Make** your changes -- follow existing code style and patterns
+4. **Test** your changes: `just test`
+5. **Type-check**: `just check`
+6. **Submit** a pull request with a clear description of what changed and why
+
+### Guidelines
+
+- All work happens on feature/fix branches -- never commit directly to `main`
+- Keep PRs focused: one feature or fix per PR
+- Add tests for new chain types or agents
+- Update this README if you add new commands, agents, or chains
+- Run `just check && just test` before submitting
+
+---
+
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE).
+
+```
+MIT License
+
+Copyright (c) 2026 King Capital
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

@@ -238,6 +238,9 @@ func main() {
 	// Static files (favicon, etc.)
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
+	// Prometheus metrics (public, no auth needed - handled by authMiddleware allowing GET on non-API paths)
+	r.Get("/metrics", handleMetrics)
+
 	// Agent persona API
 	r.Route("/api/agents", func(r chi.Router) {
 		r.Get("/{slug}/prompt", handleGetAgentPrompt)

@@ -449,3 +449,101 @@ func handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 
 	templates.HistoryPage(entries).Render(r.Context(), w)
 }
+
+// GET /metrics -- Prometheus-compatible metrics endpoint
+func handleMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+
+	// Dashboard uptime (always available)
+	uptimeSecs := int64(time.Since(startTime).Seconds())
+	fmt.Fprintf(w, "# HELP mae_dashboard_uptime_seconds Dashboard uptime in seconds\n")
+	fmt.Fprintf(w, "# TYPE mae_dashboard_uptime_seconds gauge\n")
+	fmt.Fprintf(w, "mae_dashboard_uptime_seconds %d\n\n", uptimeSecs)
+
+	if !dbEnabled || db == nil {
+		// Without DB, emit only uptime and zeros
+		fmt.Fprintf(w, "# HELP mae_sessions_total Total sessions by status\n")
+		fmt.Fprintf(w, "# TYPE mae_sessions_total gauge\n")
+		fmt.Fprintf(w, "mae_sessions_total{status=\"active\"} 0\n")
+		fmt.Fprintf(w, "mae_sessions_total{status=\"completed\"} 0\n")
+		fmt.Fprintf(w, "mae_sessions_total{status=\"failed\"} 0\n")
+		fmt.Fprintf(w, "mae_sessions_total{status=\"cancelled\"} 0\n\n")
+
+		fmt.Fprintf(w, "# HELP mae_agents_total Total agents by status\n")
+		fmt.Fprintf(w, "# TYPE mae_agents_total gauge\n")
+		fmt.Fprintf(w, "mae_agents_total{status=\"running\"} 0\n")
+		fmt.Fprintf(w, "mae_agents_total{status=\"completed\"} 0\n")
+		fmt.Fprintf(w, "mae_agents_total{status=\"failed\"} 0\n\n")
+
+		fmt.Fprintf(w, "# HELP mae_total_cost_usd Total cost in USD across all agents\n")
+		fmt.Fprintf(w, "# TYPE mae_total_cost_usd gauge\n")
+		fmt.Fprintf(w, "mae_total_cost_usd 0\n\n")
+
+		fmt.Fprintf(w, "# HELP mae_events_total Total event count\n")
+		fmt.Fprintf(w, "# TYPE mae_events_total gauge\n")
+		fmt.Fprintf(w, "mae_events_total 0\n")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Sessions by status
+	fmt.Fprintf(w, "# HELP mae_sessions_total Total sessions by status\n")
+	fmt.Fprintf(w, "# TYPE mae_sessions_total gauge\n")
+	sessionCounts := map[string]int64{"active": 0, "completed": 0, "failed": 0, "cancelled": 0}
+	rows, err := db.QueryContext(ctx, `SELECT status, COUNT(*) FROM sessions GROUP BY status`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var status string
+			var count int64
+			if err := rows.Scan(&status, &count); err == nil {
+				sessionCounts[status] = count
+			}
+		}
+		rows.Close()
+	}
+	for _, s := range []string{"active", "completed", "failed", "cancelled"} {
+		fmt.Fprintf(w, "mae_sessions_total{status=\"%s\"} %d\n", s, sessionCounts[s])
+	}
+	fmt.Fprintln(w)
+
+	// Agents by status
+	fmt.Fprintf(w, "# HELP mae_agents_total Total agents by status\n")
+	fmt.Fprintf(w, "# TYPE mae_agents_total gauge\n")
+	agentCounts := map[string]int64{"running": 0, "completed": 0, "failed": 0}
+	rows2, err := db.QueryContext(ctx, `SELECT status, COUNT(*) FROM agents GROUP BY status`)
+	if err == nil {
+		defer rows2.Close()
+		for rows2.Next() {
+			var status string
+			var count int64
+			if err := rows2.Scan(&status, &count); err == nil {
+				agentCounts[status] = count
+			}
+		}
+		rows2.Close()
+	}
+	for _, s := range []string{"running", "completed", "failed"} {
+		fmt.Fprintf(w, "mae_agents_total{status=\"%s\"} %d\n", s, agentCounts[s])
+	}
+	fmt.Fprintln(w)
+
+	// Total cost
+	fmt.Fprintf(w, "# HELP mae_total_cost_usd Total cost in USD across all agents\n")
+	fmt.Fprintf(w, "# TYPE mae_total_cost_usd gauge\n")
+	var totalCost float64
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd), 0) FROM agents`).Scan(&totalCost); err != nil {
+		totalCost = 0
+	}
+	fmt.Fprintf(w, "mae_total_cost_usd %.6f\n\n", totalCost)
+
+	// Total events
+	fmt.Fprintf(w, "# HELP mae_events_total Total event count\n")
+	fmt.Fprintf(w, "# TYPE mae_events_total gauge\n")
+	var eventCount int64
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&eventCount); err != nil {
+		eventCount = 0
+	}
+	fmt.Fprintf(w, "mae_events_total %d\n", eventCount)
+}

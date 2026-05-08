@@ -308,7 +308,7 @@ describe("pipeline state tracking", () => {
     expect(session.totalCost).toBeGreaterThan(0);
     // Each agent should have cost info
     if (session.agents) {
-      for (const agent of session.agents) {
+      for (const [, agent] of session.agents) {
         expect(agent.costUsd).toBeGreaterThanOrEqual(0);
       }
     }
