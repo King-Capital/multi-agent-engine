@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Activity,
   CircleDollarSign,
@@ -17,15 +17,17 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api, API_BASE_URL } from "@/lib/api";
-import type { DBEvent, DBSession, LiveEvent } from "@/lib/types";
+import { api } from "@/lib/api";
+import type { DBSession } from "@/lib/types";
 import {
   cn,
   formatCurrency,
   formatNumber,
   shortId,
+  statusColor,
 } from "@/lib/utils";
 import { usePolling } from "@/hooks/usePolling";
+import { SessionSSEProvider } from "@/hooks/useSessionSSE";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -39,22 +41,14 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SessionTabs } from "@/components/SessionTabs";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function statusClass(status: string) {
-  if (["completed", "done"].includes(status))
-    return "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
-  if (["active", "running", "waiting"].includes(status))
-    return "bg-cyan-500/15 text-cyan-300 border-cyan-500/30";
-  if (["failed", "error", "blocked"].includes(status))
-    return "bg-red-500/15 text-red-300 border-red-500/30";
-  return "bg-slate-500/15 text-slate-300 border-slate-500/30";
-}
-
 // ─── Stats panel ──────────────────────────────────────────────────────────────
 
 function StatsPanel() {
-  const { data, loading, error } = usePolling(api.stats, 15_000, []);
+  const { data, loading, error } = usePolling(
+    (signal) => api.stats(signal),
+    15_000,
+    [],
+  );
   if (loading)
     return (
       <Card className="glass">
@@ -192,7 +186,7 @@ function SessionSidebar({
           </div>
           <div>
             <h1 className="font-bold">MAE Dashboard</h1>
-            <p className="text-xs text-slate-500">{API_BASE_URL || "proxy"}</p>
+            <p className="text-xs text-slate-500">Real-time engine monitor</p>
           </div>
         </div>
         <Input
@@ -231,7 +225,7 @@ function SessionSidebar({
                     {shortId(s.id)} · {new Date(s.created_at).toLocaleString()}
                   </div>
                 </div>
-                <Badge className={statusClass(s.status)} variant="outline">
+                <Badge className={statusColor(s.status)} variant="outline">
                   {s.status}
                 </Badge>
               </div>
@@ -247,68 +241,42 @@ function SessionSidebar({
   );
 }
 
-// ─── Session detail (tabbed) ──────────────────────────────────────────────────
+// ─── Session detail (tabbed) — uses shared SSE ───────────────────────────────
 
 function Detail({ session }: { session: DBSession }) {
   const {
     data: history,
-    loading: eventsLoading,
-    error: eventsError,
     refresh,
-  } = usePolling(() => api.sessionEvents(session.id), 10_000, [session.id]);
-
-  const [live, setLive] = useState<LiveEvent[]>([]);
-  const [streamError, setStreamError] = useState<string | null>(null);
-
-  // Open SSE stream
-  useEffect(() => {
-    setLive([]);
-    setStreamError(null);
-    const es = new EventSource(api.streamUrl(session.id));
-    const handler = (e: MessageEvent) => {
-      try {
-        setLive((v) => [JSON.parse(e.data), ...v].slice(0, 300));
-      } catch {
-        /* ignore */
-      }
-    };
-    es.onmessage = handler;
-    [
-      "session_start",
-      "session_end",
-      "agent_spawn",
-      "agent_done",
-      "message",
-      "tool_call",
-      "tilldone",
-      "cost_update",
-      "domain_block",
-      "self_heal",
-      "error",
-      "pause",
-      "resume",
-      "waiting",
-    ].forEach((t) => es.addEventListener(t, handler as EventListener));
-    es.onerror = () => setStreamError("SSE reconnecting or unavailable");
-    return () => es.close();
-  }, [session.id]);
+  } = usePolling(
+    (signal) => api.sessionEvents(session.id, signal),
+    10_000,
+    [session.id],
+  );
 
   return (
-    <SessionTabs
-      session={session}
-      liveEvents={live}
-      historyEvents={history ?? []}
-      streamError={streamError}
-      onRefresh={refresh}
-    />
+    <SessionSSEProvider sessionId={session.id}>
+      <SessionTabs
+        session={session}
+        historyEvents={history ?? []}
+        onRefresh={refresh}
+      />
+    </SessionSSEProvider>
   );
 }
 
 // ─── Root App ─────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const { data: sessions, loading, error } = usePolling(api.sessions, 5_000, []);
-  const { data: health } = usePolling(api.health, 30_000, []);
+  const { data: sessions, loading, error } = usePolling(
+    (signal) => api.sessions(signal),
+    5_000,
+    [],
+  );
+  const { data: health } = usePolling(
+    (signal) => api.health(signal),
+    30_000,
+    [],
+  );
   const [selectedId, setSelectedId] = useState<string>();
 
   useEffect(() => {

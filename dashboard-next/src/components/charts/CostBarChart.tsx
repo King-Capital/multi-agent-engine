@@ -8,6 +8,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
+import type { TooltipContentProps } from "recharts";
 import { formatCurrency } from "@/lib/utils";
 
 interface ChainCostData {
@@ -23,9 +24,23 @@ interface CostBarChartProps {
 
 const BAR_COLORS = ["#22d3ee", "#06b6d4", "#0891b2", "#0e7490", "#155e75"];
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const tooltipFormatter = (value: unknown) =>
-  [formatCurrency(Number(value ?? 0)), "Cost"] as [string, string];
+function ChartTooltip({ active, payload }: TooltipContentProps) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div
+      style={{
+        backgroundColor: "hsl(222.2 84% 5.9%)",
+        border: "1px solid hsl(217.2 32.6% 17.5%)",
+        borderRadius: 8,
+        color: "hsl(210 40% 98%)",
+        fontSize: 13,
+        padding: "8px 12px",
+      }}
+    >
+      <p>Cost: {formatCurrency(Number(payload[0].value ?? 0))}</p>
+    </div>
+  );
+}
 
 export function CostBarChart({ data, height = 260 }: CostBarChartProps) {
   if (!data.length) {
@@ -67,17 +82,7 @@ export function CostBarChart({ data, height = 260 }: CostBarChartProps) {
             v.length > 18 ? v.slice(0, 16) + "…" : v
           }
         />
-        <Tooltip
-          contentStyle={{
-            backgroundColor: "hsl(222.2 84% 5.9%)",
-            border: "1px solid hsl(217.2 32.6% 17.5%)",
-            borderRadius: 8,
-            color: "hsl(210 40% 98%)",
-            fontSize: 13,
-          }}
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          formatter={tooltipFormatter as any}
-        />
+        <Tooltip content={(props) => <ChartTooltip {...props} />} />
         <Bar dataKey="cost" radius={[0, 4, 4, 0]} barSize={24}>
           {data.map((_entry, idx) => (
             <Cell key={idx} fill={BAR_COLORS[idx % BAR_COLORS.length]} />

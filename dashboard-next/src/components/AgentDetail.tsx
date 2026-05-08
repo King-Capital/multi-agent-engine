@@ -19,7 +19,7 @@ import {
   User,
 } from "lucide-react";
 import type { LiveAgent, DBEvent, LiveEvent } from "@/lib/types";
-import { formatCurrency, formatNumber, formatDuration, shortId } from "@/lib/utils";
+import { formatCurrency, formatNumber, formatDurationMs, shortId } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -245,7 +245,7 @@ export function AgentDetail({ agent, events = [], onClose }: AgentDetailProps) {
             />
             <InfoRow icon={<DollarSign className="w-3.5 h-3.5" />} label="Cost" value={formatCurrency(agent.cost_usd)} accent />
             <InfoRow icon={<Hash className="w-3.5 h-3.5" />} label="Tokens" value={formatNumber(agent.tokens_used)} />
-            <InfoRow icon={<Clock className="w-3.5 h-3.5" />} label="Elapsed" value={formatDuration(agent.elapsed_ms)} />
+            <InfoRow icon={<Clock className="w-3.5 h-3.5" />} label="Elapsed" value={formatDurationMs(agent.elapsed_ms)} />
             {agent.parent_id && (
               <InfoRow icon={<User className="w-3.5 h-3.5" />} label="Parent" value={shortId(agent.parent_id)} mono />
             )}

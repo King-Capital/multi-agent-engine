@@ -17,16 +17,34 @@ export function formatNumber(value = 0) {
   return new Intl.NumberFormat().format(value);
 }
 
-export function formatDuration(msOrSeconds?: number) {
-  const val = Math.max(0, msOrSeconds ?? 0);
-  // Heuristic: if val > 10000, treat as milliseconds; else as seconds
-  const seconds = val > 10_000 ? Math.round(val / 1000) : Math.round(val);
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
+/**
+ * Format a duration given in milliseconds.
+ * Use `formatDurationSec` for values already in seconds.
+ */
+export function formatDurationMs(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  return formatDurationSec(seconds);
+}
+
+/**
+ * Format a duration given in seconds.
+ */
+export function formatDurationSec(totalSeconds: number): string {
+  const s = Math.max(0, Math.round(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
   if (h) return `${h}h ${m}m`;
-  if (m) return `${m}m ${s}s`;
-  return `${s}s`;
+  if (m) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
+/**
+ * @deprecated Use `formatDurationMs` or `formatDurationSec` with explicit units.
+ * Kept for backward compat — treats values as milliseconds.
+ */
+export function formatDuration(ms?: number) {
+  return formatDurationMs(Math.max(0, ms ?? 0));
 }
 
 export function shortId(id?: string) {
@@ -43,17 +61,26 @@ export function relativeTime(dateStr?: string | null): string {
   return `${Math.floor(abs / 86_400_000)}d ago`;
 }
 
+// ─── Consolidated status styling ──────────────────────────────────────────────
+
+/**
+ * Canonical status → CSS class mapping used by badges throughout the app.
+ * Combines the former `statusClass` (App.tsx, SessionTabs.tsx) and `statusColor` variants.
+ */
 export function statusColor(status: string): string {
   switch (status) {
     case "active":
+    case "running":
       return "text-cyan-400 bg-cyan-400/10 border-cyan-400/30";
     case "completed":
+    case "done":
       return "text-emerald-400 bg-emerald-400/10 border-emerald-400/30";
     case "error":
     case "failed":
       return "text-red-400 bg-red-400/10 border-red-400/30";
     case "waiting":
     case "paused":
+    case "blocked":
       return "text-amber-400 bg-amber-400/10 border-amber-400/30";
     case "cancelled":
       return "text-zinc-400 bg-zinc-400/10 border-zinc-400/30";
@@ -65,14 +92,17 @@ export function statusColor(status: string): string {
 export function statusDot(status: string): string {
   switch (status) {
     case "active":
+    case "running":
       return "bg-cyan-400";
     case "completed":
+    case "done":
       return "bg-emerald-400";
     case "error":
     case "failed":
       return "bg-red-400";
     case "waiting":
     case "paused":
+    case "blocked":
       return "bg-amber-400";
     default:
       return "bg-zinc-500";
@@ -82,6 +112,6 @@ export function statusDot(status: string): string {
 /** Clamp and round a cost to a readable string */
 export function formatCost(usd: number): string {
   if (usd === 0) return "$0.00";
-  if (usd < 0.001) return `<$0.001`;
+  if (usd < 0.001) return "<$0.001";
   return formatCurrency(usd);
 }

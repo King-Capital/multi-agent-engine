@@ -3,11 +3,12 @@
  *
  * Layout: top-down tree. Each node is a rounded rect colored by team_color.
  * Edges connect parent → child. Nodes are clickable to open AgentDetail panel.
- * Real-time updates via SSE: agent_spawn, agent_done, cost_update events.
+ * Real-time updates via shared SSE context (no duplicate connections).
  */
 
 import * as React from "react";
-import { api, subscribeToSession } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useSessionSSE } from "@/hooks/useSessionSSE";
 import type { LiveAgent, DBEvent, LiveEvent } from "@/lib/types";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { AgentDetail } from "./AgentDetail";
@@ -228,9 +229,11 @@ export function AgentGraph({
     return () => { cancelled = true; };
   }, [sessionId]);
 
-  // SSE real-time updates
+  // Use shared SSE for real-time updates (no duplicate connection)
+  const { subscribe } = useSessionSSE();
+
   React.useEffect(() => {
-    const unsub = subscribeToSession(sessionId, (event: LiveEvent) => {
+    const unsub = subscribe((event: LiveEvent) => {
       const d = event.data ?? {};
       if (event.event_type === "agent_spawn") {
         const newAgent: LiveAgent = {
@@ -262,7 +265,7 @@ export function AgentGraph({
       }
     });
     return unsub;
-  }, [sessionId]);
+  }, [subscribe]);
 
   React.useEffect(() => {
     if (selectedAgentId !== undefined) setSelected(selectedAgentId ?? null);

@@ -13,21 +13,19 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
+import type { TooltipContentProps } from "recharts";
 import { DollarSign, Hash, TrendingUp } from "lucide-react";
 import type { LiveAgent } from "@/lib/types";
-import { formatCurrency, formatNumber, formatDuration } from "@/lib/utils";
+import { formatCurrency, formatNumber, formatDurationMs } from "@/lib/utils";
 
 // ─── Chart tooltip ────────────────────────────────────────────────────────────
 
 function ChartTooltip({
   active,
   payload,
-}: {
-  active?: boolean;
-  payload?: Array<{ payload: LiveAgent; value: number }>;
-}) {
+}: TooltipContentProps) {
   if (!active || !payload?.length) return null;
-  const agent = payload[0].payload;
+  const agent = payload[0].payload as LiveAgent;
   return (
     <div className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-xs shadow-xl">
       <p className="font-semibold text-zinc-100 mb-1">{agent.name}</p>
@@ -56,12 +54,9 @@ function AgentCostRow({
 
   return (
     <tr className="border-b border-zinc-800/50 last:border-0 hover:bg-zinc-800/30 transition-colors">
-      {/* Rank */}
       <td className="py-2.5 pl-4 pr-2 text-[11px] text-zinc-600 font-mono w-8">
         {rank}
       </td>
-
-      {/* Agent name + role */}
       <td className="py-2.5 pr-3">
         <div className="flex items-center gap-2">
           <span
@@ -77,25 +72,17 @@ function AgentCostRow({
         </div>
         <p className="text-[10px] text-zinc-600 ml-4 truncate">{agent.team_name}</p>
       </td>
-
-      {/* Cost */}
       <td className="py-2.5 pr-4 text-right">
         <span className="text-sm text-cyan-400 font-mono font-semibold">
           {formatCurrency(agent.cost_usd)}
         </span>
       </td>
-
-      {/* Tokens */}
       <td className="py-2.5 pr-4 text-right text-xs text-zinc-400 font-mono">
         {formatNumber(agent.tokens_used)}
       </td>
-
-      {/* Elapsed */}
       <td className="py-2.5 pr-4 text-right text-xs text-zinc-500 font-mono">
-        {formatDuration(agent.elapsed_ms)}
+        {formatDurationMs(agent.elapsed_ms)}
       </td>
-
-      {/* % bar */}
       <td className="py-2.5 pr-4 w-32">
         <div className="flex items-center gap-2">
           <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
@@ -194,12 +181,11 @@ export function CostBreakdown({ agents }: CostBreakdownProps) {
               tick={{ fontSize: 9, fill: "#71717a" }}
               tickLine={false}
               axisLine={false}
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              tickFormatter={(v: any) => `$${Number(v).toFixed(2)}`}
+              tickFormatter={(v: number) => `$${v.toFixed(2)}`}
               width={44}
             />
             <Tooltip
-              content={<ChartTooltip />}
+              content={(props) => <ChartTooltip {...props} />}
               cursor={{ fill: "rgba(255,255,255,0.04)" }}
             />
             <Bar dataKey="cost_usd" radius={[3, 3, 0, 0]}>

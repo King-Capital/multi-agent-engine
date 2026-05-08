@@ -2,12 +2,14 @@
  * TillDone — real-time till_done progress checklist.
  * Renders TillDoneState from SSE "tilldone" events with animated
  * checkmarks and a smooth progress bar.
+ *
+ * Uses shared SSE context — no duplicate connections.
  */
 
 import * as React from "react";
 import { CheckCircle, Circle, Loader2, Target } from "lucide-react";
 import type { TillDoneState, TillDoneItem, LiveEvent } from "@/lib/types";
-import { subscribeToSession } from "@/lib/api";
+import { useSessionSSE } from "@/hooks/useSessionSSE";
 import { cn } from "@/lib/utils";
 
 // ─── Single item row ──────────────────────────────────────────────────────────
@@ -112,14 +114,17 @@ export function TillDone({ sessionId, initialState }: TillDoneProps) {
     initialState ?? null,
   );
 
+  // Use shared SSE context instead of opening a separate connection
+  const { subscribe } = useSessionSSE();
+
   React.useEffect(() => {
-    const unsub = subscribeToSession(sessionId, (event: LiveEvent) => {
+    const unsub = subscribe((event: LiveEvent) => {
       if (event.event_type === "tilldone" && event.data?.tilldone) {
         setState(event.data.tilldone as TillDoneState);
       }
     });
     return unsub;
-  }, [sessionId]);
+  }, [subscribe]);
 
   if (!state) {
     return (

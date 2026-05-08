@@ -1,10 +1,8 @@
 /**
  * SessionTabs — tabbed interface for the session detail view.
- * Integrates: Stream | Agents | Till Done | Files | Cost
+ * Integrates: Stream | Agents | Till Done | Files | Cost | Replay
  *
- * Drop-in replacement for the inline detail panel in App.tsx.
- * Accepts the same props as the existing Detail component plus the
- * live/historical events that App already manages.
+ * Uses shared SSE from SessionSSEProvider (parent wraps this).
  */
 
 import * as React from "react";
@@ -15,6 +13,7 @@ import {
   DollarSign,
   FolderOpen,
   MessageSquare,
+  PlayCircle,
   RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -26,22 +25,12 @@ import { AgentGraph } from "@/components/AgentGraph";
 import { TillDone } from "@/components/TillDone";
 import { FilesView } from "@/components/FilesView";
 import { CostBreakdown } from "@/components/CostBreakdown";
+import { ReplayPlayer } from "@/components/ReplayPlayer";
 import { api } from "@/lib/api";
 import { usePolling } from "@/hooks/usePolling";
+import { useSessionSSE } from "@/hooks/useSessionSSE";
 import type { DBSession, DBEvent, LiveEvent, LiveAgent } from "@/lib/types";
-import { cn, formatCurrency, formatDuration, formatNumber, shortId } from "@/lib/utils";
-
-// ─── Helpers shared with App.tsx ──────────────────────────────────────────────
-
-function statusClass(status: string) {
-  if (["completed", "done"].includes(status))
-    return "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
-  if (["active", "running", "waiting"].includes(status))
-    return "bg-cyan-500/15 text-cyan-300 border-cyan-500/30";
-  if (["failed", "error", "blocked"].includes(status))
-    return "bg-red-500/15 text-red-300 border-red-500/30";
-  return "bg-slate-500/15 text-slate-300 border-slate-500/30";
-}
+import { cn, formatCurrency, formatDurationMs, formatNumber, shortId, statusColor } from "@/lib/utils";
 
 // ─── Inline event row (stream tab) ───────────────────────────────────────────
 
@@ -93,6 +82,7 @@ interface StreamTabProps {
   historyEvents: DBEvent[];
   streamError: string | null;
   message: string;
+  sendError: string | null;
   onMessageChange: (v: string) => void;
   onSend: () => void;
 }
@@ -102,6 +92,7 @@ function StreamTab({
   historyEvents,
   streamError,
   message,
+  sendError,
   onMessageChange,
   onSend,
 }: StreamTabProps) {
@@ -143,24 +134,29 @@ function StreamTab({
             </div>
           )}
           {allEvents.map((ev, i) => (
-            <LiveEventRow key={`${ev.event_type}-${ev.timestamp ?? i}`} ev={ev} />
+            <LiveEventRow key={`${ev.event_type}-${ev.timestamp ?? ""}-${i}`} ev={ev} />
           ))}
           <div ref={bottomRef} />
         </div>
       </ScrollArea>
-      <div className="border-t border-zinc-800 p-3 flex gap-2">
-        <input
-          className="flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-          placeholder="Steer the orchestrator…"
-          value={message}
-          onChange={(e) => onMessageChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onSend();
-          }}
-        />
-        <Button size="sm" onClick={onSend} disabled={!message.trim()}>
-          Send
-        </Button>
+      <div className="border-t border-zinc-800 p-3 space-y-2">
+        {sendError && (
+          <p className="text-xs text-red-400">{sendError}</p>
+        )}
+        <div className="flex gap-2">
+          <input
+            className="flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            placeholder="Steer the orchestrator…"
+            value={message}
+            onChange={(e) => onMessageChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onSend();
+            }}
+          />
+          <Button size="sm" onClick={onSend} disabled={!message.trim()}>
+            Send
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -170,7 +166,7 @@ function StreamTab({
 
 function CostTab({ sessionId }: { sessionId: string }) {
   const { data: agents, loading, error } = usePolling(
-    () => api.sessionAgents(sessionId),
+    (signal) => api.sessionAgents(sessionId, signal),
     15_000,
     [sessionId],
   );
@@ -197,21 +193,21 @@ function CostTab({ sessionId }: { sessionId: string }) {
 
 interface SessionTabsProps {
   session: DBSession;
-  liveEvents: LiveEvent[];
   historyEvents: DBEvent[];
-  streamError: string | null;
   onRefresh: () => void;
 }
 
 export function SessionTabs({
   session,
-  liveEvents,
   historyEvents,
-  streamError,
   onRefresh,
 }: SessionTabsProps) {
   const [tab, setTab] = React.useState("stream");
   const [message, setMessage] = React.useState("");
+  const [sendError, setSendError] = React.useState<string | null>(null);
+
+  // Use shared SSE from context
+  const { events: liveEvents, error: streamError } = useSessionSSE();
 
   const totals = React.useMemo(() => {
     const duration = session.completed_at
@@ -222,11 +218,12 @@ export function SessionTabs({
 
   async function handleSend() {
     if (!message.trim()) return;
+    setSendError(null);
     try {
       await api.sendMessage(session.id, message.trim());
       setMessage("");
-    } catch {
-      // silently fail — user can retry
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : "Failed to send message");
     }
   }
 
@@ -238,7 +235,7 @@ export function SessionTabs({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-xl font-bold text-zinc-100">{session.name}</h2>
-              <Badge className={statusClass(session.status)} variant="outline">
+              <Badge className={statusColor(session.status)} variant="outline">
                 {session.status}
               </Badge>
               {session.chain && (
@@ -248,7 +245,7 @@ export function SessionTabs({
             <p className="mt-0.5 text-xs text-slate-500">
               {shortId(session.id)} · {session.platform} ·{" "}
               {new Date(session.created_at).toLocaleString()} ·{" "}
-              {formatDuration(totals.duration)}
+              {formatDurationMs(totals.duration)}
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={onRefresh}>
@@ -282,6 +279,10 @@ export function SessionTabs({
               <DollarSign className="w-3.5 h-3.5 mr-1.5" />
               Cost
             </TabsTrigger>
+            <TabsTrigger value="replay">
+              <PlayCircle className="w-3.5 h-3.5 mr-1.5" />
+              Replay
+            </TabsTrigger>
           </TabsList>
 
           {/* Stream tab */}
@@ -303,6 +304,7 @@ export function SessionTabs({
                   historyEvents={historyEvents}
                   streamError={streamError}
                   message={message}
+                  sendError={sendError}
                   onMessageChange={setMessage}
                   onSend={() => void handleSend()}
                 />
@@ -371,6 +373,11 @@ export function SessionTabs({
                 <CostTab sessionId={session.id} />
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Replay tab */}
+          <TabsContent value="replay" className="flex-1 min-h-0">
+            <ReplayPlayer sessionId={session.id} />
           </TabsContent>
         </Tabs>
       </div>

@@ -7,6 +7,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import type { TooltipContentProps } from "recharts";
 import { formatCurrency } from "@/lib/utils";
 
 interface CostAreaChartProps {
@@ -14,18 +15,27 @@ interface CostAreaChartProps {
   height?: number;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const tooltipFormatter = (value: unknown) =>
-  [formatCurrency(Number(value ?? 0)), "Cost"] as [string, string];
-
-const labelFormatter = (label: unknown) => {
+function ChartTooltip({ active, payload, label }: TooltipContentProps) {
+  if (!active || !payload?.length) return null;
   const d = new Date(String(label) + "T00:00:00");
-  return d.toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
-};
+  return (
+    <div
+      style={{
+        backgroundColor: "hsl(222.2 84% 5.9%)",
+        border: "1px solid hsl(217.2 32.6% 17.5%)",
+        borderRadius: 8,
+        color: "hsl(210 40% 98%)",
+        fontSize: 13,
+        padding: "8px 12px",
+      }}
+    >
+      <p style={{ marginBottom: 4 }}>
+        {d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
+      </p>
+      <p>Cost: {formatCurrency(Number(payload[0].value ?? 0))}</p>
+    </div>
+  );
+}
 
 export function CostAreaChart({ data, height = 300 }: CostAreaChartProps) {
   if (!data.length) {
@@ -66,19 +76,7 @@ export function CostAreaChart({ data, height = 300 }: CostAreaChartProps) {
           fontSize={12}
           tickFormatter={(v: number) => `$${v.toFixed(2)}`}
         />
-        <Tooltip
-          contentStyle={{
-            backgroundColor: "hsl(222.2 84% 5.9%)",
-            border: "1px solid hsl(217.2 32.6% 17.5%)",
-            borderRadius: 8,
-            color: "hsl(210 40% 98%)",
-            fontSize: 13,
-          }}
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          formatter={tooltipFormatter as any}
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          labelFormatter={labelFormatter as any}
-        />
+        <Tooltip content={(props) => <ChartTooltip {...props} />} />
         <Area
           type="monotone"
           dataKey="cost"
