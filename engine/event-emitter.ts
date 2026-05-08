@@ -14,6 +14,7 @@ export class EventEmitter {
 
   constructor(dashboardUrl?: string, apiToken?: string) {
     this.dashboardUrl = dashboardUrl ?? "http://localhost:8400";
+    console.log("[event-emitter] Dashboard URL:", this.dashboardUrl);
     this.apiToken = apiToken ?? process.env.MAE_API_TOKEN;
   }
 
