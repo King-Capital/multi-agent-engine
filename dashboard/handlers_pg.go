@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -298,4 +299,105 @@ func handleSearchTraces(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(traces)
+}
+
+// GET /api/pg/sessions/:id/events -- all events for a session (replay)
+func handleAPIGetSessionEvents(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+	sessionID := chi.URLParam(r, "id")
+	if sessionID == "" {
+		http.Error(w, "session id required", http.StatusBadRequest)
+		return
+	}
+
+	rows, err := db.QueryContext(r.Context(),
+		`SELECT id, session_id, agent_id, event_type, payload, created_at 
+		 FROM events 
+		 WHERE session_id = $1 
+		 ORDER BY created_at ASC, id ASC`,
+		sessionID)
+	if err != nil {
+		dbError(w, "query events", err)
+		return
+	}
+	defer rows.Close()
+
+	type Event struct {
+		ID        int64           `json:"id"`
+		SessionID string          `json:"session_id"`
+		AgentID   string          `json:"agent_id"`
+		EventType string          `json:"event_type"`
+		Payload   json.RawMessage `json:"payload"`
+		CreatedAt time.Time       `json:"created_at"`
+	}
+
+	var events []Event
+	for rows.Next() {
+		var e Event
+		if err := rows.Scan(&e.ID, &e.SessionID, &e.AgentID, &e.EventType, &e.Payload, &e.CreatedAt); err != nil {
+			continue
+		}
+		events = append(events, e)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(events)
+}
+
+// GET /api/pg/sessions/history -- sessions with aggregated cost/tokens
+func handleAPISessionHistory(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+
+	rows, err := db.QueryContext(r.Context(), `
+		SELECT 
+			s.id, s.name, s.chain, s.status, s.created_at, s.completed_at,
+			COALESCE(SUM(a.cost_usd), 0) as total_cost,
+			COUNT(DISTINCT a.id) as agent_count,
+			EXTRACT(EPOCH FROM COALESCE(s.completed_at, NOW()) - s.created_at) as duration_secs
+		FROM sessions s
+		LEFT JOIN agents a ON a.session_id = s.id
+		GROUP BY s.id
+		ORDER BY s.created_at DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		dbError(w, "query history", err)
+		return
+	}
+	defer rows.Close()
+
+	type HistoryEntry struct {
+		ID          string     `json:"id"`
+		Name        string     `json:"name"`
+		Chain       *string    `json:"chain"`
+		Status      string     `json:"status"`
+		CreatedAt   time.Time  `json:"created_at"`
+		CompletedAt *time.Time `json:"completed_at"`
+		TotalCost   float64    `json:"total_cost"`
+		AgentCount  int        `json:"agent_count"`
+		DurationSec float64    `json:"duration_secs"`
+	}
+
+	var history []HistoryEntry
+	for rows.Next() {
+		var h HistoryEntry
+		if err := rows.Scan(&h.ID, &h.Name, &h.Chain, &h.Status, &h.CreatedAt, &h.CompletedAt,
+			&h.TotalCost, &h.AgentCount, &h.DurationSec); err != nil {
+			continue
+		}
+		history = append(history, h)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(history)
 }

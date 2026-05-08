@@ -261,11 +261,13 @@ func main() {
 
 		// PG-backed endpoints
 		r.Get("/users", handleAPIGetUsers)
+		r.Get("/pg/history", handleAPISessionHistory)
 		r.Route("/pg/sessions", func(r chi.Router) {
 			r.Get("/", handleAPIGetSessions)
 			r.Post("/", handleAPICreateSession)
 			r.Patch("/{id}", handleAPIPatchSession)
 			r.Get("/{id}/agents", handleAPIGetAgents)
+			r.Get("/{id}/events", handleAPIGetSessionEvents)
 			r.Post("/{id}/agents", handleAPICreateAgent)
 		})
 		r.Patch("/pg/agents/{id}", handleAPIPatchAgent)
