@@ -5,6 +5,9 @@ import { ClaudeCodeAdapter } from "./adapters/claude-code";
 import { PiAdapter } from "./adapters/pi";
 import { CodexAdapter } from "./adapters/codex";
 import { A2AAdapter } from "./adapters/a2a";
+import { loadChains, loadModelRouting } from "./config";
+import { readFileSync as readFile } from "fs";
+import { join } from "path";
 
 const args = process.argv.slice(2);
 
@@ -19,6 +22,8 @@ Usage:
   agent session list                    List all sessions
   agent session close <id> [--status done|error]  Close a session
   agent new-agent <name> <role> <team>  Scaffold a new agent
+  agent version                         Show MAE version and system info
+  agent info                            Show detailed system overview
   agent adapters                        List available adapters
   agent discover <url>                  Discover a remote A2A agent
 
@@ -212,6 +217,109 @@ switch (command) {
 
   case "new-agent": {
     await scaffoldAgent(args.slice(1));
+    break;
+  }
+
+  case "version": {
+    const BASE_DIR = process.env.MAE_ROOT ?? join(import.meta.dir, "..");
+    const versionFile = join(BASE_DIR, "VERSION");
+    let maeVersion = "unknown";
+    try { maeVersion = readFile(versionFile, "utf-8").trim(); } catch {}
+
+    const bunVersion = typeof Bun !== "undefined" ? Bun.version : "unknown";
+    const chainsFile = loadChains();
+    const chainCount = Object.keys(chainsFile.chains).length;
+
+    console.log(`
+MAE v${maeVersion}
+Bun v${bunVersion}
+Dashboard: ${dashboardUrl}
+Adapters:  ${adapters.length} registered
+Chains:    ${chainCount} configured
+`);
+    break;
+  }
+
+  case "info": {
+    const BASE_DIR_INFO = process.env.MAE_ROOT ?? join(import.meta.dir, "..");
+    const versionFileInfo = join(BASE_DIR_INFO, "VERSION");
+    let maeVer = "unknown";
+    try { maeVer = readFile(versionFileInfo, "utf-8").trim(); } catch {}
+
+    const bunVer = typeof Bun !== "undefined" ? Bun.version : "unknown";
+
+    console.log(`\n${"═".repeat(50)}`);
+    console.log(`  Multi-Agent Engine v${maeVer}`);
+    console.log(`${"═".repeat(50)}`);
+    console.log(`  Bun: v${bunVer}  |  Dashboard: ${dashboardUrl}`);
+
+    // --- Chains ---
+    console.log(`\n${"─".repeat(50)}`);
+    console.log("  CHAINS");
+    console.log(`${"─".repeat(50)}`);
+    const chainsData = loadChains();
+    for (const [name, chain] of Object.entries(chainsData.chains)) {
+      const stepCount = (chain as any).steps?.length ?? (chain as any).parallel?.length ?? 0;
+      const desc = (chain as any).description ?? "";
+      console.log(`  ${name.padEnd(24)} ${String(stepCount).padStart(2)} steps  ${desc}`);
+    }
+    console.log(`  Total: ${Object.keys(chainsData.chains).length} chains`);
+
+    // --- Adapters ---
+    console.log(`\n${"─".repeat(50)}`);
+    console.log("  ADAPTERS");
+    console.log(`${"─".repeat(50)}`);
+    for (const adapter of adapters) {
+      const available = await adapter.isAvailable();
+      console.log(`  ${available ? "✓" : "✗"} ${adapter.name.padEnd(20)} ${available ? "available" : "not available"}`);
+    }
+
+    // --- Model Routing ---
+    console.log(`\n${"─".repeat(50)}`);
+    console.log("  MODEL ROUTING");
+    console.log(`${"─".repeat(50)}`);
+    const routing = loadModelRouting() as any;
+    if (routing.tiers) {
+      for (const [tierName, tier] of Object.entries(routing.tiers as Record<string, any>)) {
+        const defaultModel = tier.default ?? "none";
+        const optionCount = tier.options?.length ?? 0;
+        console.log(`  ${tierName.padEnd(10)} default: ${defaultModel.padEnd(28)} (${optionCount} options)`);
+        if (tier.description) console.log(`             ${tier.description}`);
+      }
+    }
+    if (routing.aliases) {
+      console.log(`\n  Aliases:`);
+      for (const [alias, model] of Object.entries(routing.aliases as Record<string, string>)) {
+        console.log(`    ${alias.padEnd(12)} -> ${model}`);
+      }
+    }
+    if (routing.budgets) {
+      console.log(`\n  Budgets:`);
+      console.log(`    Max/session: ${routing.budgets.max_per_session_usd}  |  Warn at: ${routing.budgets.warn_at_usd}  |  Max/agent: ${routing.budgets.max_per_agent_usd}`);
+    }
+
+    // --- Dashboard Health ---
+    console.log(`\n${"─".repeat(50)}`);
+    console.log("  DASHBOARD");
+    console.log(`${"─".repeat(50)}`);
+    try {
+      const healthResp = await fetch(`${dashboardUrl}/api/health`, { signal: AbortSignal.timeout(3000) });
+      if (healthResp.ok) {
+        const healthData = await healthResp.json().catch(() => null);
+        console.log(`  ✓ Connected (${dashboardUrl})`);
+        if (healthData && typeof healthData === "object") {
+          const h = healthData as Record<string, unknown>;
+          if (h.version) console.log(`    Dashboard version: ${h.version}`);
+          if (h.uptime) console.log(`    Uptime: ${h.uptime}s`);
+        }
+      } else {
+        console.log(`  ✗ Responded with ${healthResp.status} (${dashboardUrl})`);
+      }
+    } catch (e: any) {
+      console.log(`  ✗ Unreachable (${dashboardUrl})`);
+    }
+
+    console.log(`\n${"═".repeat(50)}\n`);
     break;
   }
 
