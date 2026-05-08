@@ -1,104 +1,109 @@
-# MAE Sandbox Pool
-
-Pre-warmed LXC containers cloned from a golden snapshot for agent isolation during multi-agent runs.
+# MAE Sandbox Pool -- Reference (v4)
 
 ## Golden Image
 
-- **VMID:** 410
-- **Snapshot:** mae-golden-v1
-- **Node:** proxmox05
-- **IP:** 10.71.20.80
+- **VMID:** 1000 (`mae-golden-image`) -- stopped LXC on proxmox05
+- **Snapshot:** `mae-golden-v1`
 - **Storage:** px05_zfs_disk
-- **Base template:** TN01_lxc_nvme:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst
-- **OS:** Debian 13 (trixie), 4 cores, 4GB RAM, 16GB disk, nesting=1
+- **Backup:** TN01_backups_nfs (`vzdump-lxc-410-2026_05_07-22_13_20.tar.zst`)
 
-### Tools
+## VMID / IP Map (VMID 80X -> IP .8X)
 
-Node 24.15, Bun 1.3.13, Go 1.24.3, templ, GH CLI 2.92, uv 0.11.11, Claude Code 2.1.133, Pi, Git 2.47.3
+| VMID | IP | Name |
+|------|----|------|
+| 1000 | 10.71.20.80 | mae-golden-image (stopped, do not use) |
+| 801 | 10.71.20.81 | mae-sandbox-1 |
+| 802 | 10.71.20.82 | mae-sandbox-2 |
+| 803 | 10.71.20.83 | mae-sandbox-3 |
+| 804 | 10.71.20.84 | mae-sandbox-4 |
+| 805-809 | 10.71.20.85-89 | Expansion |
 
-### User: mae
-
-UID 3007, groups: collab+builds, zsh + oh-my-zsh, passwordless sudo
-
-### Repos (~/Development/King-Capital/)
-
-multi-agent-engine, king-core, king-trading, king-agents, king-strategies, king-ingest, king-dashboard, bulkbridge-ai, bb-admin-app, bb-client-app, supplier-app
-
-## Pool Allocation
-
-| Name | VMID | IP | Purpose |
-|------|------|----|---------|
-| mae-golden | 410 | 10.71.20.80 | Template (do not use directly) |
-| mae-sandbox-1 | 411 | 10.71.20.81 | Agent sandbox |
-| mae-sandbox-2 | 412 | 10.71.20.82 | Agent sandbox |
-| mae-sandbox-3 | 413 | 10.71.20.83 | Agent sandbox |
-| mae-sandbox-4 | 414 | 10.71.20.84 | Agent sandbox |
-| (spare) | 415-419 | 10.71.20.85-89 | Reserved for expansion |
-
-## Spinning Up Sandboxes
-
-### Clone via API
+## Clone a Sandbox
 
 ```bash
-# Clone from golden snapshot
-curl -sk -X POST "https://10.71.1.9:8006/api2/json/nodes/proxmox05/lxc/410/clone" \
-  -H "Authorization: PVEAPIToken=root@pam!claude-mcp=<secret>" \
-  -d "newid=411&hostname=mae-sandbox-1&snapname=mae-golden-v1&storage=px05_zfs_disk&full=1"
+VMID=801
+NAME="mae-sandbox-1"
+IP="10.71.20.81"
 
-# Set network (omit hwaddr to auto-generate MAC -- CRITICAL to avoid ARP conflicts)
-curl -sk -X PUT "https://10.71.1.9:8006/api2/json/nodes/proxmox05/lxc/411/config" \
-  -H "Authorization: PVEAPIToken=root@pam!claude-mcp=<secret>" \
-  -d "net0=name%3Deth0%2Cbridge%3Dvmbr0%2Ctag%3D20%2Cip%3D10.71.20.81%2F24%2Cgw%3D10.71.20.1%2Cfirewall%3D0"
+pct clone 1000 $VMID --snapname mae-golden-v1 --hostname $NAME --storage px05_zfs_disk --full
+pct set $VMID -net0 name=eth0,bridge=vmbr0,tag=20,ip=${IP}/24,gw=10.71.20.1,firewall=0
+pct set $VMID -features nesting=1
+pct start $VMID
+```
+
+## Batch Create
+
+```bash
+for i in 1 2 3 4; do
+  vmid=$((800 + i))
+  ip="10.71.20.$((80 + i))"
+  pct clone 1000 $vmid --snapname mae-golden-v1 --hostname "mae-sandbox-${i}" --storage px05_zfs_disk --full
+  pct set $vmid -net0 name=eth0,bridge=vmbr0,tag=20,ip=${ip}/24,gw=10.71.20.1,firewall=0
+  pct set $vmid -features nesting=1
+  pct start $vmid
+  echo "mae-sandbox-${i} (${vmid}) at ${ip} -- started"
+done
+```
+
+## Proxmox API
+
+```bash
+TOKEN="PVEAPIToken=root@pam!claude-mcp=<secret>"
+PVE="https://10.71.1.9:8006/api2/json"
+
+# Clone
+curl -sk -X POST "$PVE/nodes/proxmox05/lxc/1000/clone" \
+  -H "Authorization: $TOKEN" \
+  -d "newid=801&hostname=mae-sandbox-1&snapname=mae-golden-v1&storage=px05_zfs_disk&full=1"
+
+# Configure (omit hwaddr for auto MAC)
+curl -sk -X PUT "$PVE/nodes/proxmox05/lxc/801/config" \
+  -H "Authorization: $TOKEN" \
+  -d "net0=name%3Deth0%2Cbridge%3Dvmbr0%2Ctag%3D20%2Cip%3D10.71.20.81%2F24%2Cgw%3D10.71.20.1%2Cfirewall%3D0" \
+  -d "features=nesting%3D1"
 
 # Start
-curl -sk -X POST "https://10.71.1.9:8006/api2/json/nodes/proxmox05/lxc/411/status/start" \
-  -H "Authorization: PVEAPIToken=root@pam!claude-mcp=<secret>"
+curl -sk -X POST "$PVE/nodes/proxmox05/lxc/801/status/start" \
+  -H "Authorization: $TOKEN"
+
+# Stop + Destroy
+curl -sk -X POST "$PVE/nodes/proxmox05/lxc/801/status/stop" \
+  -H "Authorization: $TOKEN"
+curl -sk -X DELETE "$PVE/nodes/proxmox05/lxc/801" \
+  -H "Authorization: $TOKEN"
 ```
 
-### Clone via pct (on proxmox05)
+## SSH
+
+Clones inherit authorized_keys from golden image. All pre-authorized:
+Rico, Air (skippy), bilby, cc-king, cc-kevin, cc-geetesh, ct106/107 runners, Skippy-the-Magnificent-one
+
+## Updating Golden Image
 
 ```bash
-pct clone 410 411 --snapname mae-golden-v1 --hostname mae-sandbox-1 --storage px05_zfs_disk --full
-pct set 411 -net0 name=eth0,bridge=vmbr0,tag=20,ip=10.71.20.81/24,gw=10.71.20.1,firewall=0
-pct set 411 -features nesting=1 -onboot 0
-pct start 411
+pct start 1000
+ssh root@10.71.20.80  # make changes
+pct stop 1000
+pct snapshot 1000 mae-golden-v2 --description "what changed"
+# Future clones: --snapname mae-golden-v2
 ```
+
+## What's Installed
+
+Node 24, Bun 1.3.13, Go 1.24.3, templ 0.3.1001, GH CLI 2.92.0, uv 0.11.11, Claude Code 2.1.133, Pi
+User `mae` (UID 3007, collab+builds, zsh, sudo, ~/Development/)
 
 ## Network
 
-- **VLAN:** 20 (tag=20 on vmbr0)
-- **Gateway:** 10.71.20.1 (UCG Fiber)
-- **Subnet:** 10.71.20.0/24
-- **DNS:** 10.71.1.220, 10.71.1.222, 1.1.1.1
-
-## SSH Access
-
-Shared `mae-sandbox` keypair (ed25519) deployed to: Rico's Mac, Air (skippy), bilby (CT 271), cc-king (CT 320), cc-kevin (CT 321), cc-geetesh (CT 322), runner CT 106 (10.71.20.114), runner CT 107 (10.71.20.115).
-
-Additional authorized keys: Skippy GH, bilby, king/kevin/geetesh cc-lxcs, both runners.
-
-## Proxmox API Token
-
-- **Token:** `root@pam!claude-mcp`
-- **Role:** SandboxBuilder
-- **Permissions:** VM.Allocate, VM.Snapshot, VM.Clone, VM.Config.*, VM.PowerMgmt, VM.Console, Datastore.AllocateSpace, Datastore.AllocateTemplate, Datastore.Audit, SDN.Use, Sys.Audit, Sys.Console
+- VLAN 20 (tag=20 on vmbr0)
+- Gateway: 10.71.20.1
+- DNS: 10.71.1.220, 10.71.1.222, 1.1.1.1
 
 ## Runner Firewall
 
-Runners have iptables OUTPUT whitelist. Sandbox range `10.71.20.80/29` is allowed for SSH. If expanding beyond .87, update `/etc/iptables/rules.v4` on both runners.
+CT 106/107 iptables allows `10.71.20.80/29` (covers .80-.87). If expanding past .87, update `/etc/iptables/rules.v4` on both runners.
 
-## Cleanup
-
-```bash
-# Via API
-curl -sk -X POST ".../lxc/411/status/stop" -H "Authorization: ..."
-curl -sk -X DELETE ".../lxc/411" -H "Authorization: ..."
-
-# Via pct
-pct stop 411 && pct destroy 411
-```
-
-## Ansible (full provision from scratch)
+## Ansible (provision from scratch)
 
 ```bash
 cd projects/pai-infra/ansible

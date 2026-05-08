@@ -12,115 +12,82 @@ on:
           - warm
           - verify
           - destroy
-      vmid:
-        description: 'VMID (411-419)'
-        required: false
-        default: '411'
-      ip_address:
-        description: 'Static IP (10.71.20.81-89)'
-        required: false
-        default: '10.71.20.81'
-      hostname:
-        description: 'Hostname'
-        required: false
-        default: 'mae-sandbox-1'
+      sandbox_id:
+        description: 'Sandbox number (1-4)'
+        required: true
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
 
 permissions:
   contents: read
 
 concurrency:
-  group: sandbox-${{ inputs.vmid }}
+  group: sandbox-${{ inputs.sandbox_id }}
   cancel-in-progress: false
+
+env:
+  PVE_API: "https://10.71.1.9:8006/api2/json"
+  GOLDEN_VMID: "1000"
+  SNAPSHOT: "mae-golden-v1"
 
 jobs:
   sandbox:
-    name: "${{ inputs.action }} CT ${{ inputs.vmid }}"
+    name: "${{ inputs.action }} mae-sandbox-${{ inputs.sandbox_id }}"
     runs-on: [self-hosted, mae]
+    env:
+      VMID: ${{ fromJSON(format('{0}', inputs.sandbox_id)) + 800 }}
+      IP: "10.71.20.${{ fromJSON(format('{0}', inputs.sandbox_id)) + 80 }}"
+      HOSTNAME: "mae-sandbox-${{ inputs.sandbox_id }}"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: "📦 Clone sandbox from mae-golden-v1"
+      - name: "📦 Clone mae-sandbox-${{ inputs.sandbox_id }}"
         if: inputs.action == 'clone'
-        env:
-          PVE_AUTH: "PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}"
-          PVE_API: "https://10.71.1.9:8006/api2/json"
         run: |
           set -euo pipefail
-          VMID="${{ inputs.vmid }}"
-          IP="${{ inputs.ip_address }}"
-          HOSTNAME="${{ inputs.hostname }}"
+          TOKEN="PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}"
 
-          echo "::group::Clone CT 410 -> CT $VMID ($HOSTNAME)"
-          echo "  Source:   CT 410 (mae-golden), snapshot mae-golden-v1"
-          echo "  Target:   CT $VMID ($HOSTNAME) at $IP"
-          echo "  Storage:  px05_zfs_disk (full clone)"
-
-          # Clone from snapshot
-          RESULT=$(curl -sk -X POST "$PVE_API/nodes/proxmox05/lxc/410/clone" \
-            -H "Authorization: $PVE_AUTH" \
-            -d "newid=$VMID&hostname=$HOSTNAME&snapname=mae-golden-v1&storage=px05_zfs_disk&full=1")
-          echo "Clone: $(echo "$RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data','FAILED: '+str(d)))")"
+          echo "::group::Clone CT $GOLDEN_VMID -> CT $VMID ($HOSTNAME at $IP)"
+          curl -sk -X POST "$PVE_API/nodes/proxmox05/lxc/$GOLDEN_VMID/clone" \
+            -H "Authorization: $TOKEN" \
+            -d "newid=$VMID&hostname=$HOSTNAME&snapname=$SNAPSHOT&storage=px05_zfs_disk&full=1"
+          echo "Clone submitted. Waiting 60s for full clone..."
+          sleep 60
           echo "::endgroup::"
 
-          # Wait for clone to complete
-          echo "::group::Waiting for clone"
+          echo "::group::Configure network + nesting"
+          curl -sk -X PUT "$PVE_API/nodes/proxmox05/lxc/$VMID/config" \
+            -H "Authorization: $TOKEN" \
+            -d "net0=name%3Deth0%2Cbridge%3Dvmbr0%2Ctag%3D20%2Cip%3D${IP}%2F24%2Cgw%3D10.71.20.1%2Cfirewall%3D0" \
+            -d "features=nesting%3D1"
+          echo "::endgroup::"
+
+          echo "::group::Start"
+          curl -sk -X POST "$PVE_API/nodes/proxmox05/lxc/$VMID/status/start" \
+            -H "Authorization: $TOKEN"
+          echo "::endgroup::"
+
+          echo "::group::Wait for SSH"
           sleep 15
-          for i in $(seq 1 20); do
-            STATUS=$(curl -sk "$PVE_API/nodes/proxmox05/lxc/$VMID/status/current" \
-              -H "Authorization: $PVE_AUTH" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('status','pending'))" 2>/dev/null || echo "pending")
-            if [ "$STATUS" != "pending" ]; then
-              echo "Clone complete (status: $STATUS)"
+          for i in $(seq 1 10); do
+            if ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no mae@$IP hostname &>/dev/null; then
+              echo "✅ mae-sandbox-${{ inputs.sandbox_id }} is up at $IP"
               break
             fi
-            echo "  Waiting for clone... (${i}/20)"
+            echo "  Waiting... (${i}/10)"
             sleep 5
           done
           echo "::endgroup::"
 
-          # Set network with fresh MAC
-          echo "::group::Configure network"
-          curl -sk -X PUT "$PVE_API/nodes/proxmox05/lxc/$VMID/config" \
-            -H "Authorization: $PVE_AUTH" \
-            -d "net0=name%3Deth0%2Cbridge%3Dvmbr0%2Ctag%3D20%2Cip%3D${IP}%2F24%2Cgw%3D10.71.20.1%2Cfirewall%3D0" \
-            -d "features=nesting%3D1" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin)))"
-          echo "::endgroup::"
-
-          # Start
-          echo "::group::Start container"
-          curl -sk -X POST "$PVE_API/nodes/proxmox05/lxc/$VMID/status/start" \
-            -H "Authorization: $PVE_AUTH" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Start: {d.get(\"data\",\"FAILED\")}')"
-          echo "::endgroup::"
-
-          # Wait for boot + SSH
-          echo "::group::Wait for SSH"
-          sleep 10
-          for i in $(seq 1 15); do
-            if ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no mae@$IP "hostname" &>/dev/null; then
-              echo "✅ SSH connected to mae@$IP"
-              break
-            fi
-            echo "  Waiting for SSH... (${i}/15)"
-            sleep 3
-          done
-          echo "::endgroup::"
-
-          # Quick verify
-          echo "::group::Verify"
-          ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no mae@$IP "
-            echo \"Hostname: \$(hostname)\"
-            echo \"Node: \$(node --version)\"
-            echo \"Repos: \$(ls ~/Development/King-Capital | wc -l)\"
-            echo \"Disk: \$(df -h / | tail -1 | awk '{print \$3 \" / \" \$2}')\"
-          " || echo "⚠️ SSH verify failed -- container may still be booting"
-          echo "::endgroup::"
-
-      - name: "🔄 Warm sandbox"
+      - name: "🔄 Warm"
         if: inputs.action == 'warm'
         run: |
           set -euo pipefail
-          IP="${{ inputs.ip_address }}"
-
-          echo "::group::Pull repos"
+          echo "::group::Pull repos + refresh deps"
           ssh -o StrictHostKeyChecking=no mae@$IP "
             cd ~/Development/King-Capital
             for d in */; do
@@ -132,56 +99,36 @@ jobs:
           "
           echo "::endgroup::"
 
-          echo "::group::Refresh deps"
-          ssh -o StrictHostKeyChecking=no mae@$IP "
-            source ~/.zshrc 2>/dev/null
-            cd ~/Development/King-Capital/multi-agent-engine/engine && bun install 2>&1 | tail -1
-            cd ~/Development/King-Capital/multi-agent-engine/dashboard && /usr/local/go/bin/go mod download 2>&1 | tail -1
-            cd ~/Development/King-Capital/king-core && bun install 2>&1 | tail -1
-          "
-          echo "::endgroup::"
-
-      - name: "🔍 Verify sandbox"
+      - name: "🔍 Verify"
         if: inputs.action == 'verify'
         run: |
-          ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no mae@${{ inputs.ip_address }} "
+          ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no mae@$IP "
             echo '=== Tools ==='
             echo \"Node: \$(node --version)\"
             echo \"Bun: \$(bun --version)\"
             echo \"Go: \$(/usr/local/go/bin/go version)\"
             echo \"GH: \$(gh --version | head -1)\"
             echo \"Claude: \$(claude --version 2>/dev/null)\"
-            echo \"Git: \$(git --version)\"
             echo ''
             echo '=== Repos ==='
             ls ~/Development/King-Capital/
             echo ''
             echo '=== Disk ==='
             df -h / | tail -1
-            echo ''
-            echo '=== SSH ==='
-            ssh -T git@github.com 2>&1 | head -1
           "
 
-      - name: "💀 Destroy sandbox"
+      - name: "💀 Destroy"
         if: inputs.action == 'destroy'
-        env:
-          PVE_AUTH: "PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}"
-          PVE_API: "https://10.71.1.9:8006/api2/json"
         run: |
           set -euo pipefail
-          VMID="${{ inputs.vmid }}"
+          TOKEN="PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}"
 
-          if [ "$VMID" = "410" ]; then
-            echo "❌ REFUSING to destroy mae-golden (CT 410)"
-            exit 1
-          fi
-
-          echo "::group::Stop + destroy CT $VMID"
+          echo "Stopping CT $VMID..."
           curl -sk -X POST "$PVE_API/nodes/proxmox05/lxc/$VMID/status/stop" \
-            -H "Authorization: $PVE_AUTH" | python3 -c "import sys,json; print(f'Stop: {json.load(sys.stdin).get(\"data\",\"failed\")}')"
+            -H "Authorization: $TOKEN"
           sleep 5
+
+          echo "Destroying CT $VMID..."
           curl -sk -X DELETE "$PVE_API/nodes/proxmox05/lxc/$VMID" \
-            -H "Authorization: $PVE_AUTH" | python3 -c "import sys,json; print(f'Destroy: {json.load(sys.stdin).get(\"data\",\"failed\")}')"
-          echo "::endgroup::"
-          echo "✅ CT $VMID destroyed"
+            -H "Authorization: $TOKEN"
+          echo "✅ mae-sandbox-${{ inputs.sandbox_id }} destroyed"
