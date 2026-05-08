@@ -1,133 +1,107 @@
 # MAE Sandbox Pool
 
-Pre-warmed LXC containers cloned from a golden template for agent isolation during multi-agent runs.
+Pre-warmed LXC containers cloned from a golden snapshot for agent isolation during multi-agent runs.
 
-## Golden Image: mae-golden (CT 410)
+## Golden Image
 
-**Location:** proxmox05 (10.71.20.80)
-**Base OS:** Debian 13 (trixie)
-**Template:** `TN01_lxc_nvme:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst`
-**Storage:** `px05_zfs_disk`
-**Features:** nesting=1 (required for systemd 257)
+- **VMID:** 410
+- **Snapshot:** mae-golden-v1
+- **Node:** proxmox05
+- **IP:** 10.71.20.80
+- **Storage:** px05_zfs_disk
+- **Base template:** TN01_lxc_nvme:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst
+- **OS:** Debian 13 (trixie), 4 cores, 4GB RAM, 16GB disk, nesting=1
 
-### Installed Tools
+### Tools
 
-| Tool | Version | Path |
-|------|---------|------|
-| Node.js | 24.15 | /usr/bin/node |
-| Bun | 1.3.13 | /usr/local/bin/bun |
-| Go | 1.24.3 | /usr/local/go/bin/go |
-| GH CLI | 2.92 | /usr/bin/gh |
-| uv | 0.11.11 | ~/.local/bin/uv |
-| Claude Code | 2.1.133 | /usr/bin/claude |
-| Pi | latest | /usr/bin/pi |
-| templ | latest | /usr/local/bin/templ |
-| Git | 2.47.3 | /usr/bin/git |
+Node 24.15, Bun 1.3.13, Go 1.24.3, templ, GH CLI 2.92, uv 0.11.11, Claude Code 2.1.133, Pi, Git 2.47.3
 
 ### User: mae
 
-- UID 3007, groups: collab, builds
-- Shell: zsh + oh-my-zsh
-- Passwordless sudo
-- SSH key: Skippy-the-Magnificent-one@github (ED25519)
-- Git protocol: SSH (git@github.com: insteadOf https://github.com/)
+UID 3007, groups: collab+builds, zsh + oh-my-zsh, passwordless sudo
 
 ### Repos (~/Development/King-Capital/)
 
-All repos cloned via SSH from King-Capital org:
+multi-agent-engine, king-core, king-trading, king-agents, king-strategies, king-ingest, king-dashboard, bulkbridge-ai, bb-admin-app, bb-client-app, supplier-app
 
-| Repo | Has Deps | Notes |
-|------|----------|-------|
-| multi-agent-engine | bun (engine/) + go (dashboard/) | MAE itself |
-| king-core | bun | Shared schemas/types |
-| king-trading | - | Trading engine |
-| king-agents | - | Agent configs |
-| king-strategies | - | Strategy library |
-| king-ingest | - | Data ingestion |
-| king-dashboard | needs npm token | @king-capital/core is private |
-| bulkbridge-ai | bun | BulkBridge platform |
-| bb-admin-app | empty | Admin frontend |
-| bb-client-app | bun | Client frontend |
-| supplier-app | empty | Supplier portal |
+## Pool Allocation
 
-### Container Config
+| Name | VMID | IP | Purpose |
+|------|------|----|---------|
+| mae-golden | 410 | 10.71.20.80 | Template (do not use directly) |
+| mae-sandbox-1 | 411 | 10.71.20.81 | Agent sandbox |
+| mae-sandbox-2 | 412 | 10.71.20.82 | Agent sandbox |
+| mae-sandbox-3 | 413 | 10.71.20.83 | Agent sandbox |
+| mae-sandbox-4 | 414 | 10.71.20.84 | Agent sandbox |
+| (spare) | 415-419 | 10.71.20.85-89 | Reserved for expansion |
 
-```
-cores: 2
-memory: 2048 MiB
-swap: 512 MiB
-disk: 16 GB (px05_zfs_disk)
-network: vmbr0, static IP
-features: nesting=1
-```
+## Spinning Up Sandboxes
 
-## Spinning Up a Sandbox
-
-### From GH Actions (preferred)
-
-Use the **Sandbox Management** workflow (`sandbox-manage.yml`):
-
-1. Go to Actions > Sandbox Management > Run workflow
-2. Choose action: `create`, `provision`, `warm`, or `destroy`
-3. Set target IP and VMID
-
-### From CLI (via Proxmox API)
+### Clone via API
 
 ```bash
-# Create a clone from the golden snapshot
-PVE_TOKEN="PVEAPIToken=root@pam!claude-mcp=<token>"
+# Clone from golden snapshot
+curl -sk -X POST "https://10.71.1.9:8006/api2/json/nodes/proxmox05/lxc/410/clone" \
+  -H "Authorization: PVEAPIToken=root@pam!claude-mcp=<secret>" \
+  -d "newid=411&hostname=mae-sandbox-1&snapname=mae-golden-v1&storage=px05_zfs_disk&full=1"
 
-curl -sk -X POST "https://10.71.1.5:8006/api2/json/nodes/proxmox05/lxc" \
-  -H "Authorization: $PVE_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "vmid": <new-vmid>,
-    "ostemplate": "TN01_lxc_nvme:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst",
-    "hostname": "mae-sandbox-<N>",
-    "cores": 2, "memory": 2048, "swap": 512,
-    "rootfs": "px05_zfs_disk:16",
-    "net0": "name=eth0,bridge=vmbr0,ip=<ip>/24,gw=10.71.1.1",
-    "unprivileged": 1, "features": "nesting=1", "start": 1
-  }'
+# Set network (omit hwaddr to auto-generate MAC -- CRITICAL to avoid ARP conflicts)
+curl -sk -X PUT "https://10.71.1.9:8006/api2/json/nodes/proxmox05/lxc/411/config" \
+  -H "Authorization: PVEAPIToken=root@pam!claude-mcp=<secret>" \
+  -d "net0=name%3Deth0%2Cbridge%3Dvmbr0%2Ctag%3D20%2Cip%3D10.71.20.81%2F24%2Cgw%3D10.71.20.1%2Cfirewall%3D0"
+
+# Start
+curl -sk -X POST "https://10.71.1.9:8006/api2/json/nodes/proxmox05/lxc/411/status/start" \
+  -H "Authorization: PVEAPIToken=root@pam!claude-mcp=<secret>"
 ```
 
-### From mcp2cli
+### Clone via pct (on proxmox05)
 
 ```bash
-mcp2cli proxmox-plus create_container --params '{
-  "node": "proxmox05",
-  "vmid": "<new-vmid>",
-  "ostemplate": "TN01_lxc_nvme:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst",
-  "hostname": "mae-sandbox-<N>",
-  "cores": 2, "memory": 2048, "disk_size": 16,
-  "storage": "px05_zfs_disk",
-  "network_bridge": "vmbr0",
-  "start_after_create": true,
-  "unprivileged": true
-}'
+pct clone 410 411 --snapname mae-golden-v1 --hostname mae-sandbox-1 --storage px05_zfs_disk --full
+pct set 411 -net0 name=eth0,bridge=vmbr0,tag=20,ip=10.71.20.81/24,gw=10.71.20.1,firewall=0
+pct set 411 -features nesting=1 -onboot 0
+pct start 411
 ```
 
-## Keeping It Warm
+## Network
 
-The nightly `sandbox-warm.yml` workflow (3 AM EDT) runs on all pool containers:
-1. `git pull` all repos in `~/Development/King-Capital/`
-2. Refresh bun/go deps for MAE + king-core
-3. Report tool versions
+- **VLAN:** 20 (tag=20 on vmbr0)
+- **Gateway:** 10.71.20.1 (UCG Fiber)
+- **Subnet:** 10.71.20.0/24
+- **DNS:** 10.71.1.220, 10.71.1.222, 1.1.1.1
 
-## VMID Allocation
+## SSH Access
 
-| VMID | IP | Purpose |
-|------|-----|---------|
-| 410 | 10.71.20.80 | mae-golden (template, DO NOT DELETE) |
-| 411 | 10.71.20.81 | mae-sandbox-1 |
-| 412 | 10.71.20.82 | mae-sandbox-2 |
-| 413 | 10.71.20.83 | mae-sandbox-3 |
-| 414 | 10.71.20.84 | mae-sandbox-4 |
+Shared `mae-sandbox` keypair (ed25519) deployed to: Rico's Mac, Air (skippy), bilby (CT 271), cc-king (CT 320), cc-kevin (CT 321), cc-geetesh (CT 322), runner CT 106 (10.71.20.114), runner CT 107 (10.71.20.115).
+
+Additional authorized keys: Skippy GH, bilby, king/kevin/geetesh cc-lxcs, both runners.
 
 ## Proxmox API Token
 
-- User: `root@pam`
-- Runners: CT 106 (10.71.20.114), CT 107 (10.71.20.115) -- VLAN 20 only
-- Token: `claude-mcp`
-- Role: SandboxBuilder (VM.Allocate, VM.Config.*, VM.PowerMgmt, Datastore.*, SDN.Use, Sys.Audit)
-- Scope: cluster-wide (/)
+- **Token:** `root@pam!claude-mcp`
+- **Role:** SandboxBuilder
+- **Permissions:** VM.Allocate, VM.Snapshot, VM.Clone, VM.Config.*, VM.PowerMgmt, VM.Console, Datastore.AllocateSpace, Datastore.AllocateTemplate, Datastore.Audit, SDN.Use, Sys.Audit, Sys.Console
+
+## Runner Firewall
+
+Runners have iptables OUTPUT whitelist. Sandbox range `10.71.20.80/29` is allowed for SSH. If expanding beyond .87, update `/etc/iptables/rules.v4` on both runners.
+
+## Cleanup
+
+```bash
+# Via API
+curl -sk -X POST ".../lxc/411/status/stop" -H "Authorization: ..."
+curl -sk -X DELETE ".../lxc/411" -H "Authorization: ..."
+
+# Via pct
+pct stop 411 && pct destroy 411
+```
+
+## Ansible (full provision from scratch)
+
+```bash
+cd projects/pai-infra/ansible
+ansible-playbook -i inventory/hosts.yml playbooks/lxc-baseline.yml --limit mae_sandboxes
+ansible-playbook -i inventory/hosts.yml playbooks/mae-sandbox-golden.yml --extra-vars "github_token=ghp_..."
+```

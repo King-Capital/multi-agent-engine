@@ -8,7 +8,7 @@ GOLDEN_IP="10.71.20.80"
 NODE="proxmox05"
 TEMPLATE="TN01_lxc_nvme:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst"
 STORAGE="px05_zfs_disk"
-PVE_HOST="10.71.1.5"
+PVE_HOST="10.71.1.9"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
