@@ -43,7 +43,7 @@ jobs:
         if: inputs.action == 'clone'
         env:
           PVE_AUTH: "PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}"
-          PVE_API: "https://10.71.1.9:8006/api2/json"
+          PVE_API: "https://10.71.1.5:8006/api2/json"
         run: |
           set -euo pipefail
           VMID="${{ inputs.vmid }}"
@@ -167,7 +167,7 @@ jobs:
         if: inputs.action == 'destroy'
         env:
           PVE_AUTH: "PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}"
-          PVE_API: "https://10.71.1.9:8006/api2/json"
+          PVE_API: "https://10.71.1.5:8006/api2/json"
         run: |
           set -euo pipefail
           VMID="${{ inputs.vmid }}"

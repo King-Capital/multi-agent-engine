@@ -1,4 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
   <rect width="32" height="32" rx="6" fill="#0a0e17"/>
-  <path d="M18 3L8 18h6l-2 11 10-15h-6z" fill="#36f9f6" stroke="#36f9f6" stroke-width="0.5" stroke-linejoin="round"/>
+  <!-- Beer can body -->
+  <rect x="6" y="10" width="10" height="18" rx="1.5" fill="#b8b8b8" stroke="#777" stroke-width="0.4"/>
+  <!-- Beer can top rim -->
+  <ellipse cx="11" cy="10" rx="5" ry="1.5" fill="#ccc" stroke="#777" stroke-width="0.4"/>
+  <!-- Label band -->
+  <rect x="6" y="16" width="10" height="6" fill="#36f9f6" opacity="0.85"/>
+  <!-- S on label -->
+  <text x="11" y="21" text-anchor="middle" font-size="5.5" font-weight="bold" fill="#0a0e17" font-family="Arial">S</text>
+  <!-- Lightning bolt in right hand -->
+  <path d="M22 4 L18 14 h4 l-3 14 L26 16 h-4 z" fill="#ffd93d" stroke="#f0c020" stroke-width="0.3" stroke-linejoin="round"/>
+  <!-- Glow on bolt -->
+  <path d="M22 4 L18 14 h4 l-3 14 L26 16 h-4 z" fill="#ffd93d" opacity="0.3" filter="url(#glow)"/>
+  <defs>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
 </svg>

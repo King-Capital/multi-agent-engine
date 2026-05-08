@@ -41,17 +41,17 @@ multi-agent-engine, king-core, king-trading, king-agents, king-strategies, king-
 
 ```bash
 # Clone from golden snapshot
-curl -sk -X POST "https://10.71.1.9:8006/api2/json/nodes/proxmox05/lxc/410/clone" \
+curl -sk -X POST "https://10.71.1.5:8006/api2/json/nodes/proxmox05/lxc/410/clone" \
   -H "Authorization: PVEAPIToken=root@pam!claude-mcp=<secret>" \
   -d "newid=411&hostname=mae-sandbox-1&snapname=mae-golden-v1&storage=px05_zfs_disk&full=1"
 
 # Set network (omit hwaddr to auto-generate MAC -- CRITICAL to avoid ARP conflicts)
-curl -sk -X PUT "https://10.71.1.9:8006/api2/json/nodes/proxmox05/lxc/411/config" \
+curl -sk -X PUT "https://10.71.1.5:8006/api2/json/nodes/proxmox05/lxc/411/config" \
   -H "Authorization: PVEAPIToken=root@pam!claude-mcp=<secret>" \
   -d "net0=name%3Deth0%2Cbridge%3Dvmbr0%2Ctag%3D20%2Cip%3D10.71.20.81%2F24%2Cgw%3D10.71.20.1%2Cfirewall%3D0"
 
 # Start
-curl -sk -X POST "https://10.71.1.9:8006/api2/json/nodes/proxmox05/lxc/411/status/start" \
+curl -sk -X POST "https://10.71.1.5:8006/api2/json/nodes/proxmox05/lxc/411/status/start" \
   -H "Authorization: PVEAPIToken=root@pam!claude-mcp=<secret>"
 ```
 
