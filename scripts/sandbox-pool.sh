@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# MAE Sandbox Pool Manager (v5)
-# Golden image: VMID 1000, Sandboxes: 801-804
-# Warm pool: 512MB idle, scale to 4GB for agent work (no reboot needed)
+# MAE Sandbox Pool Manager (v6)
+# Golden image is a vzdump backup -- no live CT
+# Sandboxes: restore from backup, 512MB warm, activate to 4GB
 
-GOLDEN=1000
-SNAPSHOT="mae-golden-v1"
+BACKUP="/mnt/pve/TN01_backups_nfs/dump/vzdump-lxc-410-2026_05_07-22_13_20.tar.zst"
 NODE="${NODE:-proxmox05}"
 STORAGE="px05_zfs_disk"
 PVE="https://10.71.1.9:8006/api2/json"
@@ -15,18 +14,20 @@ PVE="https://10.71.1.9:8006/api2/json"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
-clone() {
+create() {
   local num=$1
   local vmid=$((800 + num))
   local ip="10.71.20.$((80 + num))"
   local name="mae-sandbox-$num"
 
-  log "Cloning $GOLDEN -> $vmid ($name at $ip)"
-  curl -sk -X POST "$PVE/nodes/$NODE/lxc/$GOLDEN/clone" \
+  log "Restoring backup -> CT $vmid ($name at $ip)"
+  curl -sk -X POST "$PVE/nodes/$NODE/lxc" \
     -H "Authorization: PVEAPIToken=$PVE_TOKEN" \
-    -d "newid=$vmid&hostname=$name&snapname=$SNAPSHOT&storage=$STORAGE&full=1"
+    -d "vmid=$vmid&hostname=$name&storage=$STORAGE&unprivileged=1" \
+    -d "ostemplate=$BACKUP" \
+    -d "restore=1"
 
-  log "Waiting for clone..."
+  log "Waiting for restore..."
   sleep 60
 
   log "Configuring: network, nesting, 512MB warm"
@@ -75,24 +76,24 @@ destroy() {
 }
 
 case "${1:-}" in
-  clone)      clone "${2:?Usage: $0 clone <1-4>}" ;;
+  create)     create "${2:?Usage: $0 create <1-4>}" ;;
   activate)   activate "${2:?Usage: $0 activate <1-4>}" ;;
   deactivate) deactivate "${2:?Usage: $0 deactivate <1-4>}" ;;
   destroy)    destroy "${2:?Usage: $0 destroy <1-4>}" ;;
-  batch-clone)
-    for i in 1 2 3 4; do clone $i; done ;;
+  batch-create)
+    for i in 1 2 3 4; do create $i; done ;;
   batch-destroy)
     for i in 1 2 3 4; do destroy $i; done ;;
   *)
-    echo "MAE Sandbox Pool (v5)"
+    echo "MAE Sandbox Pool (v6)"
     echo ""
     echo "Usage: $0 <command> <sandbox-num>"
     echo ""
-    echo "  clone 1       Clone mae-sandbox-1 (VMID 801, IP .81) @ 512MB"
+    echo "  create 1      Restore mae-sandbox-1 from backup @ 512MB"
     echo "  activate 1    Scale to 4GB RAM (no reboot)"
     echo "  deactivate 1  Scale to 512MB RAM (no reboot)"
     echo "  destroy 1     Stop + destroy"
-    echo "  batch-clone   Clone all 4 sequentially"
+    echo "  batch-create  Create all 4 sequentially"
     echo "  batch-destroy Destroy all 4"
     ;;
 esac

@@ -8,7 +8,7 @@ on:
         required: true
         type: choice
         options:
-          - clone
+          - create
           - activate
           - deactivate
           - warm
@@ -19,6 +19,16 @@ on:
         required: true
         type: choice
         options: ['1', '2', '3', '4']
+      node:
+        description: 'Proxmox node'
+        required: false
+        type: choice
+        options:
+          - proxmox05
+          - proxmox04
+          - proxmox01
+          - proxmox02
+        default: proxmox05
 
 permissions:
   contents: read
@@ -28,39 +38,47 @@ concurrency:
 
 env:
   PVE_API: "https://10.71.1.9:8006/api2/json"
-  PVE_NODE: "proxmox05"
-  GOLDEN_VMID: "1000"
-  SNAPSHOT: "mae-golden-v1"
+  BACKUP: "TN01_backups_nfs:backup/vzdump-lxc-410-2026_05_07-22_13_20.tar.zst"
 
 jobs:
   sandbox:
-    name: "${{ inputs.action }} mae-sandbox-${{ inputs.sandbox_id }}"
+    name: "${{ inputs.action }} mae-sandbox-${{ inputs.sandbox_id }} (${{ inputs.node }})"
     runs-on: [self-hosted, mae]
     env:
-      VMID: ""
-      IP: ""
-      HOSTNAME: "mae-sandbox-${{ inputs.sandbox_id }}"
+      NODE: ${{ inputs.node }}
     steps:
       - name: Set sandbox vars
         run: |
           echo "VMID=$((800 + ${{ inputs.sandbox_id }}))" >> $GITHUB_ENV
           echo "IP=10.71.20.$((80 + ${{ inputs.sandbox_id }}))" >> $GITHUB_ENV
+          echo "HOSTNAME=mae-sandbox-${{ inputs.sandbox_id }}" >> $GITHUB_ENV
 
-      - name: "📦 Clone"
-        if: inputs.action == 'clone'
+      - name: "📦 Create (restore from backup)"
+        if: inputs.action == 'create'
         run: |
+          set -euo pipefail
           TOKEN="PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}"
 
-          echo "::group::Clone CT $GOLDEN_VMID -> $VMID ($HOSTNAME at $IP)"
-          curl -sk -X POST "$PVE_API/nodes/$PVE_NODE/lxc/$GOLDEN_VMID/clone" \
+          echo "::group::Restore backup -> CT $VMID ($HOSTNAME) on $NODE"
+          echo "  Backup:  $BACKUP"
+          echo "  Storage: px05_zfs_disk"
+          echo "  IP:      $IP"
+
+          curl -sk -X POST "$PVE_API/nodes/$NODE/lxc" \
             -H "Authorization: $TOKEN" \
-            -d "newid=$VMID&hostname=$HOSTNAME&snapname=$SNAPSHOT&storage=px05_zfs_disk&full=1"
-          echo "Waiting 60s for full clone..."
-          sleep 60
+            --data-urlencode "vmid=$VMID" \
+            --data-urlencode "hostname=$HOSTNAME" \
+            --data-urlencode "storage=px05_zfs_disk" \
+            --data-urlencode "unprivileged=1" \
+            --data-urlencode "ostemplate=$BACKUP" \
+            --data-urlencode "restore=1"
+
+          echo "Waiting 90s for restore..."
+          sleep 90
           echo "::endgroup::"
 
-          echo "::group::Configure (network + nesting + 512MB warm)"
-          curl -sk -X PUT "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/config" \
+          echo "::group::Configure (network + nesting + 512MB)"
+          curl -sk -X PUT "$PVE_API/nodes/$NODE/lxc/$VMID/config" \
             -H "Authorization: $TOKEN" \
             -d "net0=name%3Deth0%2Cbridge%3Dvmbr0%2Ctag%3D20%2Cip%3D${IP}%2F24%2Cgw%3D10.71.20.1%2Cfirewall%3D0" \
             -d "features=nesting%3D1" \
@@ -68,16 +86,26 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Start"
-          curl -sk -X POST "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/status/start" \
+          curl -sk -X POST "$PVE_API/nodes/$NODE/lxc/$VMID/status/start" \
             -H "Authorization: $TOKEN"
           sleep 15
-          echo "✅ $HOSTNAME warm @ 512MB"
+          echo "::endgroup::"
+
+          echo "::group::Verify SSH"
+          for i in $(seq 1 10); do
+            if ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no mae@$IP hostname &>/dev/null; then
+              echo "✅ $HOSTNAME up at $IP on $NODE (warm @ 512MB)"
+              break
+            fi
+            echo "  Waiting for SSH... (${i}/10)"
+            sleep 5
+          done
           echo "::endgroup::"
 
       - name: "⬆️ Activate (4GB)"
         if: inputs.action == 'activate'
         run: |
-          curl -sk -X PUT "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/config" \
+          curl -sk -X PUT "$PVE_API/nodes/$NODE/lxc/$VMID/config" \
             -H "Authorization: PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}" \
             -d "memory=4096"
           echo "✅ $HOSTNAME activated @ 4GB (no reboot)"
@@ -85,12 +113,12 @@ jobs:
       - name: "⬇️ Deactivate (512MB)"
         if: inputs.action == 'deactivate'
         run: |
-          curl -sk -X PUT "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/config" \
+          curl -sk -X PUT "$PVE_API/nodes/$NODE/lxc/$VMID/config" \
             -H "Authorization: PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}" \
             -d "memory=512"
           echo "✅ $HOSTNAME deactivated @ 512MB (no reboot)"
 
-      - name: "🔄 Warm"
+      - name: "🔄 Warm (pull repos)"
         if: inputs.action == 'warm'
         run: |
           ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no mae@$IP "
@@ -102,25 +130,29 @@ jobs:
               cd ~/Development/King-Capital
             done
           "
+          echo "✅ $HOSTNAME repos updated"
 
       - name: "🔍 Verify"
         if: inputs.action == 'verify'
         run: |
           ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no mae@$IP "
-            echo \"Node: \$(node --version)\"
-            echo \"Bun: \$(bun --version)\"
-            echo \"Go: \$(/usr/local/go/bin/go version)\"
-            echo \"Repos: \$(ls ~/Development/King-Capital | wc -l)\"
-            echo \"Disk: \$(df -h / | tail -1 | awk '{print \$3 \" / \" \$2}')\"
+            echo \"Hostname: \$(hostname)\"
+            echo \"Node:     \$(node --version)\"
+            echo \"Bun:      \$(bun --version)\"
+            echo \"Go:       \$(/usr/local/go/bin/go version)\"
+            echo \"Claude:   \$(claude --version 2>/dev/null)\"
+            echo \"Repos:    \$(ls ~/Development/King-Capital | wc -l)\"
+            echo \"RAM:      \$(free -m | grep Mem | awk '{print \$2}')MB\"
+            echo \"Disk:     \$(df -h / | tail -1 | awk '{print \$3 \"/\" \$2}')\"
           "
 
       - name: "💀 Destroy"
         if: inputs.action == 'destroy'
         run: |
           TOKEN="PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}"
-          curl -sk -X POST "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/status/stop" \
+          curl -sk -X POST "$PVE_API/nodes/$NODE/lxc/$VMID/status/stop" \
             -H "Authorization: $TOKEN"
           sleep 5
-          curl -sk -X DELETE "$PVE_API/nodes/$PVE_NODE/lxc/$VMID" \
+          curl -sk -X DELETE "$PVE_API/nodes/$NODE/lxc/$VMID?force=1&purge=1" \
             -H "Authorization: $TOKEN"
-          echo "✅ $HOSTNAME destroyed"
+          echo "✅ $HOSTNAME destroyed on $NODE"
