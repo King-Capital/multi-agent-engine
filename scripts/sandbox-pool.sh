@@ -1,129 +1,98 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# MAE Sandbox Pool Manager
-# Creates, warms, and manages a pool of pre-provisioned dev LXCs
-# Usage: sandbox-pool.sh <create|status|destroy|warm> [options]
+# MAE Sandbox Pool Manager (v5)
+# Golden image: VMID 1000, Sandboxes: 801-804
+# Warm pool: 512MB idle, scale to 4GB for agent work (no reboot needed)
 
-POOL_PREFIX="mae-sandbox"
+GOLDEN=1000
+SNAPSHOT="mae-golden-v1"
 NODE="${NODE:-proxmox05}"
-TEMPLATE="${TEMPLATE:-TN01_lxc_nvme:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst}"
-STORAGE="${STORAGE:-TN01_lxc_nvme}"
-BRIDGE="${BRIDGE:-vmbr0}"
-CORES="${CORES:-2}"
-MEMORY="${MEMORY:-2048}"
-DISK="${DISK:-16}"
-POOL_SIZE="${POOL_SIZE:-3}"
-START_VMID="${START_VMID:-400}"
+STORAGE="px05_zfs_disk"
+PVE="https://10.71.1.9:8006/api2/json"
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+: "${PVE_TOKEN:?Set PVE_TOKEN env var}"
 
-usage() {
-  echo "MAE Sandbox Pool Manager"
-  echo ""
-  echo "Usage: $0 <command> [options]"
-  echo ""
-  echo "Commands:"
-  echo "  create    Create N sandbox LXCs (default: $POOL_SIZE)"
-  echo "  status    Show pool status"
-  echo "  warm      Re-provision/update all pool LXCs"
-  echo "  destroy   Destroy all pool LXCs"
-  echo "  assign    Assign a free sandbox to an agent session"
-  echo "  release   Release a sandbox back to the pool"
-  echo ""
-  echo "Environment:"
-  echo "  NODE=$NODE  POOL_SIZE=$POOL_SIZE  CORES=$CORES  MEMORY=$MEMORY"
-  echo "  START_VMID=$START_VMID  TEMPLATE=$TEMPLATE"
+log() { echo "[$(date '+%H:%M:%S')] $*"; }
+
+clone() {
+  local num=$1
+  local vmid=$((800 + num))
+  local ip="10.71.20.$((80 + num))"
+  local name="mae-sandbox-$num"
+
+  log "Cloning $GOLDEN -> $vmid ($name at $ip)"
+  curl -sk -X POST "$PVE/nodes/$NODE/lxc/$GOLDEN/clone" \
+    -H "Authorization: PVEAPIToken=$PVE_TOKEN" \
+    -d "newid=$vmid&hostname=$name&snapname=$SNAPSHOT&storage=$STORAGE&full=1"
+
+  log "Waiting for clone..."
+  sleep 60
+
+  log "Configuring: network, nesting, 512MB warm"
+  curl -sk -X PUT "$PVE/nodes/$NODE/lxc/$vmid/config" \
+    -H "Authorization: PVEAPIToken=$PVE_TOKEN" \
+    -d "net0=name%3Deth0%2Cbridge%3Dvmbr0%2Ctag%3D20%2Cip%3D${ip}%2F24%2Cgw%3D10.71.20.1%2Cfirewall%3D0" \
+    -d "features=nesting%3D1" \
+    -d "memory=512"
+
+  log "Starting $name"
+  curl -sk -X POST "$PVE/nodes/$NODE/lxc/$vmid/status/start" \
+    -H "Authorization: PVEAPIToken=$PVE_TOKEN"
+
+  log "✅ $name ($vmid) at $ip -- warm @ 512MB"
 }
 
-create_sandbox() {
-  local vmid=$1
-  local hostname="${POOL_PREFIX}-${vmid}"
-  
-  echo -e "${YELLOW}Creating LXC $vmid ($hostname) on $NODE...${NC}"
-  
-  mcp2cli proxmox-plus create_container --params "{
-    \"node\": \"$NODE\",
-    \"vmid\": \"$vmid\",
-    \"ostemplate\": \"$TEMPLATE\",
-    \"hostname\": \"$hostname\",
-    \"cores\": $CORES,
-    \"memory\": $MEMORY,
-    \"disk_size\": $DISK,
-    \"storage\": \"$STORAGE\",
-    \"network_bridge\": \"$BRIDGE\",
-    \"start_after_create\": true,
-    \"unprivileged\": true,
-    \"password\": \"mae-sandbox-$(date +%s)\"
-  }" 2>&1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('result',{}).get('text',d.get('message','')))" || true
-  
-  echo -e "${GREEN}Created $hostname${NC}"
+activate() {
+  local num=$1
+  local vmid=$((800 + num))
+  log "Activating CT $vmid -> 4GB RAM (no reboot)"
+  curl -sk -X PUT "$PVE/nodes/$NODE/lxc/$vmid/config" \
+    -H "Authorization: PVEAPIToken=$PVE_TOKEN" -d "memory=4096"
+  log "✅ CT $vmid active @ 4GB"
 }
 
-cmd_create() {
-  echo "Creating sandbox pool ($POOL_SIZE containers starting at VMID $START_VMID)..."
-  for i in $(seq 0 $((POOL_SIZE - 1))); do
-    local vmid=$((START_VMID + i))
-    create_sandbox "$vmid"
-  done
-  echo -e "\n${GREEN}Pool created. Run '$0 warm' to provision dev tools.${NC}"
+deactivate() {
+  local num=$1
+  local vmid=$((800 + num))
+  log "Deactivating CT $vmid -> 512MB RAM (no reboot)"
+  curl -sk -X PUT "$PVE/nodes/$NODE/lxc/$vmid/config" \
+    -H "Authorization: PVEAPIToken=$PVE_TOKEN" -d "memory=512"
+  log "✅ CT $vmid idle @ 512MB"
 }
 
-cmd_status() {
-  echo "MAE Sandbox Pool Status:"
-  mcp2cli proxmox-plus get_containers --params "{\"node\": \"$NODE\"}" 2>&1 | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-text = d.get('result', {}).get('text', '')
-for block in text.split('📦'):
-    if 'mae-sandbox' in block.lower() or 'sandbox' in block.lower():
-        print('📦' + block)
-"
-}
-
-cmd_warm() {
-  echo "Warming sandbox pool (provisioning dev tools)..."
-  local script_dir="$(cd "$(dirname "$0")" && pwd)"
-  
-  for i in $(seq 0 $((POOL_SIZE - 1))); do
-    local vmid=$((START_VMID + i))
-    local ip=$(get_container_ip "$vmid")
-    if [ -n "$ip" ]; then
-      echo -e "${YELLOW}Provisioning sandbox $vmid at $ip...${NC}"
-      scp -o StrictHostKeyChecking=no "$script_dir/sandbox-provision.sh" "root@${ip}:/tmp/"
-      ssh -o StrictHostKeyChecking=no "root@${ip}" "bash /tmp/sandbox-provision.sh"
-      echo -e "${GREEN}Sandbox $vmid provisioned${NC}"
-    else
-      echo -e "${RED}Cannot reach sandbox $vmid -- is it running?${NC}"
-    fi
-  done
-}
-
-cmd_destroy() {
-  echo -e "${RED}Destroying sandbox pool...${NC}"
-  for i in $(seq 0 $((POOL_SIZE - 1))); do
-    local vmid=$((START_VMID + i))
-    echo "Stopping and deleting LXC $vmid..."
-    mcp2cli proxmox-plus stop_container --params "{\"selector\": \"$vmid\"}" 2>/dev/null || true
-    sleep 2
-    mcp2cli proxmox-plus delete_container --params "{\"node\": \"$NODE\", \"vmid\": \"$vmid\"}" 2>/dev/null || true
-  done
-  echo -e "${GREEN}Pool destroyed${NC}"
-}
-
-get_container_ip() {
-  # Get IP from container config -- placeholder, needs network detection
-  echo ""
+destroy() {
+  local num=$1
+  local vmid=$((800 + num))
+  log "Stopping CT $vmid"
+  curl -sk -X POST "$PVE/nodes/$NODE/lxc/$vmid/status/stop" \
+    -H "Authorization: PVEAPIToken=$PVE_TOKEN"
+  sleep 5
+  log "Destroying CT $vmid"
+  curl -sk -X DELETE "$PVE/nodes/$NODE/lxc/$vmid" \
+    -H "Authorization: PVEAPIToken=$PVE_TOKEN"
+  log "✅ CT $vmid destroyed"
 }
 
 case "${1:-}" in
-  create)  cmd_create ;;
-  status)  cmd_status ;;
-  warm)    cmd_warm ;;
-  destroy) cmd_destroy ;;
-  *)       usage ;;
+  clone)      clone "${2:?Usage: $0 clone <1-4>}" ;;
+  activate)   activate "${2:?Usage: $0 activate <1-4>}" ;;
+  deactivate) deactivate "${2:?Usage: $0 deactivate <1-4>}" ;;
+  destroy)    destroy "${2:?Usage: $0 destroy <1-4>}" ;;
+  batch-clone)
+    for i in 1 2 3 4; do clone $i; done ;;
+  batch-destroy)
+    for i in 1 2 3 4; do destroy $i; done ;;
+  *)
+    echo "MAE Sandbox Pool (v5)"
+    echo ""
+    echo "Usage: $0 <command> <sandbox-num>"
+    echo ""
+    echo "  clone 1       Clone mae-sandbox-1 (VMID 801, IP .81) @ 512MB"
+    echo "  activate 1    Scale to 4GB RAM (no reboot)"
+    echo "  deactivate 1  Scale to 512MB RAM (no reboot)"
+    echo "  destroy 1     Stop + destroy"
+    echo "  batch-clone   Clone all 4 sequentially"
+    echo "  batch-destroy Destroy all 4"
+    ;;
 esac

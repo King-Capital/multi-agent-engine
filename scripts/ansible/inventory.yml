@@ -1,8 +1,0 @@
----
-all:
-  children:
-    sandboxes:
-      hosts:
-        mae-sandbox-template:
-          ansible_host: 10.71.1.230
-          ansible_user: root

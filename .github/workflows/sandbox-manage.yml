@@ -4,92 +4,123 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'Action to perform'
+        description: 'Action'
         required: true
         type: choice
         options:
-          - provision
+          - clone
+          - activate
+          - deactivate
           - warm
-          - create
+          - verify
           - destroy
-      target_ip:
-        description: 'Sandbox IP (default: 10.71.1.230)'
-        required: false
-        default: '10.71.1.230'
-      vmid:
-        description: 'VMID for create/destroy (default: 403)'
-        required: false
-        default: '403'
+      sandbox_id:
+        description: 'Sandbox number (1-4)'
+        required: true
+        type: choice
+        options: ['1', '2', '3', '4']
 
 permissions:
   contents: read
 
+concurrency:
+  group: sandbox-${{ inputs.sandbox_id }}
+
+env:
+  PVE_API: "https://10.71.1.9:8006/api2/json"
+  PVE_NODE: "proxmox05"
+  GOLDEN_VMID: "1000"
+  SNAPSHOT: "mae-golden-v1"
+
 jobs:
   sandbox:
-    name: "Sandbox: ${{ inputs.action }}"
+    name: "${{ inputs.action }} mae-sandbox-${{ inputs.sandbox_id }}"
     runs-on: [self-hosted, mae]
+    env:
+      VMID: ""
+      IP: ""
+      HOSTNAME: "mae-sandbox-${{ inputs.sandbox_id }}"
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Install Ansible
-        if: inputs.action == 'provision' || inputs.action == 'warm'
+      - name: Set sandbox vars
         run: |
-          pip install ansible --break-system-packages 2>/dev/null || pip install ansible
+          echo "VMID=$((800 + ${{ inputs.sandbox_id }}))" >> $GITHUB_ENV
+          echo "IP=10.71.20.$((80 + ${{ inputs.sandbox_id }}))" >> $GITHUB_ENV
 
-      - name: Write inventory
-        if: inputs.action == 'provision' || inputs.action == 'warm'
+      - name: "📦 Clone"
+        if: inputs.action == 'clone'
         run: |
-          cat > /tmp/sandbox-inventory.yml << EOF
-          all:
-            children:
-              sandboxes:
-                hosts:
-                  sandbox:
-                    ansible_host: ${{ inputs.target_ip }}
-                    ansible_user: root
-                    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
-          EOF
+          TOKEN="PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}"
 
-      - name: Run provisioning playbook
-        if: inputs.action == 'provision'
+          echo "::group::Clone CT $GOLDEN_VMID -> $VMID ($HOSTNAME at $IP)"
+          curl -sk -X POST "$PVE_API/nodes/$PVE_NODE/lxc/$GOLDEN_VMID/clone" \
+            -H "Authorization: $TOKEN" \
+            -d "newid=$VMID&hostname=$HOSTNAME&snapname=$SNAPSHOT&storage=px05_zfs_disk&full=1"
+          echo "Waiting 60s for full clone..."
+          sleep 60
+          echo "::endgroup::"
+
+          echo "::group::Configure (network + nesting + 512MB warm)"
+          curl -sk -X PUT "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/config" \
+            -H "Authorization: $TOKEN" \
+            -d "net0=name%3Deth0%2Cbridge%3Dvmbr0%2Ctag%3D20%2Cip%3D${IP}%2F24%2Cgw%3D10.71.20.1%2Cfirewall%3D0" \
+            -d "features=nesting%3D1" \
+            -d "memory=512"
+          echo "::endgroup::"
+
+          echo "::group::Start"
+          curl -sk -X POST "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/status/start" \
+            -H "Authorization: $TOKEN"
+          sleep 15
+          echo "✅ $HOSTNAME warm @ 512MB"
+          echo "::endgroup::"
+
+      - name: "⬆️ Activate (4GB)"
+        if: inputs.action == 'activate'
         run: |
-          ansible-playbook -i /tmp/sandbox-inventory.yml scripts/ansible/sandbox-playbook.yml -v
+          curl -sk -X PUT "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/config" \
+            -H "Authorization: PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}" \
+            -d "memory=4096"
+          echo "✅ $HOSTNAME activated @ 4GB (no reboot)"
 
-      - name: Warm sandbox (update repos + deps)
+      - name: "⬇️ Deactivate (512MB)"
+        if: inputs.action == 'deactivate'
+        run: |
+          curl -sk -X PUT "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/config" \
+            -H "Authorization: PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}" \
+            -d "memory=512"
+          echo "✅ $HOSTNAME deactivated @ 512MB (no reboot)"
+
+      - name: "🔄 Warm"
         if: inputs.action == 'warm'
         run: |
-          ansible sandboxes -i /tmp/sandbox-inventory.yml -m shell -a "
-            cd /home/mae/repos && for d in */; do
-              cd /home/mae/repos/\$d && git pull --ff-only 2>/dev/null
-              cd /home/mae/repos
+          ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no mae@$IP "
+            cd ~/Development/King-Capital
+            for d in */; do
+              echo -n \"  \$d: \"
+              cd ~/Development/King-Capital/\$d
+              git pull --ff-only 2>&1 | tail -1
+              cd ~/Development/King-Capital
             done
-          " --become --become-user mae
+          "
 
-      - name: Create sandbox LXC
-        if: inputs.action == 'create'
-        env:
-          PVE_TOKEN: ${{ secrets.PROXMOX_API_TOKEN }}
+      - name: "🔍 Verify"
+        if: inputs.action == 'verify'
         run: |
-          curl -sk -X POST "https://10.71.1.5:8006/api2/json/nodes/proxmox05/lxc" \
-            -H "Authorization: PVEAPIToken=$PVE_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "vmid": ${{ inputs.vmid }},
-              "ostemplate": "TN01_lxc_nvme:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst",
-              "hostname": "mae-sandbox-${{ inputs.vmid }}",
-              "cores": 2, "memory": 2048, "swap": 512,
-              "rootfs": "px05_zfs_disk:16",
-              "net0": "name=eth0,bridge=vmbr0,ip=${{ inputs.target_ip }}/24,gw=10.71.1.1",
-              "unprivileged": 1, "features": "nesting=1", "start": 1
-            }'
+          ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no mae@$IP "
+            echo \"Node: \$(node --version)\"
+            echo \"Bun: \$(bun --version)\"
+            echo \"Go: \$(/usr/local/go/bin/go version)\"
+            echo \"Repos: \$(ls ~/Development/King-Capital | wc -l)\"
+            echo \"Disk: \$(df -h / | tail -1 | awk '{print \$3 \" / \" \$2}')\"
+          "
 
-      - name: Destroy sandbox LXC
+      - name: "💀 Destroy"
         if: inputs.action == 'destroy'
-        env:
-          PVE_TOKEN: ${{ secrets.PROXMOX_API_TOKEN }}
         run: |
-          curl -sk -X POST "https://10.71.1.5:8006/api2/json/nodes/proxmox05/lxc/${{ inputs.vmid }}/status/stop" \
-            -H "Authorization: PVEAPIToken=$PVE_TOKEN"
+          TOKEN="PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}"
+          curl -sk -X POST "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/status/stop" \
+            -H "Authorization: $TOKEN"
           sleep 5
-          curl -sk -X DELETE "https://10.71.1.5:8006/api2/json/nodes/proxmox05/lxc/${{ inputs.vmid }}?force=1&purge=1" \
-            -H "Authorization: PVEAPIToken=$PVE_TOKEN"
+          curl -sk -X DELETE "$PVE_API/nodes/$PVE_NODE/lxc/$VMID" \
+            -H "Authorization: $TOKEN"
+          echo "✅ $HOSTNAME destroyed"
