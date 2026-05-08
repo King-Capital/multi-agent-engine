@@ -69,6 +69,21 @@ func main() {
 			log.Printf("Marked %d stale sessions as error", n)
 		}
 
+		// Periodic stale session reaper — every 5 minutes, mark active sessions
+		// with no events in the last 30 minutes as error.
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				bgCtx := context.Background()
+				if n, err := MarkStaleSessions(bgCtx, 30); err != nil {
+					log.Printf("stale reaper error: %v", err)
+				} else if n > 0 {
+					log.Printf("Stale reaper: marked %d sessions as error", n)
+				}
+			}
+		}()
+
 		if sessions, eventsBySession, err := HydrateRecentSessions(ctx, 50); err != nil {
 			log.Printf("WARNING: failed to hydrate sessions: %v", err)
 		} else {
