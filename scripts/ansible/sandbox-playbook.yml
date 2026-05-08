@@ -1,0 +1,112 @@
+---
+- name: Provision MAE Dev Sandbox
+  hosts: sandboxes
+  become: true
+  vars:
+    mae_user: mae
+    node_version: "24"
+    go_version: "1.24.3"
+    repos:
+      - { org: "King-Capital", name: "multi-agent-engine" }
+      - { org: "King-Capital", name: "king-core" }
+      - { org: "King-Capital", name: "king-trading" }
+      - { org: "King-Capital", name: "king-agents" }
+      - { org: "King-Capital", name: "king-strategies" }
+      - { org: "King-Capital", name: "king-ingest" }
+      - { org: "King-Capital", name: "king-dashboard" }
+  tasks:
+    - name: System packages
+      apt:
+        name: [curl, wget, git, sudo, build-essential, ca-certificates, gnupg, jq, unzip, openssh-client, tmux, htop, lsb-release]
+        state: present
+        update_cache: true
+    - name: Add NodeSource repo
+      shell: curl -fsSL https://deb.nodesource.com/setup_{{ node_version }}.x | bash -
+      args:
+        creates: /etc/apt/sources.list.d/nodesource.list
+    - name: Install Node.js
+      apt: { name: nodejs, state: present }
+    - name: Install Bun
+      shell: curl -fsSL https://bun.sh/install | bash
+      args:
+        creates: /usr/local/bin/bun
+      environment:
+        BUN_INSTALL: /usr/local
+    - name: Install Go
+      unarchive:
+        src: "https://go.dev/dl/go{{ go_version }}.linux-amd64.tar.gz"
+        dest: /usr/local
+        remote_src: true
+        creates: /usr/local/go/bin/go
+    - name: Go PATH
+      copy:
+        content: 'export PATH=$PATH:/usr/local/go/bin:~/go/bin'
+        dest: /etc/profile.d/go.sh
+    - name: Add GitHub CLI repo
+      shell: |
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list
+      args:
+        creates: /etc/apt/sources.list.d/github-cli.list
+    - name: Install GitHub CLI
+      apt: { name: gh, state: present, update_cache: true }
+    - name: Install uv
+      shell: curl -LsSf https://astral.sh/uv/install.sh | INSTALLER_NO_MODIFY_PATH=1 sh
+      args:
+        creates: /root/.local/bin/uv
+    - name: Symlink uv
+      file: { src: /root/.local/bin/uv, dest: /usr/local/bin/uv, state: link }
+    - name: Install Claude Code
+      npm: { name: "@anthropic-ai/claude-code", global: true, state: present }
+    - name: Install Pi
+      npm: { name: "@anthropic-ai/pi", global: true, state: present }
+    - name: Install templ
+      shell: /usr/local/go/bin/go install github.com/a-h/templ/cmd/templ@latest
+      environment:
+        GOPATH: /root/go
+        PATH: "/usr/local/go/bin:{{ ansible_env.PATH }}"
+      args:
+        creates: /root/go/bin/templ
+    - name: Create mae user
+      user: { name: "{{ mae_user }}", shell: /bin/bash, groups: sudo, create_home: true }
+    - name: Passwordless sudo
+      copy:
+        content: "{{ mae_user }} ALL=(ALL) NOPASSWD:ALL"
+        dest: "/etc/sudoers.d/{{ mae_user }}"
+        mode: "0440"
+    - name: Git config
+      become_user: "{{ mae_user }}"
+      git_config:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        scope: global
+      loop:
+        - { name: "user.name", value: "MAE Sandbox Agent" }
+        - { name: "user.email", value: "mae@rodaddy.live" }
+        - { name: "init.defaultBranch", value: "main" }
+    - name: Repos directory
+      file: { path: "/home/{{ mae_user }}/repos", state: directory, owner: "{{ mae_user }}", group: "{{ mae_user }}" }
+    - name: Clone repos
+      become_user: "{{ mae_user }}"
+      git:
+        repo: "https://github.com/{{ item.org }}/{{ item.name }}.git"
+        dest: "/home/{{ mae_user }}/repos/{{ item.name }}"
+        depth: 1
+        version: main
+      loop: "{{ repos }}"
+      ignore_errors: true
+    - name: MAE bun install
+      become_user: "{{ mae_user }}"
+      shell: bun install
+      args:
+        chdir: "/home/{{ mae_user }}/repos/multi-agent-engine"
+      ignore_errors: true
+    - name: MAE dashboard go deps
+      become_user: "{{ mae_user }}"
+      shell: go mod download
+      args:
+        chdir: "/home/{{ mae_user }}/repos/multi-agent-engine/dashboard"
+      environment:
+        GOPATH: "/home/{{ mae_user }}/go"
+        PATH: "/usr/local/go/bin:{{ ansible_env.PATH }}"
+      ignore_errors: true
