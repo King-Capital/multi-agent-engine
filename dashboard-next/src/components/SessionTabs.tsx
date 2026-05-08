@@ -32,7 +32,7 @@ import { buildAgentsFromEvents, mergeAgents } from "@/lib/agents-from-events";
 import { usePolling } from "@/hooks/usePolling";
 import { useSessionSSE } from "@/hooks/useSessionSSE";
 import type { DBSession, DBEvent, LiveEvent } from "@/lib/types";
-import { cn, formatDurationMs, shortId, statusColor } from "@/lib/utils";
+import { agentColor, cn, formatDurationMs, shortId, statusColor } from "@/lib/utils";
 
 // ─── Stream components (conversation-style, matching old dashboard UX) ────────
 
