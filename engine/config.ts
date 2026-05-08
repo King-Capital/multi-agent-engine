@@ -207,7 +207,7 @@ export function getModelFallbacks(model: string): string[] {
   const fallbacks: string[] = [];
   
   // Check each tier for the model and return alternatives
-  for (const [, tier] of Object.entries(routing.tiers ?? {})) {
+  for (const [, tier] of Object.entries((routing as any).tiers ?? {})) {
     const options = (tier as { options?: { model: string }[] }).options ?? [];
     const hasModel = options.some(o => o.model === model);
     if (hasModel) {
