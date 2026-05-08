@@ -19,6 +19,7 @@ import { buildAgentsFromEvents, mergeAgents } from "@/lib/agents-from-events";
 import { useSessionSSE } from "@/hooks/useSessionSSE";
 import type { LiveAgent, DBEvent, LiveEvent } from "@/lib/types";
 import {
+	agentColor,
 	cn,
 	formatCurrency,
 	shortId,
@@ -72,11 +73,7 @@ function AgentRow({
 	showTokens?: boolean;
 	onClick: () => void;
 }) {
-	const teamColor = agent.team_color && /^#[0-9a-f]{3,8}$/i.test(agent.team_color)
-		? agent.team_color
-		: agent.role === "orchestrator" ? "#a78bfa"
-		: agent.role === "lead" ? "#60a5fa"
-		: "#34d399";
+	const teamColor = agentColor(agent.role);
 
 	return (
 		<button

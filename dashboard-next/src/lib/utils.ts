@@ -115,3 +115,19 @@ export function formatCost(usd: number): string {
   if (usd < 0.001) return "<$0.001";
   return formatCurrency(usd);
 }
+
+
+// ─── Agent display colors ─────────────────────────────────────────────────────
+
+/** 
+ * High-contrast agent color based on role.
+ * Ignores engine team_color (often low-contrast cyan on dark bg).
+ * Used by both agent tree panel and stream tab.
+ */
+export function agentColor(role?: string): string {
+  switch (role) {
+    case "orchestrator": return "#a78bfa"; // violet
+    case "lead":         return "#60a5fa"; // blue
+    default:             return "#34d399"; // emerald
+  }
+}

@@ -58,13 +58,7 @@ function agentDisplay(ev: LiveEvent): {
 } {
 	const d = ev.data ?? {};
 	const name = d.agent_name ?? ev.agent_id ?? "unknown";
-	const color =
-		d.team_color ??
-		(d.agent_role === "orchestrator"
-			? "#a78bfa"
-			: d.agent_role === "lead"
-				? "#60a5fa"
-				: "#34d399");
+	const color = agentColor(d.agent_role as string | undefined);
 	const role = (d.agent_role as string) ?? "";
 	return { name, color, role };
 }
@@ -275,7 +269,7 @@ function ErrorEntry({ ev }: { ev: LiveEvent }) {
 function AgentSpawnLine({ ev }: { ev: LiveEvent }) {
 	const d = ev.data ?? {};
 	const name = d.agent_name ?? ev.agent_id ?? "unknown";
-	const color = d.team_color ?? "#94a3b8";
+	const color = agentColor(d.agent_role as string | undefined);
 	const role = d.agent_role ?? "";
 	const model = d.model ?? "";
 	return (
