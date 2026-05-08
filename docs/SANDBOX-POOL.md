@@ -4,7 +4,7 @@ Pre-warmed LXC containers cloned from a golden template for agent isolation duri
 
 ## Golden Image: mae-golden (CT 410)
 
-**Location:** proxmox05 (10.71.20.169)
+**Location:** proxmox05 (10.71.20.80)
 **Base OS:** Debian 13 (trixie)
 **Template:** `TN01_lxc_nvme:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst`
 **Storage:** `px05_zfs_disk`
@@ -116,14 +116,18 @@ The nightly `sandbox-warm.yml` workflow (3 AM EDT) runs on all pool containers:
 
 ## VMID Allocation
 
-| Range | Purpose |
-|-------|---------|
-| 410 | mae-golden (template, DO NOT DELETE) |
-| 411-419 | Sandbox pool instances |
+| VMID | IP | Purpose |
+|------|-----|---------|
+| 410 | 10.71.20.80 | mae-golden (template, DO NOT DELETE) |
+| 411 | 10.71.20.81 | mae-sandbox-1 |
+| 412 | 10.71.20.82 | mae-sandbox-2 |
+| 413 | 10.71.20.83 | mae-sandbox-3 |
+| 414 | 10.71.20.84 | mae-sandbox-4 |
 
 ## Proxmox API Token
 
 - User: `root@pam`
+- Runners: CT 106 (10.71.20.114), CT 107 (10.71.20.115) -- VLAN 20 only
 - Token: `claude-mcp`
 - Role: SandboxBuilder (VM.Allocate, VM.Config.*, VM.PowerMgmt, Datastore.*, SDN.Use, Sys.Audit)
 - Scope: cluster-wide (/)

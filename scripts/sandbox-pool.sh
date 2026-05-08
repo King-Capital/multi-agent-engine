@@ -4,7 +4,7 @@ set -euo pipefail
 # MAE Sandbox Pool Manager
 # Manages sandbox LXCs cloned from mae-golden (CT 410)
 
-GOLDEN_IP="10.71.20.169"
+GOLDEN_IP="10.71.20.80"
 NODE="proxmox05"
 TEMPLATE="TN01_lxc_nvme:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst"
 STORAGE="px05_zfs_disk"

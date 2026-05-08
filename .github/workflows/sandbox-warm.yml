@@ -8,7 +8,7 @@ on:
       targets:
         description: 'Comma-separated IPs to warm (default: golden only)'
         required: false
-        default: '10.71.20.169'
+        default: '10.71.20.80'
 
 permissions:
   contents: read
@@ -19,7 +19,7 @@ jobs:
     runs-on: [self-hosted, mae]
     strategy:
       matrix:
-        target: ${{ fromJSON(format('["{0}"]', inputs.targets || '10.71.20.169')) }}
+        target: ${{ fromJSON(format('["{0}"]', inputs.targets || '10.71.20.80')) }}
     steps:
       - name: "🔄 Pull repos on ${{ matrix.target }}"
         run: |

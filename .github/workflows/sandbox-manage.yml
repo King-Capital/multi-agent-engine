@@ -19,7 +19,7 @@ on:
       ip_address:
         description: 'Static IP for new sandbox'
         required: false
-        default: '10.71.20.171'
+        default: '10.71.20.81'
       hostname:
         description: 'Hostname (default: mae-sandbox-01)'
         required: false
