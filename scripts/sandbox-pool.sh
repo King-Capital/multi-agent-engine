@@ -6,7 +6,7 @@ set -euo pipefail
 
 GOLDEN=1000
 SNAPSHOT="mae-golden-v1"
-NODE="proxmox05"
+NODE="${NODE:-proxmox05}"
 STORAGE="px05_zfs_disk"
 PVE="https://10.71.1.9:8006/api2/json"
 

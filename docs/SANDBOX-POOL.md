@@ -3,6 +3,7 @@
 ## Golden Image
 
 - **VMID:** 1000 (`mae-golden-image`) -- stopped LXC on proxmox05
+- **Note:** Clones can target any Proxmox node, not just proxmox05
 - **Snapshot:** `mae-golden-v1`
 - **Storage:** px05_zfs_disk
 - **Backup:** TN01_backups_nfs (`vzdump-lxc-410-2026_05_07-22_13_20.tar.zst`)
