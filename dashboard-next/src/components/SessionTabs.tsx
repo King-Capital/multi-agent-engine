@@ -413,6 +413,68 @@ function AgentFilterPills({
 	onToggle: (name: string) => void;
 }) {
 	const allActive = activeFilters.size === 0;
+	const activeCount = activeFilters.size;
+
+	// Compact dropdown for 5+ agents, pills for fewer
+	if (agents.length > 4) {
+		return (
+			<div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-white/5">
+				<span className="text-xs text-zinc-600">Agents:</span>
+				<div className="flex flex-wrap gap-1 flex-1 min-w-0">
+					<button
+						className={cn(
+							"px-2 py-0.5 rounded text-[11px] font-medium transition-colors",
+							allActive
+								? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40"
+								: "bg-white/[0.04] text-zinc-500 border border-white/5 hover:text-zinc-300",
+						)}
+						onClick={() => onToggle("__all__")}
+					>
+						All ({agents.length})
+					</button>
+					{agents.map((a) => {
+						const isActive = activeFilters.has(a.name);
+						// Truncate long names
+						const shortName = a.name.length > 14 ? a.name.slice(0, 12) + "\u2026" : a.name;
+						return (
+							<button
+								key={a.name}
+								title={a.name}
+								className={cn(
+									"px-2 py-0.5 rounded text-[11px] font-medium transition-colors max-w-[120px] truncate",
+									isActive
+										? "border"
+										: "bg-white/[0.04] text-zinc-500 border border-white/5 hover:text-zinc-300",
+								)}
+								style={
+									isActive
+										? {
+												backgroundColor: `${a.color}20`,
+												color: a.color,
+												borderColor: `${a.color}66`,
+											}
+										: undefined
+								}
+								onClick={() => onToggle(a.name)}
+							>
+								{shortName}
+							</button>
+						);
+					})}
+				</div>
+				{activeCount > 0 && (
+					<button
+						className="text-[10px] text-zinc-600 hover:text-zinc-400 shrink-0"
+						onClick={() => onToggle("__all__")}
+					>
+						clear
+					</button>
+				)}
+			</div>
+		);
+	}
+
+	// Small agent count: full pills
 	return (
 		<div className="shrink-0 flex flex-wrap gap-1.5 px-3 py-2 border-b border-white/5">
 			<button

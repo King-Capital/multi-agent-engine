@@ -270,7 +270,7 @@ export function SessionSidebar({
 				</select>
 
 				{/* Status filter pills */}
-				<div className="flex flex-wrap gap-1 mb-2">
+				<div className="flex flex-wrap gap-1 gap-y-1.5 mb-2">
 					{STATUS_PILLS.map((pill) => {
 						const isActive =
 							pill.value === "all"
@@ -281,7 +281,7 @@ export function SessionSidebar({
 								key={pill.value}
 								onClick={() => toggleFilter(pill.value)}
 								className={cn(
-									"text-xs px-2 py-0.5 rounded transition-all",
+									"text-[11px] px-1.5 py-0.5 rounded transition-all",
 									isActive ? pill.activeClass : pill.inactiveClass,
 								)}
 							>
