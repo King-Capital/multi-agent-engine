@@ -36,7 +36,9 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
     headers: { Accept: "application/json" },
   });
   if (!res.ok) {
-    throw new Error(`API ${path} → ${res.status} ${res.statusText}`);
+    const err = new Error(`API ${path} → ${res.status} ${res.statusText}`);
+    console.error("[api]", err.message);
+    throw err;
   }
   return res.json() as Promise<T>;
 }
@@ -68,11 +70,26 @@ export const api = {
    * Returns full agent records from the in-memory session store.
    * Shape matches models.Agent (Go) → LiveAgent (TS).
    */
-  sessionAgents: (id: string, signal?: AbortSignal) =>
-    get<LiveAgent[]>(
-      `/api/pg/sessions/${encodeURIComponent(id)}/agents`,
-      signal,
-    ),
+  sessionAgents: async (id: string, signal?: AbortSignal): Promise<LiveAgent[]> => {
+    const raw = await get<any[]>(`/api/pg/sessions/${encodeURIComponent(id)}/agents`, signal);
+    return (raw ?? []).map((a: any) => ({
+      id: a.agent_id ?? a.id?.toString() ?? "unknown",
+      name: a.persona ?? a.agent_id ?? "Agent",
+      role: a.role ?? "worker",
+      model: a.adapter ?? "unknown",
+      team_name: a.role === "orchestrator" ? "Orchestrator" : "Team",
+      team_color: a.role === "orchestrator" ? "#36f9f6" : "#00d4ff",
+      parent_id: undefined,
+      status: a.status ?? "pending",
+      persona_path: undefined,
+      cost_usd: a.cost_usd ?? 0,
+      tokens_used: 0,
+      context_tokens: 0,
+      context_max: 1000000,
+      started_at: a.created_at ?? new Date().toISOString(),
+      elapsed_ms: 0,
+    }));
+  },
 
   /** DB agent rows — lighter shape without team_color / model detail. */
   sessionDBAgents: (id: string, signal?: AbortSignal) =>

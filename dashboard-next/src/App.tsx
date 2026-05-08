@@ -41,6 +41,7 @@ import type { DBSession } from "@/lib/types";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { usePolling } from "@/hooks/usePolling";
 import { SessionSSEProvider } from "@/hooks/useSessionSSE";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import {
 	Card,
 	CardContent,
@@ -380,10 +381,12 @@ function SessionDetailPage() {
 export default function App() {
 	return (
 		<BrowserRouter>
+			<ErrorBoundary>
 			<Routes>
 				<Route path="/" element={<SessionListPage />} />
 				<Route path="/session/:id" element={<SessionDetailPage />} />
 			</Routes>
+			</ErrorBoundary>
 		</BrowserRouter>
 	);
 }
