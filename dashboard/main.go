@@ -232,6 +232,7 @@ func main() {
 	r.Get("/", handleDashboard)
 	r.Get("/session/{sessionID}", handleSession)
 	r.Get("/agents", handleAgentsList)
+	r.Get("/history", handleHistoryPage)
 	r.Get("/agents/{slug}", handleAgentDetail)
 
 	// Static files (favicon, etc.)
