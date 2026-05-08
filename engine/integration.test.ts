@@ -142,3 +142,42 @@ describe("team configs", () => {
     expect(valA!.lead.model).not.toBe(valB!.lead.model);
   });
 });
+
+describe("steering", () => {
+  test("routes @agent-name message to correct agent", () => {
+    const orch = new Orchestrator("http://localhost:8400");
+    
+    // Simulate message senders registered by the adapter
+    const received: { agent: string; message: string }[] = [];
+    
+    // Access the private messageSenders map via any cast
+    const orchAny = orch as any;
+    orchAny.messageSenders = new Map([
+      ["session-1:code-reviewer", (msg: string) => received.push({ agent: "code-reviewer", message: msg })],
+      ["session-1:security-reviewer", (msg: string) => received.push({ agent: "security-reviewer", message: msg })],
+    ]);
+
+    // Send a targeted message
+    orch.sendUserMessage("session-1", "@Code Reviewer focus on error handling");
+
+    expect(received.length).toBe(1);
+    expect(received[0]!.agent).toBe("code-reviewer");
+    expect(received[0]!.message).toBe("focus on error handling");
+  });
+
+  test("broadcasts to first agent when no @target", () => {
+    const orch = new Orchestrator("http://localhost:8400");
+    const received: string[] = [];
+    
+    const orchAny = orch as any;
+    orchAny.messageSenders = new Map([
+      ["session-1:lead", (msg: string) => received.push(msg)],
+      ["session-1:worker", (msg: string) => received.push(msg)],
+    ]);
+
+    orch.sendUserMessage("session-1", "how's progress?");
+
+    expect(received.length).toBe(1);
+    expect(received[0]).toBe("how's progress?");
+  });
+});

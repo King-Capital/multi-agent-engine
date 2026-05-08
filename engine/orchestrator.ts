@@ -121,21 +121,35 @@ export class Orchestrator {
   }
 
   sendUserMessage(sessionId: string, message: string): void {
-    // Support @agent-name targeting: "@Code Reviewer focus on error handling"
-    const targetMatch = message.match(/^@([\w\s-]+?)\s+(.+)/s);
-    if (targetMatch) {
-      const targetName = (targetMatch[1] ?? '').toLowerCase().replace(/[^a-z0-9]+/g, "-");
-      const actualMessage = targetMatch[2] ?? message;
+    if (message.startsWith("@")) {
+      const prefix = `${sessionId}:`;
+      // Match longest registered agent name from the @mention
+      let bestMatch: { agentKey: string; sender: (msg: string) => void; rest: string } | null = null;
+
       for (const [key, sender] of this.messageSenders) {
-        if (key.startsWith(sessionId) && key.includes(targetName)) {
-          console.log(`[orchestrator] Targeted message to ${targetName}: ${actualMessage.slice(0, 80)}`);
-          sender(actualMessage);
-          return;
+        if (!key.startsWith(prefix)) continue;
+        const agentSlug = key.slice(prefix.length);
+        // Try matching "@code reviewer ..." or "@code-reviewer ..."
+        const variants = [agentSlug.replace(/-/g, " "), agentSlug];
+        for (const v of variants) {
+          if (message.toLowerCase().startsWith(`@${v.toLowerCase()}`)) {
+            const rest = message.slice(v.length + 1).trim(); // +1 for @
+            if (!bestMatch || v.length > bestMatch.agentKey.length) {
+              bestMatch = { agentKey: v, sender, rest };
+            }
+          }
         }
       }
-      console.warn(`[orchestrator] No active agent matching @${targetName}, broadcasting`);
+
+      if (bestMatch) {
+        console.log(`[orchestrator] Targeted message to ${bestMatch.agentKey}: ${bestMatch.rest.slice(0, 80)}`);
+        bestMatch.sender(bestMatch.rest);
+        return;
+      }
+      console.warn(`[orchestrator] No active agent matching @mention in: ${message.slice(0, 50)}`);
     }
-    // Broadcast to first available sender (default behavior)
+
+    // Broadcast to first available sender
     for (const [key, sender] of this.messageSenders) {
       if (key.startsWith(sessionId)) {
         sender(message);
