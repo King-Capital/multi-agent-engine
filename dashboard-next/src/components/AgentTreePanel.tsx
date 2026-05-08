@@ -63,11 +63,13 @@ function AgentRow({
 	agent,
 	depth,
 	selected,
+	showTokens,
 	onClick,
 }: {
 	agent: LiveAgent;
 	depth: number;
 	selected: boolean;
+	showTokens?: boolean;
 	onClick: () => void;
 }) {
 	return (
@@ -97,9 +99,14 @@ function AgentRow({
 				<div className="truncate text-[10px] text-zinc-600">{agent.model}</div>
 			</div>
 
-			{/* Cost */}
-			<span className="text-[10px] text-cyan-400 font-mono shrink-0">
-				{formatCurrency(agent.cost_usd)}
+			{/* Cost / Tokens bubble */}
+			<span className={cn(
+				"text-[10px] font-mono font-bold shrink-0 px-1.5 py-0.5 rounded-full",
+				showTokens
+					? "bg-amber-500/20 text-amber-300"
+					: "bg-emerald-500/20 text-emerald-300",
+			)}>
+				{showTokens ? formatNumber(agent.tokens_used) : formatCurrency(agent.cost_usd)}
 			</span>
 		</button>
 	);
@@ -169,6 +176,7 @@ export function AgentTreePanel({
 	const navigate = useNavigate();
 	const [agents, setAgents] = React.useState<LiveAgent[]>([]);
 	const [loading, setLoading] = React.useState(true);
+	const [showTokens, setShowTokens] = React.useState(false);
 
 	// Load agents from events + PG
 	React.useEffect(() => {
@@ -254,6 +262,7 @@ export function AgentTreePanel({
 	const tree = React.useMemo(() => buildTree(agents), [agents]);
 	const flat = React.useMemo(() => flattenTree(tree), [tree]);
 	const totalCost = agents.reduce((s, a) => s + a.cost_usd, 0);
+	const totalTokens = agents.reduce((s, a) => s + a.tokens_used, 0);
 
 	return (
 		<div className="flex h-full w-full flex-col">
@@ -268,7 +277,7 @@ export function AgentTreePanel({
 						Sessions
 					</button>
 				)}
-				<h2 className="text-sm font-bold text-zinc-100 truncate">
+				<h2 className="text-sm font-bold text-zinc-100 line-clamp-2">
 					{session.name}
 				</h2>
 				<div className="flex flex-wrap items-center gap-2 mt-1">
@@ -279,12 +288,21 @@ export function AgentTreePanel({
 				</div>
 			</div>
 
-			{/* Agent count + cost summary */}
+			{/* Agent count + cost/token toggle */}
 			<div className="shrink-0 px-4 py-2 border-b border-white/5 flex flex-wrap items-center justify-between gap-y-1 text-xs text-zinc-500">
 				<span>{agents.length} agents</span>
-				<span className="text-cyan-400 font-mono">
-					{formatCurrency(totalCost)}
-				</span>
+				<button
+					onClick={() => setShowTokens((v) => !v)}
+					className={cn(
+						"px-2 py-0.5 rounded-full text-[10px] font-bold font-mono transition-colors",
+						showTokens
+							? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+							: "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40",
+					)}
+					title={showTokens ? "Click for cost" : "Click for tokens"}
+				>
+					{showTokens ? `${formatNumber(totalTokens)} tok` : formatCurrency(totalCost)}
+				</button>
 			</div>
 
 			{/* Agent tree list */}

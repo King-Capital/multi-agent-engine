@@ -61,10 +61,10 @@ function agentDisplay(ev: LiveEvent): {
 	const color =
 		d.team_color ??
 		(d.agent_role === "orchestrator"
-			? "#36f9f6"
+			? "#a78bfa"
 			: d.agent_role === "lead"
-				? "#ffd93d"
-				: "#94a3b8");
+				? "#60a5fa"
+				: "#34d399");
 	const role = (d.agent_role as string) ?? "";
 	return { name, color, role };
 }
@@ -538,7 +538,7 @@ function AgentSectionBlock({ section }: { section: AgentSection }) {
 			style={{ borderLeftWidth: 3, borderLeftColor: info.color }}
 		>
 			{/* Agent name header */}
-			<div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-white/[0.02]">
+			<div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-white/[0.04]">
 				<span
 					className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded"
 					style={{
