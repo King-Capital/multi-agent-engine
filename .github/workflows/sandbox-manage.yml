@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'Action to perform'
+        description: 'Action'
         required: true
         type: choice
         options:
           - clone
-          - scale-up
-          - scale-down
+          - activate
+          - deactivate
           - warm
           - verify
           - destroy
@@ -18,23 +18,18 @@ on:
         description: 'Sandbox number (1-4)'
         required: true
         type: choice
-        options:
-          - '1'
-          - '2'
-          - '3'
-          - '4'
+        options: ['1', '2', '3', '4']
 
 permissions:
   contents: read
 
 concurrency:
   group: sandbox-${{ inputs.sandbox_id }}
-  cancel-in-progress: false
 
 env:
   PVE_API: "https://10.71.1.9:8006/api2/json"
-  GOLDEN_VMID: "1000"
   PVE_NODE: "proxmox05"
+  GOLDEN_VMID: "1000"
   SNAPSHOT: "mae-golden-v1"
 
 jobs:
@@ -42,56 +37,63 @@ jobs:
     name: "${{ inputs.action }} mae-sandbox-${{ inputs.sandbox_id }}"
     runs-on: [self-hosted, mae]
     env:
-      VMID: ${{ fromJSON(format('{0}', inputs.sandbox_id)) + 800 }}
-      IP: "10.71.20.${{ fromJSON(format('{0}', inputs.sandbox_id)) + 80 }}"
+      VMID: ""
+      IP: ""
       HOSTNAME: "mae-sandbox-${{ inputs.sandbox_id }}"
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Set sandbox vars
+        run: |
+          echo "VMID=$((800 + ${{ inputs.sandbox_id }}))" >> $GITHUB_ENV
+          echo "IP=10.71.20.$((80 + ${{ inputs.sandbox_id }}))" >> $GITHUB_ENV
 
-      - name: "📦 Clone mae-sandbox-${{ inputs.sandbox_id }}"
+      - name: "📦 Clone"
         if: inputs.action == 'clone'
         run: |
-          set -euo pipefail
           TOKEN="PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}"
 
-          echo "::group::Clone CT $GOLDEN_VMID -> CT $VMID ($HOSTNAME at $IP)"
+          echo "::group::Clone CT $GOLDEN_VMID -> $VMID ($HOSTNAME at $IP)"
           curl -sk -X POST "$PVE_API/nodes/$PVE_NODE/lxc/$GOLDEN_VMID/clone" \
             -H "Authorization: $TOKEN" \
             -d "newid=$VMID&hostname=$HOSTNAME&snapname=$SNAPSHOT&storage=px05_zfs_disk&full=1"
-          echo "Clone submitted. Waiting 60s for full clone..."
+          echo "Waiting 60s for full clone..."
           sleep 60
           echo "::endgroup::"
 
-          echo "::group::Configure network + nesting"
+          echo "::group::Configure (network + nesting + 512MB warm)"
           curl -sk -X PUT "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/config" \
             -H "Authorization: $TOKEN" \
             -d "net0=name%3Deth0%2Cbridge%3Dvmbr0%2Ctag%3D20%2Cip%3D${IP}%2F24%2Cgw%3D10.71.20.1%2Cfirewall%3D0" \
-            -d "features=nesting%3D1"
+            -d "features=nesting%3D1" \
+            -d "memory=512"
           echo "::endgroup::"
 
           echo "::group::Start"
           curl -sk -X POST "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/status/start" \
             -H "Authorization: $TOKEN"
+          sleep 15
+          echo "✅ $HOSTNAME warm @ 512MB"
           echo "::endgroup::"
 
-          echo "::group::Wait for SSH"
-          sleep 15
-          for i in $(seq 1 10); do
-            if ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no mae@$IP hostname &>/dev/null; then
-              echo "✅ mae-sandbox-${{ inputs.sandbox_id }} is up at $IP"
-              break
-            fi
-            echo "  Waiting... (${i}/10)"
-            sleep 5
-          done
-          echo "::endgroup::"
+      - name: "⬆️ Activate (4GB)"
+        if: inputs.action == 'activate'
+        run: |
+          curl -sk -X PUT "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/config" \
+            -H "Authorization: PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}" \
+            -d "memory=4096"
+          echo "✅ $HOSTNAME activated @ 4GB (no reboot)"
+
+      - name: "⬇️ Deactivate (512MB)"
+        if: inputs.action == 'deactivate'
+        run: |
+          curl -sk -X PUT "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/config" \
+            -H "Authorization: PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}" \
+            -d "memory=512"
+          echo "✅ $HOSTNAME deactivated @ 512MB (no reboot)"
 
       - name: "🔄 Warm"
         if: inputs.action == 'warm'
         run: |
-          set -euo pipefail
-          echo "::group::Pull repos + refresh deps"
-          ssh -o StrictHostKeyChecking=no mae@$IP "
+          ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no mae@$IP "
             cd ~/Development/King-Capital
             for d in */; do
               echo -n \"  \$d: \"
@@ -100,54 +102,25 @@ jobs:
               cd ~/Development/King-Capital
             done
           "
-          echo "::endgroup::"
 
       - name: "🔍 Verify"
         if: inputs.action == 'verify'
         run: |
           ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no mae@$IP "
-            echo '=== Tools ==='
             echo \"Node: \$(node --version)\"
             echo \"Bun: \$(bun --version)\"
             echo \"Go: \$(/usr/local/go/bin/go version)\"
-            echo \"GH: \$(gh --version | head -1)\"
-            echo \"Claude: \$(claude --version 2>/dev/null)\"
-            echo ''
-            echo '=== Repos ==='
-            ls ~/Development/King-Capital/
-            echo ''
-            echo '=== Disk ==='
-            df -h / | tail -1
+            echo \"Repos: \$(ls ~/Development/King-Capital | wc -l)\"
+            echo \"Disk: \$(df -h / | tail -1 | awk '{print \$3 \" / \" \$2}')\"
           "
-
-      - name: "⬆️ Scale up to 4GB"
-        if: inputs.action == 'scale-up'
-        run: |
-          TOKEN="PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}"
-          curl -sk -X PUT "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/config"             -H "Authorization: $TOKEN" -d "memory=4096"
-          curl -sk -X POST "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/status/reboot"             -H "Authorization: $TOKEN"
-          echo "✅ mae-sandbox-${{ inputs.sandbox_id }} scaled to 4GB"
-
-      - name: "⬇️ Scale down to 512MB"
-        if: inputs.action == 'scale-down'
-        run: |
-          TOKEN="PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}"
-          curl -sk -X PUT "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/config"             -H "Authorization: $TOKEN" -d "memory=512"
-          curl -sk -X POST "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/status/reboot"             -H "Authorization: $TOKEN"
-          echo "✅ mae-sandbox-${{ inputs.sandbox_id }} scaled to 512MB"
 
       - name: "💀 Destroy"
         if: inputs.action == 'destroy'
         run: |
-          set -euo pipefail
           TOKEN="PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}"
-
-          echo "Stopping CT $VMID..."
           curl -sk -X POST "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/status/stop" \
             -H "Authorization: $TOKEN"
           sleep 5
-
-          echo "Destroying CT $VMID..."
           curl -sk -X DELETE "$PVE_API/nodes/$PVE_NODE/lxc/$VMID" \
             -H "Authorization: $TOKEN"
-          echo "✅ mae-sandbox-${{ inputs.sandbox_id }} destroyed"
+          echo "✅ $HOSTNAME destroyed"
