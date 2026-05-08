@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 7 * * *"  # 3 AM EDT
   workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Comma-separated IPs to warm (default: golden only)'
+        required: false
+        default: '10.71.20.169'
 
 permissions:
   contents: read
@@ -12,54 +17,52 @@ jobs:
   warm:
     name: Update sandbox repos & deps
     runs-on: [self-hosted, mae]
+    strategy:
+      matrix:
+        target: ${{ fromJSON(format('["{0}"]', inputs.targets || '10.71.20.169')) }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - name: Install Ansible
-        run: pip install ansible --break-system-packages 2>/dev/null || pip install ansible
-
-      - name: Write inventory
+      - name: "🔄 Pull repos on ${{ matrix.target }}"
         run: |
-          cat > /tmp/sandbox-inventory.yml << EOF
-          all:
-            children:
-              sandboxes:
-                hosts:
-                  sandbox-template:
-                    ansible_host: 10.71.1.230
-                    ansible_user: mae
-                    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
-          EOF
+          set -euo pipefail
+          IP="${{ matrix.target }}"
 
-      - name: Update repos
-        run: |
-          ansible sandboxes -i /tmp/sandbox-inventory.yml -m shell -a "
-            export PATH=\$PATH:/usr/local/go/bin:/usr/local/bin
-            cd ~/repos
+          echo "::group::Connectivity"
+          ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no mae@$IP "hostname" || {
+            echo "❌ Cannot reach $IP"
+            exit 1
+          }
+          echo "::endgroup::"
+
+          echo "::group::Git pull all repos"
+          ssh -o StrictHostKeyChecking=no mae@$IP "
+            cd ~/Development/King-Capital
             for d in */; do
-              echo \"Updating \$d...\"
-              cd ~/repos/\$d
+              echo -n \"\$d: \"
+              cd ~/Development/King-Capital/\$d
               git fetch origin main --depth=1 2>/dev/null
-              git reset --hard origin/main 2>/dev/null
-              cd ~/repos
+              git reset --hard origin/main 2>/dev/null && echo 'updated' || echo 'failed'
+              cd ~/Development/King-Capital
             done
           "
+          echo "::endgroup::"
 
-      - name: Refresh MAE deps
-        run: |
-          ansible sandboxes -i /tmp/sandbox-inventory.yml -m shell -a "
-            export PATH=\$PATH:/usr/local/go/bin:/usr/local/bin
-            cd ~/repos/multi-agent-engine && bun install 2>/dev/null
-            cd ~/repos/multi-agent-engine/dashboard && go mod download 2>/dev/null
+          echo "::group::Refresh deps"
+          ssh -o StrictHostKeyChecking=no mae@$IP "
+            source ~/.zshrc 2>/dev/null
+            cd ~/Development/King-Capital/multi-agent-engine/engine && bun install 2>&1 | tail -1
+            cd ~/Development/King-Capital/multi-agent-engine/dashboard && /usr/local/go/bin/go mod download 2>&1
+            cd ~/Development/King-Capital/king-core && bun install 2>&1 | tail -1
+            cd ~/Development/King-Capital/bulkbridge-ai && bun install 2>&1 | tail -1
+            cd ~/Development/King-Capital/bb-client-app && bun install 2>&1 | tail -1
           "
+          echo "::endgroup::"
 
-      - name: Check tool versions
-        run: |
-          ansible sandboxes -i /tmp/sandbox-inventory.yml -m shell -a "
+          echo "::group::Status"
+          ssh -o StrictHostKeyChecking=no mae@$IP "
             echo 'Node:' \$(node --version)
             echo 'Bun:' \$(bun --version)
-            echo 'Go:' \$(go version 2>/dev/null || echo 'not found')
-            echo 'GH:' \$(gh --version 2>/dev/null | head -1 || echo 'not found')
-            echo 'Claude:' \$(claude --version 2>/dev/null || echo 'not found')
-            echo 'Repos:' \$(ls ~/repos | wc -l)
+            echo 'Go:' \$(/usr/local/go/bin/go version)
+            echo 'Repos:' \$(ls ~/Development/King-Capital | wc -l)
+            echo 'Disk:' \$(df -h / | tail -1 | awk '{print \$3 \" / \" \$2 \" (\" \$5 \")\"}')
           "
+          echo "::endgroup::"

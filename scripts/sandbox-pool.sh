@@ -2,25 +2,24 @@
 set -euo pipefail
 
 # MAE Sandbox Pool Manager
-# Creates, warms, and manages a pool of pre-provisioned dev LXCs
-# Usage: sandbox-pool.sh <create|status|destroy|warm> [options]
+# Manages sandbox LXCs cloned from mae-golden (CT 410)
 
-POOL_PREFIX="mae-sandbox"
-NODE="${NODE:-proxmox05}"
-TEMPLATE="${TEMPLATE:-TN01_lxc_nvme:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst}"
-STORAGE="${STORAGE:-TN01_lxc_nvme}"
-BRIDGE="${BRIDGE:-vmbr0}"
-CORES="${CORES:-2}"
-MEMORY="${MEMORY:-2048}"
-DISK="${DISK:-16}"
-POOL_SIZE="${POOL_SIZE:-3}"
-START_VMID="${START_VMID:-400}"
+GOLDEN_IP="10.71.20.169"
+NODE="proxmox05"
+TEMPLATE="TN01_lxc_nvme:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst"
+STORAGE="px05_zfs_disk"
+PVE_HOST="10.71.1.5"
 
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
 NC='\033[0m'
+
+log() { echo -e "${CYAN}[$(date '+%H:%M:%S')]${NC} $*"; }
+ok()  { echo -e "${GREEN}✅ $*${NC}"; }
+err() { echo -e "${RED}❌ $*${NC}"; }
+warn() { echo -e "${YELLOW}⚠️  $*${NC}"; }
 
 usage() {
   echo "MAE Sandbox Pool Manager"
@@ -28,102 +27,152 @@ usage() {
   echo "Usage: $0 <command> [options]"
   echo ""
   echo "Commands:"
-  echo "  create    Create N sandbox LXCs (default: $POOL_SIZE)"
-  echo "  status    Show pool status"
-  echo "  warm      Re-provision/update all pool LXCs"
-  echo "  destroy   Destroy all pool LXCs"
-  echo "  assign    Assign a free sandbox to an agent session"
-  echo "  release   Release a sandbox back to the pool"
-  echo ""
-  echo "Environment:"
-  echo "  NODE=$NODE  POOL_SIZE=$POOL_SIZE  CORES=$CORES  MEMORY=$MEMORY"
-  echo "  START_VMID=$START_VMID  TEMPLATE=$TEMPLATE"
-}
-
-create_sandbox() {
-  local vmid=$1
-  local hostname="${POOL_PREFIX}-${vmid}"
-  
-  echo -e "${YELLOW}Creating LXC $vmid ($hostname) on $NODE...${NC}"
-  
-  mcp2cli proxmox-plus create_container --params "{
-    \"node\": \"$NODE\",
-    \"vmid\": \"$vmid\",
-    \"ostemplate\": \"$TEMPLATE\",
-    \"hostname\": \"$hostname\",
-    \"cores\": $CORES,
-    \"memory\": $MEMORY,
-    \"disk_size\": $DISK,
-    \"storage\": \"$STORAGE\",
-    \"network_bridge\": \"$BRIDGE\",
-    \"start_after_create\": true,
-    \"unprivileged\": true,
-    \"password\": \"mae-sandbox-$(date +%s)\"
-  }" 2>&1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('result',{}).get('text',d.get('message','')))" || true
-  
-  echo -e "${GREEN}Created $hostname${NC}"
+  echo "  create <vmid> <ip> [hostname]  Create a new sandbox LXC"
+  echo "  destroy <vmid>                 Destroy a sandbox (refuses CT 410)"
+  echo "  warm [ip]                      Pull repos + refresh deps"
+  echo "  status                         Show all sandbox containers"
+  echo "  verify [ip]                    Check tools + repos on a sandbox"
 }
 
 cmd_create() {
-  echo "Creating sandbox pool ($POOL_SIZE containers starting at VMID $START_VMID)..."
-  for i in $(seq 0 $((POOL_SIZE - 1))); do
-    local vmid=$((START_VMID + i))
-    create_sandbox "$vmid"
+  local vmid="${1:?Usage: $0 create <vmid> <ip> [hostname]}"
+  local ip="${2:?Usage: $0 create <vmid> <ip> [hostname]}"
+  local hostname="${3:-mae-sandbox-${vmid}}"
+
+  log "Creating CT $vmid ($hostname) at $ip on $NODE"
+  log "  Template: $TEMPLATE"
+  log "  Storage:  $STORAGE (16GB)"
+  log "  Resources: 2 cores, 2GB RAM"
+  log "  Features: nesting=1"
+
+  if [ -z "$PVE_TOKEN" ]; then
+    err "PVE_TOKEN env var required (PVEAPIToken=root@pam!claude-mcp=<value>)"
+    exit 1
+  fi
+
+  RESULT=$(curl -sk -X POST "https://${PVE_HOST}:8006/api2/json/nodes/${NODE}/lxc" \
+    -H "Authorization: PVEAPIToken=${PVE_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"vmid\": ${vmid},
+      \"ostemplate\": \"${TEMPLATE}\",
+      \"hostname\": \"${hostname}\",
+      \"cores\": 2, \"memory\": 2048, \"swap\": 512,
+      \"rootfs\": \"${STORAGE}:16\",
+      \"net0\": \"name=eth0,bridge=vmbr0,ip=${ip}/24,gw=10.71.1.1\",
+      \"unprivileged\": 1, \"features\": \"nesting=1\", \"start\": 1
+    }")
+
+  echo "$RESULT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if d.get('data'):
+    print(f'Task: {d[\"data\"]}')
+elif d.get('errors'):
+    print(f'FAILED: {json.dumps(d[\"errors\"])}')
+    sys.exit(1)
+"
+
+  log "Waiting for boot..."
+  for i in $(seq 1 30); do
+    if ping -c1 -W2 "$ip" &>/dev/null; then
+      ok "Container $vmid is up (${i}s)"
+      break
+    fi
+    [ $((i % 5)) -eq 0 ] && log "  Still waiting... (${i}s)"
+    sleep 2
   done
-  echo -e "\n${GREEN}Pool created. Run '$0 warm' to provision dev tools.${NC}"
+
+  log "Checking SSH..."
+  for i in $(seq 1 10); do
+    if ssh -o ConnectTimeout=3 -o StrictHostKeyChecking=no mae@"$ip" "echo ok" &>/dev/null; then
+      ok "SSH connected to mae@$ip"
+      cmd_verify "$ip"
+      return
+    fi
+    sleep 3
+  done
+  warn "SSH not reachable yet -- may need key setup"
+}
+
+cmd_destroy() {
+  local vmid="${1:?Usage: $0 destroy <vmid>}"
+
+  if [ "$vmid" = "410" ]; then
+    err "REFUSING to destroy mae-golden (CT 410)"
+    exit 1
+  fi
+
+  log "Destroying CT $vmid..."
+  curl -sk -X POST "https://${PVE_HOST}:8006/api2/json/nodes/${NODE}/lxc/${vmid}/status/stop" \
+    -H "Authorization: PVEAPIToken=${PVE_TOKEN}" >/dev/null 2>&1
+  sleep 5
+  curl -sk -X DELETE "https://${PVE_HOST}:8006/api2/json/nodes/${NODE}/lxc/${vmid}?force=1&purge=1" \
+    -H "Authorization: PVEAPIToken=${PVE_TOKEN}" >/dev/null 2>&1
+  ok "CT $vmid destroyed"
+}
+
+cmd_warm() {
+  local ip="${1:-$GOLDEN_IP}"
+  log "Warming sandbox at $ip"
+
+  ssh -o StrictHostKeyChecking=no mae@"$ip" "
+    cd ~/Development/King-Capital
+    for d in */; do
+      echo -n \"  \$d: \"
+      cd ~/Development/King-Capital/\$d
+      git pull --ff-only 2>&1 | tail -1
+      cd ~/Development/King-Capital
+    done
+    echo ''
+    echo 'Refreshing deps...'
+    source ~/.zshrc 2>/dev/null
+    cd ~/Development/King-Capital/multi-agent-engine/engine && bun install 2>&1 | tail -1
+    cd ~/Development/King-Capital/king-core && bun install 2>&1 | tail -1
+  "
+  ok "Warm complete"
+}
+
+cmd_verify() {
+  local ip="${1:-$GOLDEN_IP}"
+  log "Verifying sandbox at $ip"
+
+  ssh -o StrictHostKeyChecking=no mae@"$ip" "
+    echo '--- Tools ---'
+    echo 'Node:   ' \$(node --version 2>/dev/null || echo MISSING)
+    echo 'Bun:    ' \$(bun --version 2>/dev/null || echo MISSING)
+    echo 'Go:     ' \$(/usr/local/go/bin/go version 2>/dev/null || echo MISSING)
+    echo 'GH CLI: ' \$(gh --version 2>/dev/null | head -1 || echo MISSING)
+    echo 'uv:     ' \$(~/.local/bin/uv --version 2>/dev/null || echo MISSING)
+    echo 'Claude: ' \$(claude --version 2>/dev/null || echo MISSING)
+    echo 'Git:    ' \$(git --version 2>/dev/null || echo MISSING)
+    echo ''
+    echo '--- Repos ---'
+    ls ~/Development/King-Capital/
+    echo ''
+    echo '--- Disk ---'
+    df -h / | tail -1
+  "
 }
 
 cmd_status() {
-  echo "MAE Sandbox Pool Status:"
-  mcp2cli proxmox-plus get_containers --params "{\"node\": \"$NODE\"}" 2>&1 | python3 -c "
+  log "Checking sandbox pool..."
+  mcp2cli proxmox get_containers 2>&1 | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 text = d.get('result', {}).get('text', '')
 for block in text.split('📦'):
-    if 'mae-sandbox' in block.lower() or 'sandbox' in block.lower():
-        print('📦' + block)
+    if 'sandbox' in block.lower() or 'golden' in block.lower() or 'mae' in block.lower():
+        print('📦' + block.strip())
+        print()
 "
 }
 
-cmd_warm() {
-  echo "Warming sandbox pool (provisioning dev tools)..."
-  local script_dir="$(cd "$(dirname "$0")" && pwd)"
-  
-  for i in $(seq 0 $((POOL_SIZE - 1))); do
-    local vmid=$((START_VMID + i))
-    local ip=$(get_container_ip "$vmid")
-    if [ -n "$ip" ]; then
-      echo -e "${YELLOW}Provisioning sandbox $vmid at $ip...${NC}"
-      scp -o StrictHostKeyChecking=no "$script_dir/sandbox-provision.sh" "root@${ip}:/tmp/"
-      ssh -o StrictHostKeyChecking=no "root@${ip}" "bash /tmp/sandbox-provision.sh"
-      echo -e "${GREEN}Sandbox $vmid provisioned${NC}"
-    else
-      echo -e "${RED}Cannot reach sandbox $vmid -- is it running?${NC}"
-    fi
-  done
-}
-
-cmd_destroy() {
-  echo -e "${RED}Destroying sandbox pool...${NC}"
-  for i in $(seq 0 $((POOL_SIZE - 1))); do
-    local vmid=$((START_VMID + i))
-    echo "Stopping and deleting LXC $vmid..."
-    mcp2cli proxmox-plus stop_container --params "{\"selector\": \"$vmid\"}" 2>/dev/null || true
-    sleep 2
-    mcp2cli proxmox-plus delete_container --params "{\"node\": \"$NODE\", \"vmid\": \"$vmid\"}" 2>/dev/null || true
-  done
-  echo -e "${GREEN}Pool destroyed${NC}"
-}
-
-get_container_ip() {
-  # Get IP from container config -- placeholder, needs network detection
-  echo ""
-}
-
 case "${1:-}" in
-  create)  cmd_create ;;
+  create)  cmd_create "${@:2}" ;;
+  destroy) cmd_destroy "${@:2}" ;;
+  warm)    cmd_warm "${@:2}" ;;
+  verify)  cmd_verify "${@:2}" ;;
   status)  cmd_status ;;
-  warm)    cmd_warm ;;
-  destroy) cmd_destroy ;;
   *)       usage ;;
 esac
