@@ -1025,3 +1025,142 @@ templ AgentGraph(sess *models.Session) {
 		</svg>
 	}
 }
+
+// --- Session Diff (Files Touched) ---
+
+// fileTypeIcon returns a Phosphor icon class and color for a file extension.
+func fileTypeIcon(path string) (string, string) {
+	ext := ""
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '.' {
+			ext = path[i:]
+			break
+		}
+		if path[i] == '/' {
+			break
+		}
+	}
+	switch ext {
+	case ".ts", ".tsx":
+		return "ph-bold ph-file-ts", "text-blue-400"
+	case ".js", ".jsx":
+		return "ph-bold ph-file-js", "text-yellow-400"
+	case ".go":
+		return "ph-bold ph-file-code", "text-cyan-400"
+	case ".md", ".mdx":
+		return "ph-bold ph-file-text", "text-neutral-400"
+	case ".json":
+		return "ph-bold ph-file-code", "text-green-400"
+	case ".yaml", ".yml":
+		return "ph-bold ph-file-code", "text-pink-400"
+	case ".py":
+		return "ph-bold ph-file-py", "text-yellow-300"
+	case ".css", ".scss":
+		return "ph-bold ph-file-css", "text-purple-400"
+	case ".html", ".templ":
+		return "ph-bold ph-file-html", "text-orange-400"
+	case ".sql":
+		return "ph-bold ph-database", "text-emerald-400"
+	case ".sh", ".bash":
+		return "ph-bold ph-terminal", "text-green-300"
+	case ".toml":
+		return "ph-bold ph-file-code", "text-amber-400"
+	case ".env":
+		return "ph-bold ph-lock-key", "text-red-300"
+	default:
+		return "ph-bold ph-file", "text-neutral-500"
+	}
+}
+
+// shortFilePath returns just the filename from a path for display.
+func shortFilePath(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' {
+			return path[i+1:]
+		}
+	}
+	return path
+}
+
+// fileDir returns the directory portion of a path, or empty string.
+func fileDir(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' {
+			return path[:i]
+		}
+	}
+	return ""
+}
+
+templ SessionDiff(sessionID string) {
+	<div x-data={ `{ open: false, files: [], count: 0, loaded: false, loading: false,
+		load() {
+			if (this.loaded || this.loading) return;
+			this.loading = true;
+			fetch('/api/pg/sessions/' + encodeURIComponent('` + sessionID + `') + '/diff')
+				.then(r => r.json())
+				.then(data => {
+					this.files = data.files || [];
+					this.count = data.count || 0;
+					this.loaded = true;
+					this.loading = false;
+				})
+				.catch(() => { this.loading = false; });
+		}
+	}` }>
+		<button
+			class="flex items-center gap-2 text-xs text-neutral-500 hover:text-neutral-300 transition-colors w-full text-left"
+			@click="open = !open; if (open) load()"
+		>
+			<span x-text="open ? '▼' : '▶'" class="w-3 flex-shrink-0"></span>
+			<i class="ph-bold ph-git-diff"></i>
+			<span>Files Modified</span>
+			<span
+				x-show="loaded"
+				x-text="count"
+				class="px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 text-xs font-bold"
+			></span>
+			<span x-show="loading" class="text-neutral-600">loading...</span>
+		</button>
+		<div x-show="open" x-transition class="mt-2 ml-5 space-y-0.5">
+			<template x-if="loaded && files.length === 0">
+				<p class="text-xs text-neutral-600 italic">No file modifications detected.</p>
+			</template>
+			<template x-for="file in files" :key="file">
+				<div class="flex items-center gap-2 text-xs py-0.5 group">
+					<i :class="fileIcon(file)" class="flex-shrink-0"></i>
+					<span class="text-neutral-400 truncate" :title="file" x-text="file"></span>
+				</div>
+			</template>
+		</div>
+		<!-- Alpine helper for file icons -->
+		<script>
+			function fileIcon(path) {
+				const ext = path.includes('.') ? path.slice(path.lastIndexOf('.')) : '';
+				const map = {
+					'.ts': 'ph-bold ph-file-ts text-blue-400',
+					'.tsx': 'ph-bold ph-file-ts text-blue-400',
+					'.js': 'ph-bold ph-file-js text-yellow-400',
+					'.jsx': 'ph-bold ph-file-js text-yellow-400',
+					'.go': 'ph-bold ph-file-code text-cyan-400',
+					'.md': 'ph-bold ph-file-text text-neutral-400',
+					'.mdx': 'ph-bold ph-file-text text-neutral-400',
+					'.json': 'ph-bold ph-file-code text-green-400',
+					'.yaml': 'ph-bold ph-file-code text-pink-400',
+					'.yml': 'ph-bold ph-file-code text-pink-400',
+					'.py': 'ph-bold ph-file-py text-yellow-300',
+					'.css': 'ph-bold ph-file-css text-purple-400',
+					'.scss': 'ph-bold ph-file-css text-purple-400',
+					'.html': 'ph-bold ph-file-html text-orange-400',
+					'.templ': 'ph-bold ph-file-html text-orange-400',
+					'.sql': 'ph-bold ph-database text-emerald-400',
+					'.sh': 'ph-bold ph-terminal text-green-300',
+					'.bash': 'ph-bold ph-terminal text-green-300',
+					'.toml': 'ph-bold ph-file-code text-amber-400',
+					'.env': 'ph-bold ph-lock-key text-red-300',
+				};
+				return map[ext] || 'ph-bold ph-file text-neutral-500';
+			}
+		</script>
+	</div>
+}

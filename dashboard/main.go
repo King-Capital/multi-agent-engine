@@ -233,6 +233,7 @@ func main() {
 	r.Get("/session/{sessionID}", handleSession)
 	r.Get("/agents", handleAgentsList)
 	r.Get("/history", handleHistoryPage)
+	r.Get("/compare", handleComparePage)
 	r.Get("/agents/{slug}", handleAgentDetail)
 
 	// Static files (favicon, etc.)
@@ -273,6 +274,7 @@ func main() {
 			r.Patch("/{id}", handleAPIPatchSession)
 			r.Get("/{id}/agents", handleAPIGetAgents)
 			r.Get("/{id}/events", handleAPIGetSessionEvents)
+			r.Get("/{id}/diff", handleAPIGetSessionDiff)
 			r.Post("/{id}/agents", handleAPICreateAgent)
 		})
 		r.Patch("/pg/agents/{id}", handleAPIPatchAgent)

@@ -646,3 +646,132 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
+
+// GET /api/pg/sessions/:id/diff -- files touched during a session
+func handleAPIGetSessionDiff(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+	sessionID := chi.URLParam(r, "id")
+	if sessionID == "" {
+		http.Error(w, "session id required", http.StatusBadRequest)
+		return
+	}
+
+	rows, err := db.QueryContext(r.Context(),
+		`SELECT payload
+		 FROM events
+		 WHERE session_id = $1
+		   AND event_type IN ('tool_call', 'tool_result')
+		 ORDER BY created_at ASC`,
+		sessionID)
+	if err != nil {
+		dbError(w, "query diff events", err)
+		return
+	}
+	defer rows.Close()
+
+	seen := make(map[string]bool)
+	var files []string
+
+	for rows.Next() {
+		var raw json.RawMessage
+		if err := rows.Scan(&raw); err != nil {
+			continue
+		}
+
+		// Extract file paths from payload JSON recursively
+		extractPaths(raw, seen, &files)
+	}
+
+	type DiffResponse struct {
+		Files []string `json:"files"`
+		Count int      `json:"count"`
+	}
+
+	resp := DiffResponse{
+		Files: files,
+		Count: len(files),
+	}
+	if resp.Files == nil {
+		resp.Files = []string{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+// extractPaths walks a JSON value looking for file path fields.
+func extractPaths(raw json.RawMessage, seen map[string]bool, files *[]string) {
+	var obj map[string]interface{}
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		extractPathsFromMap(obj, seen, files)
+		return
+	}
+
+	var arr []interface{}
+	if err := json.Unmarshal(raw, &arr); err == nil {
+		for _, item := range arr {
+			if m, ok := item.(map[string]interface{}); ok {
+				extractPathsFromMap(m, seen, files)
+			}
+		}
+	}
+}
+
+func extractPathsFromMap(obj map[string]interface{}, seen map[string]bool, files *[]string) {
+	pathKeys := []string{"path", "file", "filename", "file_path", "filePath", "filepath"}
+	for _, key := range pathKeys {
+		if val, ok := obj[key]; ok {
+			if s, ok := val.(string); ok && s != "" && !seen[s] && looksLikeFilePath(s) {
+				seen[s] = true
+				*files = append(*files, s)
+			}
+		}
+	}
+
+	// Recurse into nested objects
+	for _, val := range obj {
+		switch v := val.(type) {
+		case map[string]interface{}:
+			extractPathsFromMap(v, seen, files)
+		case []interface{}:
+			for _, item := range v {
+				if m, ok := item.(map[string]interface{}); ok {
+					extractPathsFromMap(m, seen, files)
+				}
+			}
+		}
+	}
+}
+
+// looksLikeFilePath returns true if the string looks like a file path
+// (has an extension or starts with /, ./, or contains a path separator).
+func looksLikeFilePath(s string) bool {
+	if len(s) > 500 || len(s) < 2 {
+		return false
+	}
+	// Must contain a dot (extension) or a slash (path separator)
+	hasDot := false
+	hasSlash := false
+	for _, c := range s {
+		if c == '.' {
+			hasDot = true
+		}
+		if c == '/' {
+			hasSlash = true
+		}
+		// Reject if it contains newlines or looks like prose
+		if c == '\n' || c == '\r' {
+			return false
+		}
+	}
+	return hasDot || hasSlash
+}
+
+// GET /compare -- render model comparison page
+func handleComparePage(w http.ResponseWriter, r *http.Request) {
+	sessionA := r.URL.Query().Get("a")
+	sessionB := r.URL.Query().Get("b")
+	templates.ComparePage(sessionA, sessionB).Render(r.Context(), w)
+}
