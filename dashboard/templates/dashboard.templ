@@ -19,9 +19,14 @@ templ DashboardPage(sessions []*models.Session) {
 					</h1>
 					<div class="flex items-center justify-between">
 						<p class="text-xs text-neutral-400 mt-1">Multi-Agent Orchestration</p>
-						<a href="/agents" class="text-xs text-neutral-500 hover:text-neutral-300 flex items-center gap-1" title="Agent Registry">
-							<i class="ph-bold ph-robot"></i>
-						</a>
+						<div class="flex gap-2">
+							<a href="/history" class="text-xs text-neutral-500 hover:text-neutral-300 flex items-center gap-1" title="Run History">
+								<i class="ph-bold ph-clock-counter-clockwise"></i>
+							</a>
+							<a href="/agents" class="text-xs text-neutral-500 hover:text-neutral-300 flex items-center gap-1" title="Agent Registry">
+								<i class="ph-bold ph-robot"></i>
+							</a>
+						</div>
 					</div>
 					<!-- User Selector -->
 					<div class="mt-2">

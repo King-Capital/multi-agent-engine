@@ -13,7 +13,7 @@ export class EchoAdapter implements PlatformAdapter {
     console.log(`[echo] Prompt: ${opts.userPrompt.slice(0, 200)}...`);
     console.log(`[echo] Domain write: ${opts.domain.write.join(", ")}`);
 
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, 50));
 
     return {
       agentId: `echo-${opts.persona.name.toLowerCase().replace(/\s+/g, "-")}`,

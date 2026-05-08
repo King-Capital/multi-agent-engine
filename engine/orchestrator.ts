@@ -13,6 +13,8 @@ import { EventEmitter } from "./event-emitter";
 import { sanitizeAgentInput, validateAgentOutput } from "./security";
 import { isGitRepo, createWorktree, mergeWorktree, cleanupWorktree } from "./worktree";
 import { delegateWithHealing } from "./self-healing";
+import { PipelineTracker } from "./pipeline-state";
+import { SandboxPool } from "./sandbox-pool";
 import type {
   PlatformAdapter,
   DelegateResult,
@@ -45,6 +47,8 @@ export class Orchestrator {
   private agentActivity: Map<string, AgentActivity> = new Map();
   private monitorInterval: ReturnType<typeof setInterval> | null = null;
   private messageSenders: Map<string, (msg: string) => void> = new Map();
+  private pipelines: Map<string, PipelineTracker> = new Map();
+  private sandboxPool: SandboxPool | null = null;
   private sseAbort: AbortController | null = null;
 
   constructor(dashboardUrl?: string, apiToken?: string) {
@@ -104,6 +108,11 @@ export class Orchestrator {
     this.agentActivity.clear();
   }
 
+  enableSandboxPool(opts?: { pveApi?: string; pveToken?: string; poolSize?: number }): void {
+    this.sandboxPool = new SandboxPool(opts);
+    console.log(`[orchestrator] Sandbox pool enabled (${this.sandboxPool.status().total} sandboxes)`);
+  }
+
   registerAdapter(adapter: PlatformAdapter): void {
     this.adapters.set(adapter.name, adapter);
     if (!this.defaultAdapter) {
@@ -119,21 +128,35 @@ export class Orchestrator {
   }
 
   sendUserMessage(sessionId: string, message: string): void {
-    // Support @agent-name targeting: "@Code Reviewer focus on error handling"
-    const targetMatch = message.match(/^@([\w\s-]+?)\s+(.+)/s);
-    if (targetMatch) {
-      const targetName = (targetMatch[1] ?? '').toLowerCase().replace(/[^a-z0-9]+/g, "-");
-      const actualMessage = targetMatch[2] ?? message;
+    if (message.startsWith("@")) {
+      const prefix = `${sessionId}:`;
+      // Match longest registered agent name from the @mention
+      let bestMatch: { agentKey: string; sender: (msg: string) => void; rest: string } | null = null;
+
       for (const [key, sender] of this.messageSenders) {
-        if (key.startsWith(sessionId) && key.includes(targetName)) {
-          console.log(`[orchestrator] Targeted message to ${targetName}: ${actualMessage.slice(0, 80)}`);
-          sender(actualMessage);
-          return;
+        if (!key.startsWith(prefix)) continue;
+        const agentSlug = key.slice(prefix.length);
+        // Try matching "@code reviewer ..." or "@code-reviewer ..."
+        const variants = [agentSlug.replace(/-/g, " "), agentSlug];
+        for (const v of variants) {
+          if (message.toLowerCase().startsWith(`@${v.toLowerCase()}`)) {
+            const rest = message.slice(v.length + 1).trim(); // +1 for @
+            if (!bestMatch || v.length > bestMatch.agentKey.length) {
+              bestMatch = { agentKey: v, sender, rest };
+            }
+          }
         }
       }
-      console.warn(`[orchestrator] No active agent matching @${targetName}, broadcasting`);
+
+      if (bestMatch) {
+        console.log(`[orchestrator] Targeted message to ${bestMatch.agentKey}: ${bestMatch.rest.slice(0, 80)}`);
+        bestMatch.sender(bestMatch.rest);
+        return;
+      }
+      console.warn(`[orchestrator] No active agent matching @mention in: ${message.slice(0, 50)}`);
     }
-    // Broadcast to first available sender (default behavior)
+
+    // Broadcast to first available sender
     for (const [key, sender] of this.messageSenders) {
       if (key.startsWith(sessionId)) {
         sender(message);
@@ -201,6 +224,36 @@ export class Orchestrator {
     this.sseAbort = null;
   }
 
+
+  async resume(sessionId: string, opts?: { adapter?: string }): Promise<SessionState | null> {
+    const pipeline = PipelineTracker.resume(sessionId);
+    if (!pipeline) {
+      console.error(`[orchestrator] No pipeline state found for session ${sessionId}`);
+      return null;
+    }
+
+    const state = pipeline.getState();
+    console.log(`[orchestrator] Resuming session ${sessionId} (${state.name}) from stage ${state.currentStage}`);
+    console.log(`[orchestrator] Pipeline status: ${state.status}, stages: ${state.stages.length}`);
+
+    // Find the next pending or failed stage
+    const nextStage = state.stages.findIndex(s => s.status === "pending" || s.status === "failed");
+    if (nextStage === -1) {
+      console.log(`[orchestrator] All stages complete or no pending stages found`);
+      return null;
+    }
+
+    console.log(`[orchestrator] Resuming from stage ${nextStage}: ${state.stages[nextStage]?.name}`);
+
+    // Re-run from the failed/pending stage
+    return this.run({
+      task: state.task,
+      chain: state.chain,
+      adapter: opts?.adapter,
+      sessionName: `${state.name} (resumed)`,
+    });
+  }
+
   async run(opts: {
     prompt?: string;
     chain?: string;
@@ -246,6 +299,10 @@ export class Orchestrator {
     };
     this.sessions.set(sessionId, session);
 
+    // Create pipeline state tracker for checkpoint/resume
+    const pipeline = new PipelineTracker(sessionId, sessionName, chainName, taskBody);
+    this.pipelines.set(sessionId, pipeline);
+
     await this.emitter.sessionStart(sessionId, sessionName, chainName, opts.task);
     await this.emitter.pgCreateSession({ id: sessionId, name: sessionName, chain: chainName, team: chainName });
 
@@ -269,8 +326,10 @@ export class Orchestrator {
     try {
       await this.runChain(session, chain, taskBody, opts.adapter);
       session.status = "completed";
+      pipeline?.complete();
     } catch (err) {
       session.status = "error";
+      pipeline?.fail(String(err));
       console.error(`[orchestrator] Session failed:`, err);
       await this.emitter.pgUpdateSession(sessionId, { status: "failed" });
     }
@@ -297,6 +356,15 @@ export class Orchestrator {
       if (!step) continue;
 
       const stepLabel = step.team ?? step.agent ?? "parallel teams";
+      const pipeline = this.pipelines.get(session.id);
+      const stageIdx = pipeline?.addStage({
+        name: stepLabel,
+        type: step.parallel ? "parallel" : step.team ? "team" : "agent",
+        team: step.team,
+        agent: step.agent,
+        parallelTeams: step.parallel?.map(p => p.team),
+      }) ?? -1;
+      pipeline?.startStage(stageIdx);
       await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
         `Starting step ${i + 1}/${steps.length}: ${stepLabel}.`);
 
@@ -340,6 +408,22 @@ export class Orchestrator {
 
       // Issue #65: Only mark till_done if the step didn't FAIL
       const stepGrade = stepResult?.grade ?? (parallelResults ? this.worstGrade(parallelResults.map((r) => r.grade)) : undefined);
+      // Update pipeline state
+      if (stepResult) {
+        pipeline?.completeStage(stageIdx, {
+          grade: stepResult.grade,
+          cost: stepResult.costUsd,
+          tokens: stepResult.tokensUsed,
+          output: stepResult.output,
+        });
+      } else if (parallelResults) {
+        pipeline?.completeStage(stageIdx, {
+          grade: stepGrade,
+          cost: parallelResults.reduce((s, r) => s + r.costUsd, 0),
+          tokens: parallelResults.reduce((s, r) => s + r.tokensUsed, 0),
+        });
+      }
+
       if (stepGrade !== "FAILED") {
         this.markTillDone(session, i);
       }
@@ -451,6 +535,15 @@ export class Orchestrator {
       this.trackActivity(workerId, member.name, "worker");
 
       let workerDir = session.workingDir;
+      
+      // Assign sandbox if pool is enabled
+      const sandbox = this.sandboxPool ? await this.sandboxPool.assign(workerId) : null;
+      if (sandbox) {
+        console.log(`[orchestrator] Agent ${member.name} assigned to sandbox ${sandbox.id} (${sandbox.ip})`);
+        // TODO: SSH into sandbox and use it as working dir
+        // For now, just track the assignment
+      }
+      
       if (useWorktrees) {
         const wtId = `${session.id.slice(0, 8)}-${workerId}`;
         workerDir = await createWorktree(session.workingDir, wtId);
@@ -510,6 +603,11 @@ export class Orchestrator {
       session.totalTokens += result.tokensUsed;
       await this.emitter.costUpdate(session.id, workerId, result.costUsd, result.tokensUsed, 0);
       this.checkBudget(session, workerId, result.costUsd);
+
+      // Release sandbox if assigned
+      if (this.sandboxPool) {
+        await this.sandboxPool.release(workerId);
+      }
 
       // Emit worker output summary to conversation stream
       const workerSummary = this.summarizeOutput(result.output, 1500);

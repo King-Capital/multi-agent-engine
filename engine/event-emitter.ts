@@ -10,6 +10,7 @@ export class EventEmitter {
   private seq = 0;
   private pgAgentIds: Map<string, number> = new Map();
   private droppedEvents = 0;
+  private dashboardDown = false;
 
   constructor(dashboardUrl?: string, apiToken?: string) {
     this.dashboardUrl = dashboardUrl ?? "http://localhost:8400";
@@ -25,6 +26,7 @@ export class EventEmitter {
   }
 
   private async fetchWithRetry(url: string, init: RequestInit): Promise<Response | null> {
+    if (this.dashboardDown) return null;
     for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
       try {
         const res = await fetch(url, init);
@@ -34,7 +36,10 @@ export class EventEmitter {
         }
       } catch (err: unknown) {
         const code = (err as { code?: string })?.code ?? "";
-        if (code === "ConnectionRefused") return null;
+        if (code === "ConnectionRefused") {
+          this.dashboardDown = true;
+          return null;
+        }
         if (attempt < RETRY_DELAYS.length) {
           await Bun.sleep(RETRY_DELAYS[attempt]!);
         }

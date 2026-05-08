@@ -2,11 +2,14 @@ package main
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"time"
+	"mae.local/dashboard/templates"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -298,4 +301,249 @@ func handleSearchTraces(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(traces)
+}
+
+// GET /api/pg/sessions/:id/events -- all events for a session (replay)
+func handleAPIGetSessionEvents(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+	sessionID := chi.URLParam(r, "id")
+	if sessionID == "" {
+		http.Error(w, "session id required", http.StatusBadRequest)
+		return
+	}
+
+	rows, err := db.QueryContext(r.Context(),
+		`SELECT id, session_id, agent_id, event_type, payload, created_at 
+		 FROM events 
+		 WHERE session_id = $1 
+		 ORDER BY created_at ASC, id ASC`,
+		sessionID)
+	if err != nil {
+		dbError(w, "query events", err)
+		return
+	}
+	defer rows.Close()
+
+	type Event struct {
+		ID        int64           `json:"id"`
+		SessionID string          `json:"session_id"`
+		AgentID   string          `json:"agent_id"`
+		EventType string          `json:"event_type"`
+		Payload   json.RawMessage `json:"payload"`
+		CreatedAt time.Time       `json:"created_at"`
+	}
+
+	var events []Event
+	for rows.Next() {
+		var e Event
+		if err := rows.Scan(&e.ID, &e.SessionID, &e.AgentID, &e.EventType, &e.Payload, &e.CreatedAt); err != nil {
+			continue
+		}
+		events = append(events, e)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(events)
+}
+
+// GET /api/pg/sessions/history -- sessions with aggregated cost/tokens
+func handleAPISessionHistory(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+
+	rows, err := db.QueryContext(r.Context(), `
+		SELECT 
+			s.id, s.name, s.chain, s.status, s.created_at, s.completed_at,
+			COALESCE(SUM(a.cost_usd), 0) as total_cost,
+			COUNT(DISTINCT a.id) as agent_count,
+			EXTRACT(EPOCH FROM COALESCE(s.completed_at, NOW()) - s.created_at) as duration_secs
+		FROM sessions s
+		LEFT JOIN agents a ON a.session_id = s.id
+		GROUP BY s.id
+		ORDER BY s.created_at DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		dbError(w, "query history", err)
+		return
+	}
+	defer rows.Close()
+
+	type HistoryEntry struct {
+		ID          string     `json:"id"`
+		Name        string     `json:"name"`
+		Chain       *string    `json:"chain"`
+		Status      string     `json:"status"`
+		CreatedAt   time.Time  `json:"created_at"`
+		CompletedAt *time.Time `json:"completed_at"`
+		TotalCost   float64    `json:"total_cost"`
+		AgentCount  int        `json:"agent_count"`
+		DurationSec float64    `json:"duration_secs"`
+	}
+
+	var history []HistoryEntry
+	for rows.Next() {
+		var h HistoryEntry
+		if err := rows.Scan(&h.ID, &h.Name, &h.Chain, &h.Status, &h.CreatedAt, &h.CompletedAt,
+			&h.TotalCost, &h.AgentCount, &h.DurationSec); err != nil {
+			continue
+		}
+		history = append(history, h)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(history)
+}
+
+// GET /history -- render history page
+func handleHistoryPage(w http.ResponseWriter, r *http.Request) {
+	var entries []templates.HistoryEntry
+
+	if db != nil {
+		rows, err := db.QueryContext(r.Context(), `
+			SELECT 
+				s.id, s.name, COALESCE(s.chain, ''), s.status, 
+				s.created_at, s.completed_at,
+				COALESCE(SUM(a.cost_usd), 0) as total_cost,
+				COUNT(DISTINCT a.id) as agent_count,
+				EXTRACT(EPOCH FROM COALESCE(s.completed_at, NOW()) - s.created_at) as duration_secs
+			FROM sessions s
+			LEFT JOIN agents a ON a.session_id = s.id
+			GROUP BY s.id
+			ORDER BY s.created_at DESC
+			LIMIT 100`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var e templates.HistoryEntry
+				var createdAt, completedAt sql.NullTime
+				var cost float64
+				var agents int
+				var duration float64
+				if err := rows.Scan(&e.ID, &e.Name, &e.Chain, &e.Status,
+					&createdAt, &completedAt, &cost, &agents, &duration); err != nil {
+					continue
+				}
+				e.TotalCost = cost
+				e.AgentCount = agents
+				e.DurationSec = duration
+				if createdAt.Valid {
+					e.CreatedAt = createdAt.Time.Format("Jan 2 15:04")
+				}
+				if completedAt.Valid {
+					e.CompletedAt = completedAt.Time.Format("Jan 2 15:04")
+				}
+				entries = append(entries, e)
+			}
+		}
+	}
+
+	templates.HistoryPage(entries).Render(r.Context(), w)
+}
+
+// GET /metrics -- Prometheus-compatible metrics endpoint
+func handleMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+
+	// Dashboard uptime (always available)
+	uptimeSecs := int64(time.Since(startTime).Seconds())
+	fmt.Fprintf(w, "# HELP mae_dashboard_uptime_seconds Dashboard uptime in seconds\n")
+	fmt.Fprintf(w, "# TYPE mae_dashboard_uptime_seconds gauge\n")
+	fmt.Fprintf(w, "mae_dashboard_uptime_seconds %d\n\n", uptimeSecs)
+
+	if !dbEnabled || db == nil {
+		// Without DB, emit only uptime and zeros
+		fmt.Fprintf(w, "# HELP mae_sessions_total Total sessions by status\n")
+		fmt.Fprintf(w, "# TYPE mae_sessions_total gauge\n")
+		fmt.Fprintf(w, "mae_sessions_total{status=\"active\"} 0\n")
+		fmt.Fprintf(w, "mae_sessions_total{status=\"completed\"} 0\n")
+		fmt.Fprintf(w, "mae_sessions_total{status=\"failed\"} 0\n")
+		fmt.Fprintf(w, "mae_sessions_total{status=\"cancelled\"} 0\n\n")
+
+		fmt.Fprintf(w, "# HELP mae_agents_total Total agents by status\n")
+		fmt.Fprintf(w, "# TYPE mae_agents_total gauge\n")
+		fmt.Fprintf(w, "mae_agents_total{status=\"running\"} 0\n")
+		fmt.Fprintf(w, "mae_agents_total{status=\"completed\"} 0\n")
+		fmt.Fprintf(w, "mae_agents_total{status=\"failed\"} 0\n\n")
+
+		fmt.Fprintf(w, "# HELP mae_total_cost_usd Total cost in USD across all agents\n")
+		fmt.Fprintf(w, "# TYPE mae_total_cost_usd gauge\n")
+		fmt.Fprintf(w, "mae_total_cost_usd 0\n\n")
+
+		fmt.Fprintf(w, "# HELP mae_events_total Total event count\n")
+		fmt.Fprintf(w, "# TYPE mae_events_total gauge\n")
+		fmt.Fprintf(w, "mae_events_total 0\n")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Sessions by status
+	fmt.Fprintf(w, "# HELP mae_sessions_total Total sessions by status\n")
+	fmt.Fprintf(w, "# TYPE mae_sessions_total gauge\n")
+	sessionCounts := map[string]int64{"active": 0, "completed": 0, "failed": 0, "cancelled": 0}
+	rows, err := db.QueryContext(ctx, `SELECT status, COUNT(*) FROM sessions GROUP BY status`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var status string
+			var count int64
+			if err := rows.Scan(&status, &count); err == nil {
+				sessionCounts[status] = count
+			}
+		}
+		rows.Close()
+	}
+	for _, s := range []string{"active", "completed", "failed", "cancelled"} {
+		fmt.Fprintf(w, "mae_sessions_total{status=\"%s\"} %d\n", s, sessionCounts[s])
+	}
+	fmt.Fprintln(w)
+
+	// Agents by status
+	fmt.Fprintf(w, "# HELP mae_agents_total Total agents by status\n")
+	fmt.Fprintf(w, "# TYPE mae_agents_total gauge\n")
+	agentCounts := map[string]int64{"running": 0, "completed": 0, "failed": 0}
+	rows2, err := db.QueryContext(ctx, `SELECT status, COUNT(*) FROM agents GROUP BY status`)
+	if err == nil {
+		defer rows2.Close()
+		for rows2.Next() {
+			var status string
+			var count int64
+			if err := rows2.Scan(&status, &count); err == nil {
+				agentCounts[status] = count
+			}
+		}
+		rows2.Close()
+	}
+	for _, s := range []string{"running", "completed", "failed"} {
+		fmt.Fprintf(w, "mae_agents_total{status=\"%s\"} %d\n", s, agentCounts[s])
+	}
+	fmt.Fprintln(w)
+
+	// Total cost
+	fmt.Fprintf(w, "# HELP mae_total_cost_usd Total cost in USD across all agents\n")
+	fmt.Fprintf(w, "# TYPE mae_total_cost_usd gauge\n")
+	var totalCost float64
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd), 0) FROM agents`).Scan(&totalCost); err != nil {
+		totalCost = 0
+	}
+	fmt.Fprintf(w, "mae_total_cost_usd %.6f\n\n", totalCost)
+
+	// Total events
+	fmt.Fprintf(w, "# HELP mae_events_total Total event count\n")
+	fmt.Fprintf(w, "# TYPE mae_events_total gauge\n")
+	var eventCount int64
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&eventCount); err != nil {
+		eventCount = 0
+	}
+	fmt.Fprintf(w, "mae_events_total %d\n", eventCount)
 }

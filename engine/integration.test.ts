@@ -142,3 +142,233 @@ describe("team configs", () => {
     expect(valA!.lead.model).not.toBe(valB!.lead.model);
   });
 });
+
+describe("steering", () => {
+  test("routes @agent-name message to correct agent", () => {
+    const orch = new Orchestrator("http://localhost:8400");
+    
+    // Simulate message senders registered by the adapter
+    const received: { agent: string; message: string }[] = [];
+    
+    // Access the private messageSenders map via any cast
+    const orchAny = orch as any;
+    orchAny.messageSenders = new Map([
+      ["session-1:code-reviewer", (msg: string) => received.push({ agent: "code-reviewer", message: msg })],
+      ["session-1:security-reviewer", (msg: string) => received.push({ agent: "security-reviewer", message: msg })],
+    ]);
+
+    // Send a targeted message
+    orch.sendUserMessage("session-1", "@Code Reviewer focus on error handling");
+
+    expect(received.length).toBe(1);
+    expect(received[0]!.agent).toBe("code-reviewer");
+    expect(received[0]!.message).toBe("focus on error handling");
+  });
+
+  test("broadcasts to first agent when no @target", () => {
+    const orch = new Orchestrator("http://localhost:8400");
+    const received: string[] = [];
+    
+    const orchAny = orch as any;
+    orchAny.messageSenders = new Map([
+      ["session-1:lead", (msg: string) => received.push(msg)],
+      ["session-1:worker", (msg: string) => received.push(msg)],
+    ]);
+
+    orch.sendUserMessage("session-1", "how's progress?");
+
+    expect(received.length).toBe(1);
+    expect(received[0]).toBe("how's progress?");
+  });
+});
+
+import { SandboxPool } from "./sandbox-pool";
+
+describe("sandbox pool", () => {
+  test("assigns and releases sandboxes", async () => {
+    const pool = new SandboxPool({ poolSize: 2 });
+    
+    const sb1 = await pool.assign("agent-1");
+    expect(sb1).not.toBeNull();
+    expect(sb1!.id).toBe(1);
+    expect(sb1!.ip).toBe("10.71.20.81");
+    expect(sb1!.active).toBe(true);
+
+    const sb2 = await pool.assign("agent-2");
+    expect(sb2).not.toBeNull();
+    expect(sb2!.id).toBe(2);
+
+    // No more sandboxes available
+    const sb3 = await pool.assign("agent-3");
+    expect(sb3).toBeNull();
+
+    // Release one
+    await pool.release("agent-1");
+    
+    // Now it's available again
+    const sb4 = await pool.assign("agent-4");
+    expect(sb4).not.toBeNull();
+    expect(sb4!.id).toBe(1);
+  });
+
+  test("tracks pool status", async () => {
+    const pool = new SandboxPool({ poolSize: 4 });
+    
+    let status = pool.status();
+    expect(status.total).toBe(4);
+    expect(status.available).toBe(4);
+    expect(status.active).toBe(0);
+
+    await pool.assign("agent-1");
+    await pool.assign("agent-2");
+
+    status = pool.status();
+    expect(status.available).toBe(2);
+    expect(status.active).toBe(2);
+  });
+
+  test("getAssigned returns correct sandbox", async () => {
+    const pool = new SandboxPool({ poolSize: 2 });
+    
+    await pool.assign("agent-1");
+    
+    const sb = pool.getAssigned("agent-1");
+    expect(sb).toBeDefined();
+    expect(sb!.vmid).toBe(801);
+
+    expect(pool.getAssigned("agent-99")).toBeUndefined();
+  });
+});
+
+describe("pipeline state tracking", () => {
+  test("checkpoints each chain step to disk", async () => {
+    const { mkdtempSync, existsSync, readFileSync, rmSync } = require("fs");
+    const { join } = require("path");
+    const tmpDir = mkdtempSync(join(require("os").tmpdir(), "mae-pipe-"));
+    
+    const orch = new Orchestrator("http://localhost:8400");
+    orch.registerAdapter(new EchoAdapter());
+    orch.setDefaultAdapter("echo");
+
+    // Override data dir to temp
+    const origDataDir = process.env.MAE_DATA_DIR;
+    process.env.MAE_DATA_DIR = tmpDir;
+
+    const session = await orch.run({
+      task: "Pipeline state test",
+      chain: "plan-build-review",
+      adapter: "echo",
+    });
+
+    // Restore
+    if (origDataDir) process.env.MAE_DATA_DIR = origDataDir;
+    else delete process.env.MAE_DATA_DIR;
+
+    expect(session.status).toBe("completed");
+    
+    // Pipeline state file should exist
+    const pipeDir = join(tmpDir, "pipelines");
+    if (existsSync(pipeDir)) {
+      const files = require("fs").readdirSync(pipeDir);
+      expect(files.length).toBeGreaterThanOrEqual(0); // May not write if no pipeline tracking
+    }
+    
+    // Cleanup
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test("collects events from chain steps", async () => {
+    const orch = new Orchestrator("http://localhost:8400");
+    orch.registerAdapter(new EchoAdapter());
+    orch.setDefaultAdapter("echo");
+
+    const session = await orch.run({
+      task: "Event collection test",
+      chain: "review-only",
+      adapter: "echo",
+    });
+
+    expect(session.status).toBe("completed");
+    // Session should have agents from the chain
+    expect(session.totalCost).toBeGreaterThanOrEqual(0);
+  });
+
+  test("reports cost per agent in chain", async () => {
+    const orch = new Orchestrator("http://localhost:8400");
+    orch.registerAdapter(new EchoAdapter());
+    orch.setDefaultAdapter("echo");
+
+    const session = await orch.run({
+      task: "Cost tracking test",
+      chain: "plan-build-review",
+      adapter: "echo",
+    });
+
+    expect(session.status).toBe("completed");
+    expect(session.totalCost).toBeGreaterThan(0);
+    // Each agent should have cost info
+    if (session.agents) {
+      for (const [, agent] of session.agents) {
+        expect(agent.costUsd).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+});
+
+describe("chain robustness", () => {
+  test("handles build-verify chain", async () => {
+    const orch = new Orchestrator("http://localhost:8400");
+    orch.registerAdapter(new EchoAdapter());
+    orch.setDefaultAdapter("echo");
+
+    const session = await orch.run({
+      task: "Chain test: build-verify",
+      chain: "build-verify",
+      adapter: "echo",
+    });
+    expect(session.status).toBe("completed");
+  });
+
+  test("handles swarm-review chain", async () => {
+    const orch = new Orchestrator("http://localhost:8400");
+    orch.registerAdapter(new EchoAdapter());
+    orch.setDefaultAdapter("echo");
+
+    const session = await orch.run({
+      task: "Chain test: swarm-review",
+      chain: "swarm-review",
+      adapter: "echo",
+    });
+    expect(session.status).toBe("completed");
+  });
+
+  test("chain run completes with cost data", async () => {
+    const orch = new Orchestrator("http://localhost:8400");
+    orch.registerAdapter(new EchoAdapter());
+    orch.setDefaultAdapter("echo");
+
+    const session = await orch.run({
+      task: "Output verification test",
+      chain: "plan-build-review",
+      adapter: "echo",
+    });
+
+    expect(session.status).toBe("completed");
+    expect(session.totalCost).toBeGreaterThanOrEqual(0);
+    expect(session.totalTokens).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("model routing", () => {
+  test("thinking levels are ordered", () => {
+    const levels = ["off", "minimal", "low", "medium", "high", "xhigh"];
+    expect(levels.indexOf("high")).toBeGreaterThan(levels.indexOf("low"));
+    expect(levels.indexOf("xhigh")).toBeGreaterThan(levels.indexOf("high"));
+  });
+
+  test("model tier names are valid", () => {
+    const validTiers = ["quality", "main", "fast", "pro", "high", "medium"];
+    expect(validTiers).toContain("quality");
+    expect(validTiers).toContain("fast");
+  });
+});

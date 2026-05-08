@@ -17,3 +17,5 @@ data/sessions/
 agent
 engine/data/sessions/
 engine/.pi/
+data/pipelines/
+engine/data/

@@ -1,6 +1,6 @@
 import { writeFileSync } from "fs";
 import { join } from "path";
-import { resolveModel } from "./config";
+import { resolveModel, getModelFallbacks } from "./config";
 import { sanitizeAgentInput } from "./security";
 import type { DelegateResult, DelegateOptions, PlatformAdapter, ThinkingLevel } from "./types";
 
@@ -14,6 +14,14 @@ const MODEL_ESCALATION: Record<string, string> = {
   "main": "quality",
   "free": "main",
 };
+
+function getEscalationModel(currentModel: string): string {
+  // First try dynamic fallbacks from model-routing.yaml
+  const fallbacks = getModelFallbacks(currentModel);
+  if (fallbacks.length > 0) return fallbacks[0]!;
+  // Then try static escalation map
+  return MODEL_ESCALATION[currentModel] ?? currentModel;
+}
 
 const THINKING_ESCALATION: Record<ThinkingLevel, ThinkingLevel> = {
   off: "low",
@@ -108,7 +116,7 @@ export async function delegateWithHealing(ctx: SelfHealContext): Promise<Delegat
   if (!isFailed(result)) return result;
 
   // Attempt 3: Upgrade model
-  const upgradedModel = MODEL_ESCALATION[opts.model] ?? opts.model;
+  const upgradedModel = getEscalationModel(opts.model);
   const upgradedThinking = THINKING_ESCALATION[opts.thinking] ?? opts.thinking;
   const modelChanged = upgradedModel !== opts.model;
 
