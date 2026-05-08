@@ -25,6 +25,10 @@ clone() {
     -H "Authorization: PVEAPIToken=$PVE_TOKEN" \
     -d "newid=$vmid&hostname=$name&snapname=$SNAPSHOT&storage=$STORAGE&full=1"
 
+  log "Setting RAM to 512MB (warm idle)..."
+  curl -sk -X PUT "$PVE/nodes/$NODE/lxc/$vmid/config" \
+    -H "Authorization: PVEAPIToken=$PVE_TOKEN" -d "memory=512"
+
   log "Waiting for clone to complete..."
   sleep 60
 
@@ -57,8 +61,34 @@ destroy() {
   log "✅ CT $vmid destroyed"
 }
 
+scale_up() {
+  local num=$1
+  local vmid=$((800 + num))
+  log "Scaling CT $vmid to 4GB RAM"
+  curl -sk -X PUT "$PVE/nodes/$NODE/lxc/$vmid/config" \
+    -H "Authorization: PVEAPIToken=$PVE_TOKEN" -d "memory=4096"
+  log "Rebooting $vmid..."
+  curl -sk -X POST "$PVE/nodes/$NODE/lxc/$vmid/status/reboot" \
+    -H "Authorization: PVEAPIToken=$PVE_TOKEN"
+  log "✅ CT $vmid scaled to 4GB"
+}
+
+scale_down() {
+  local num=$1
+  local vmid=$((800 + num))
+  log "Scaling CT $vmid to 512MB RAM"
+  curl -sk -X PUT "$PVE/nodes/$NODE/lxc/$vmid/config" \
+    -H "Authorization: PVEAPIToken=$PVE_TOKEN" -d "memory=512"
+  log "Rebooting $vmid..."
+  curl -sk -X POST "$PVE/nodes/$NODE/lxc/$vmid/status/reboot" \
+    -H "Authorization: PVEAPIToken=$PVE_TOKEN"
+  log "✅ CT $vmid scaled to 512MB"
+}
+
 case "${1:-}" in
   clone)   clone "${2:?Usage: $0 clone <1-4>}" ;;
+  scale-up) scale_up "${2:?Usage: $0 scale-up <1-4>}" ;;
+  scale-down) scale_down "${2:?Usage: $0 scale-down <1-4>}" ;;
   destroy) destroy "${2:?Usage: $0 destroy <1-4>}" ;;
   batch-clone)
     for i in 1 2 3 4; do clone $i; done ;;
@@ -71,5 +101,7 @@ case "${1:-}" in
     echo "  destroy 2      Destroy mae-sandbox-2 (VMID 802)"
     echo "  batch-clone    Clone all 4 sandboxes sequentially"
     echo "  batch-destroy  Destroy all 4 sandboxes"
+    echo "  scale-up 1     Scale sandbox to 4GB RAM for use"
+    echo "  scale-down 1   Scale sandbox to 512MB RAM (warm idle)"
     ;;
 esac

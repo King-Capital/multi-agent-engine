@@ -74,6 +74,31 @@ curl -sk -X DELETE "$PVE/nodes/proxmox05/lxc/801" \
   -H "Authorization: $TOKEN"
 ```
 
+## RAM Strategy
+
+Sandboxes run warm at **512 MB** RAM (idle, ready to go). When an agent needs one, scale up to **4 GB** before use, scale back down after.
+
+```bash
+# Scale up for use
+pct set 801 -memory 4096
+pct reboot 801
+
+# Scale back down when done
+pct set 801 -memory 512
+pct reboot 801
+```
+
+API:
+```bash
+# Scale up
+curl -sk -X PUT "$PVE/nodes/<node>/lxc/801/config" \
+  -H "Authorization: $TOKEN" -d "memory=4096"
+
+# Scale down
+curl -sk -X PUT "$PVE/nodes/<node>/lxc/801/config" \
+  -H "Authorization: $TOKEN" -d "memory=512"
+```
+
 ## SSH
 
 Clones inherit authorized_keys from golden image. All pre-authorized:

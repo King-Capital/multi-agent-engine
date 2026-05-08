@@ -9,6 +9,8 @@ on:
         type: choice
         options:
           - clone
+          - scale-up
+          - scale-down
           - warm
           - verify
           - destroy
@@ -117,6 +119,22 @@ jobs:
             echo '=== Disk ==='
             df -h / | tail -1
           "
+
+      - name: "⬆️ Scale up to 4GB"
+        if: inputs.action == 'scale-up'
+        run: |
+          TOKEN="PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}"
+          curl -sk -X PUT "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/config"             -H "Authorization: $TOKEN" -d "memory=4096"
+          curl -sk -X POST "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/status/reboot"             -H "Authorization: $TOKEN"
+          echo "✅ mae-sandbox-${{ inputs.sandbox_id }} scaled to 4GB"
+
+      - name: "⬇️ Scale down to 512MB"
+        if: inputs.action == 'scale-down'
+        run: |
+          TOKEN="PVEAPIToken=${{ secrets.PROXMOX_API_TOKEN }}"
+          curl -sk -X PUT "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/config"             -H "Authorization: $TOKEN" -d "memory=512"
+          curl -sk -X POST "$PVE_API/nodes/$PVE_NODE/lxc/$VMID/status/reboot"             -H "Authorization: $TOKEN"
+          echo "✅ mae-sandbox-${{ inputs.sandbox_id }} scaled to 512MB"
 
       - name: "💀 Destroy"
         if: inputs.action == 'destroy'
