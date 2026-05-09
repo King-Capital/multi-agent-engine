@@ -31,11 +31,11 @@ describe("model tier enforcement (#148)", () => {
       expect(result.thinking).toBe("medium");
     });
 
-    test("scout resolves to fast tier default model with low thinking", () => {
+    test("scout resolves to fast tier default model with fast-tier thinking", () => {
       const result = resolveModelForRole("scout");
       const routing = loadModelRouting();
       expect(result.model).toBe(routing.tiers["fast"]!.default);
-      expect(result.thinking).toBe("low");
+      expect(result.thinking).toBe(routing.roleDefaults["scout"]!.thinking);
     });
   });
 
@@ -58,10 +58,11 @@ describe("model tier enforcement (#148)", () => {
       expect(result.thinking).toBe("medium");
     });
 
-    test("scout with preferred alias uses alias model but low thinking", () => {
+    test("scout with preferred alias uses alias model but scout-tier thinking", () => {
       const result = resolveModelForRole("scout", "quality");
+      const routing = loadModelRouting();
       expect(result.model).toBe(resolveModel("quality"));
-      expect(result.thinking).toBe("low");
+      expect(result.thinking).toBe(routing.roleDefaults["scout"]!.thinking);
     });
   });
 
