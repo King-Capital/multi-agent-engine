@@ -1,7 +1,7 @@
 import { $ } from "bun";
 import { mkdirSync, existsSync } from "fs";
 import { join } from "path";
-import type { PlatformAdapter, DelegateOptions, DelegateResult, StreamEvent } from "../types";
+import type { PlatformAdapter, DelegateOptions, DelegateResult, StreamEvent, GradeLevel } from "../types";
 
 export class PiAdapter implements PlatformAdapter {
   name = "pi";
@@ -459,9 +459,13 @@ export class PiAdapter implements PlatformAdapter {
     return PiAdapter.PI_MODEL_MAP[name] ?? name;
   }
 
-  private extractGrade(output: string): "PERFECT" | "VERIFIED" | "PARTIAL" | "FEEDBACK" | "FAILED" | undefined {
-    const match = output.match(/GRADE:\s*(PERFECT|VERIFIED|PARTIAL|FEEDBACK|FAILED)/i);
-    return match?.[1]?.toUpperCase() as ReturnType<typeof this.extractGrade>;
+  private extractGrade(output: string): GradeLevel | undefined {
+    const match = output.match(/GRADE:\s*(PERFECT|VERIFIED|PASS|PARTIAL|FEEDBACK|NEEDS_WORK|FAILED)/i);
+    if (!match?.[1]) return undefined;
+    const raw = match[1].toUpperCase();
+    if (raw === "PASS") return "VERIFIED";
+    if (raw === "NEEDS_WORK") return "FEEDBACK";
+    return raw as GradeLevel;
   }
 
   private extractFindings(output: string): string[] {
