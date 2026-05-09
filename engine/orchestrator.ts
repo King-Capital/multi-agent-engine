@@ -48,6 +48,8 @@ export class Orchestrator {
   private sandboxPool: SandboxPool | null = null;
   private sseAbort: AbortController | null = null;
   private budgetState: BudgetState = { budgets: null, budgetWarned: false };
+  private pausedSessions = new Set<string>();
+  private messageBuffers = new Map<string, string[]>();
 
   constructor(dashboardUrl?: string, apiToken?: string) {
     this.dashboardUrl = dashboardUrl ?? "http://localhost:8400";
@@ -74,7 +76,63 @@ export class Orchestrator {
   }
 
   sendUserMessage(sessionId: string, message: string): void {
+    if (message.startsWith("!")) {
+      const parts = message.slice(1).split(/\s+/);
+      const cmd = parts[0] ?? "";
+      const args = parts.slice(1).join(" ");
+      this.handleSteerCommand(sessionId, cmd, args);
+      return;
+    }
+    const buf = this.messageBuffers.get(sessionId) ?? [];
+    buf.push(message);
+    this.messageBuffers.set(sessionId, buf);
     sendUserMessage(this.messageSenders, sessionId, message);
+  }
+
+  private async handleSteerCommand(sessionId: string, command: string, args: string): Promise<void> {
+    switch (command) {
+      case "pause":
+        this.pausedSessions.add(sessionId);
+        await this.emitter.message(sessionId, "orch-1", "Orchestrator", "user",
+          "Session paused. Running agents will finish current work. Send !resume to continue.");
+        console.log(`[orchestrator] Session ${sessionId} paused by user`);
+        break;
+      case "resume":
+        this.pausedSessions.delete(sessionId);
+        await this.emitter.message(sessionId, "orch-1", "Orchestrator", "user",
+          "Session resumed.");
+        console.log(`[orchestrator] Session ${sessionId} resumed by user`);
+        break;
+      case "stop": {
+        const session = this.sessions.get(sessionId);
+        if (session) session.status = "error";
+        this.pausedSessions.delete(sessionId);
+        await this.emitter.message(sessionId, "orch-1", "Orchestrator", "user",
+          "Session stopped by user.");
+        console.log(`[orchestrator] Session ${sessionId} stopped by user`);
+        break;
+      }
+      case "budget": {
+        const newBudget = parseFloat(args);
+        if (!isNaN(newBudget) && this.budgetState?.budgets) {
+          this.budgetState.budgets.max_per_session_usd = newBudget;
+          await this.emitter.message(sessionId, "orch-1", "Orchestrator", "user",
+            `Budget updated to $${newBudget}.`);
+          console.log(`[orchestrator] Session ${sessionId} budget set to $${newBudget}`);
+        }
+        break;
+      }
+      default:
+        await this.emitter.message(sessionId, "orch-1", "Orchestrator", "user",
+          `Unknown command: !${command}. Available: !pause, !resume, !stop, !budget <amount>`);
+    }
+  }
+
+  private drainMessageBuffer(sessionId: string): string {
+    const buf = this.messageBuffers.get(sessionId);
+    if (!buf?.length) return "";
+    const messages = buf.splice(0);
+    return `\n\n**Steer messages from user:**\n${messages.map(m => `> ${m}`).join("\n")}`;
   }
 
   async resume(sessionId: string, opts?: { adapter?: string }): Promise<SessionState | null> {
@@ -213,6 +271,19 @@ export class Orchestrator {
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
       if (!step) continue;
+
+      // Pause gate: wait while session is paused
+      while (this.pausedSessions.has(session.id)) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      if (session.status === "error") break;
+
+      // Drain buffered steer messages into context
+      const buffered = this.drainMessageBuffer(session.id);
+      if (buffered) {
+        previousOutput += buffered;
+        await this.emitter.message(session.id, "orch-1", "User", "user", buffered.trim());
+      }
 
       const stepLabel = step.team ?? step.agent ?? "parallel teams";
       const pipeline = this.pipelines.get(session.id);

@@ -64,6 +64,14 @@ export class ClaudeCodeAdapter implements PlatformAdapter {
       args.push("--allowedTools", "none");
     }
 
+    // Register message sender — claude-code --print can't receive mid-stream,
+    // so messages are buffered by the orchestrator for the next agent turn
+    if (opts.sendMessage) {
+      opts.sendMessage((msg: string) => {
+        console.log(`[claude-code] Steer message buffered (--print mode): ${msg.slice(0, 100)}`);
+      });
+    }
+
     console.log(`[claude-code] Spawning ${opts.persona.name} (${this.resolveCliModel(opts.model)}) in ${opts.workingDir}`);
 
     const timeout = opts.timeoutMs ?? 1_800_000;
