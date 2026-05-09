@@ -314,23 +314,26 @@ export class Orchestrator {
         previousOutput = stepResult.output;
       }
 
-      // Issue #64: on_feedback retry loop for team steps
-      if (step.on_feedback && stepResult && (stepResult.grade === "FEEDBACK" || stepResult.grade === "FAILED")) {
-        const fb = step.on_feedback;
+      // Retry on FEEDBACK/FAILED — always, not just when on_feedback is configured
+      const isIncomplete = stepResult && (stepResult.grade === "FEEDBACK" || stepResult.grade === "FAILED");
+      const isParallelIncomplete = parallelResults?.some(r => r.grade === "FEEDBACK" || r.grade === "FAILED");
+      if ((isIncomplete || isParallelIncomplete) && (step.team || step.parallel)) {
+        const fb = step.on_feedback ?? { retry_team: step.team ?? step.parallel?.[0]?.team ?? "", max_attempts: 2, escalate_to: "user" };
         let attempts = 0;
-        while (attempts < fb.max_attempts && (stepResult.grade === "FEEDBACK" || stepResult.grade === "FAILED")) {
+        while (attempts < fb.max_attempts && stepResult && (stepResult.grade === "FEEDBACK" || stepResult.grade === "FAILED")) {
           attempts++;
-          console.log(`[orchestrator] on_feedback retry ${attempts}/${fb.max_attempts} -- re-running team "${fb.retry_team}" (grade was ${stepResult.grade})`);
+          console.log(`[orchestrator] Retry ${attempts}/${fb.max_attempts} -- grade was ${stepResult.grade}`);
           await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
-            `Feedback retry ${attempts}/${fb.max_attempts}: re-running ${fb.retry_team} (grade: ${stepResult.grade}).`);
+            `Retry ${attempts}/${fb.max_attempts}: re-running (grade: ${stepResult.grade}).`);
 
-          const retryStep: ChainStep = { team: fb.retry_team };
+          const retryTeam = fb.retry_team || step.team || step.parallel?.[0]?.team || "";
+          const retryStep: ChainStep = { team: retryTeam };
           const feedbackContext = `Previous attempt graded ${stepResult.grade}. Feedback/output:\n${stepResult.output}\n\nPlease address the issues and try again.`;
           stepResult = await runTeamStep(teamDeps, session, retryStep, task, feedbackContext, adapterName);
           previousOutput = stepResult.output;
         }
-        if (stepResult.grade === "FEEDBACK" || stepResult.grade === "FAILED") {
-          console.warn(`[orchestrator] on_feedback exhausted ${fb.max_attempts} retries. Escalating to: ${fb.escalate_to}`);
+        if (stepResult && (stepResult.grade === "FEEDBACK" || stepResult.grade === "FAILED")) {
+          console.warn(`[orchestrator] Exhausted ${fb.max_attempts} retries. Escalating to: ${fb.escalate_to}`);
           await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
             `⚠️ Exhausted ${fb.max_attempts} feedback retries for step ${i + 1}. Escalation target: ${fb.escalate_to}. Grade: ${stepResult.grade}.`);
         }
