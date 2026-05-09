@@ -163,3 +163,90 @@ chains:
           retry_team: Engineering
           max_attempts: 3
           escalate_to: user
+
+  full-stack-specialized:
+    description: "Full-stack with specialized leads: frontend, backend, systems, security, QA"
+    steps:
+      - team: Planning
+        till_done:
+          - "Implementation plan produced with frontend/backend/systems breakdown"
+          - "API contracts defined between frontend and backend"
+          - "All relevant files read and understood"
+      - team: Backend
+        till_done:
+          - "Schema changes implemented and migrated"
+          - "API routes implemented with validation"
+          - "Business logic complete with error handling"
+      - team: Frontend
+        till_done:
+          - "UI components implemented per plan"
+          - "Forms connected to API endpoints"
+          - "Loading, error, and empty states handled"
+      - team: Systems
+        till_done:
+          - "Build passes"
+          - "Deployment config updated if needed"
+      - deterministic:
+          command: "bun tsc --noEmit 2>&1 || echo 'Type check skipped'"
+          label: "Type check"
+          on_failure: loop
+          max_retries: 1
+      - team: QA
+        till_done:
+          - "Unit tests written for new code"
+          - "Integration tests for API routes"
+          - "All tests pass"
+        on_feedback:
+          retry_team: Backend
+          max_attempts: 2
+          escalate_to: user
+      - team: Security Review
+        till_done:
+          - "Input validation reviewed"
+          - "Auth/authz reviewed"
+          - "No critical/high vulnerabilities"
+        on_feedback:
+          retry_team: Backend
+          max_attempts: 2
+          escalate_to: user
+
+  backend-only:
+    description: "Backend feature: schema, API, tests, security review"
+    steps:
+      - team: Planning
+        till_done:
+          - "Schema and API design complete"
+      - team: Backend
+        till_done:
+          - "All backend changes implemented"
+      - deterministic:
+          command: "bun tsc --noEmit 2>&1 || echo 'Type check skipped'"
+          label: "Type check"
+          on_failure: loop
+          max_retries: 1
+      - team: QA
+        till_done:
+          - "Tests written and passing"
+      - team: Security Review
+        till_done:
+          - "No vulnerabilities found"
+
+  frontend-only:
+    description: "Frontend feature: components, styling, tests"
+    steps:
+      - team: Planning
+        till_done:
+          - "Component breakdown and wireframe complete"
+      - team: Frontend
+        till_done:
+          - "All components implemented"
+          - "Responsive and accessible"
+      - deterministic:
+          command: "bun tsc --noEmit 2>&1 || echo 'Type check skipped'"
+          label: "Type check"
+          on_failure: loop
+          max_retries: 1
+      - team: QA
+        till_done:
+          - "Component tests written"
+          - "All tests pass"

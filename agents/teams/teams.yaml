@@ -170,3 +170,130 @@ teams:
         consult-when: >
           Maintainability, naming, structure, duplication, dead code,
           test quality, readability.
+
+  # --- Specialized Coding Teams (Issue #139) ---
+  # Use these for full-stack feature development where each domain
+  # needs its own lead managing focused workers.
+
+  - team-name: Frontend
+    team-color: "#7c3aed"
+    consult-when: >
+      React/Next.js components, client-side state, forms, validation,
+      styling, responsive design, accessibility, UI performance.
+    lead:
+      name: Frontend Lead
+      path: prompts/roles/leads/frontend.md
+      model: quality
+      color: "#7c3aed"
+    members:
+      - name: UI Builder
+        path: agents/personas/builder.md
+        model: main
+        color: "#8b5cf6"
+        consult-when: >
+          React components, hooks, forms, client-side routing,
+          component composition, state management.
+      - name: Styling Worker
+        path: agents/personas/builder.md
+        model: fast
+        color: "#a78bfa"
+        consult-when: >
+          CSS/Tailwind, responsive layouts, animations, design system
+          tokens, dark mode, component variants.
+
+  - team-name: Backend
+    team-color: "#059669"
+    consult-when: >
+      API routes, database schema, migrations, business logic,
+      authentication, authorization, data validation, server-side.
+    lead:
+      name: Backend Lead
+      path: prompts/roles/leads/backend.md
+      model: quality
+      color: "#059669"
+    members:
+      - name: API Builder
+        path: agents/personas/builder.md
+        model: main
+        color: "#10b981"
+        consult-when: >
+          REST/GraphQL routes, middleware, request validation,
+          response formatting, error handling, rate limiting.
+      - name: DB Worker
+        path: agents/personas/builder.md
+        model: main
+        color: "#34d399"
+        consult-when: >
+          Schema definitions, migrations, query optimization,
+          indexes, data modeling, seed data.
+
+  - team-name: Systems
+    team-color: "#d97706"
+    consult-when: >
+      Infrastructure, Docker, CI/CD, networking, deployment,
+      monitoring, logging, secrets management, LXC/VM setup.
+    lead:
+      name: Systems Lead
+      path: prompts/roles/leads/systems.md
+      model: quality
+      color: "#d97706"
+    members:
+      - name: Infra Worker
+        path: agents/personas/builder.md
+        model: main
+        color: "#f59e0b"
+        consult-when: >
+          Dockerfiles, docker-compose, Ansible playbooks, systemd units,
+          Caddy/Nginx configs, LXC templates, networking.
+      - name: CI/CD Worker
+        path: agents/personas/builder.md
+        model: fast
+        color: "#fbbf24"
+        consult-when: >
+          GitHub Actions workflows, build scripts, test pipelines,
+          deployment automation, artifact management.
+
+  - team-name: Security Review
+    team-color: "#dc2626"
+    consult-when: >
+      Security audit, vulnerability assessment, input validation review,
+      authentication flow review, OWASP compliance, dependency scanning.
+    lead:
+      name: Security Lead
+      path: prompts/roles/leads/security.md
+      model: quality
+      color: "#dc2626"
+    members:
+      - name: Security Auditor
+        path: agents/personas/red-team.md
+        model: quality
+        color: "#ef4444"
+        consult-when: >
+          OWASP Top 10, injection vectors, authentication bypass,
+          CORS misconfiguration, secrets exposure, SSRF/CSRF.
+
+  - team-name: QA
+    team-color: "#2563eb"
+    consult-when: >
+      Test strategy, unit tests, integration tests, E2E tests,
+      edge case identification, test data, CI test pipeline.
+    lead:
+      name: QA Lead
+      path: prompts/roles/leads/qa.md
+      model: quality
+      color: "#2563eb"
+    members:
+      - name: Test Writer
+        path: agents/personas/builder.md
+        model: main
+        color: "#3b82f6"
+        consult-when: >
+          Unit tests, integration tests, test fixtures, mocks,
+          assertion patterns, coverage targets.
+      - name: E2E Worker
+        path: agents/personas/builder.md
+        model: main
+        color: "#60a5fa"
+        consult-when: >
+          End-to-end test scenarios, browser automation, API testing,
+          load testing, regression suites.
