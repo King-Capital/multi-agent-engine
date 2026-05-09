@@ -1,16 +1,162 @@
 #!/usr/bin/env bash
-# mae -- Multi-Agent Engine CLI wrapper
-# Usage: mae task "Add input validation"
-#        mae chain full-stack-specialized "Build the login page"
-#        mae run review "git diff HEAD~1"
-#        mae session list
-#        mae info
-#        mae version
+set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ENGINE_DIR="$SCRIPT_DIR/../engine"
+# mae -- Multi-Agent Engine CLI
+# Install: curl -fsSL https://raw.githubusercontent.com/King-Capital/multi-agent-engine/main/scripts/mae | bash -s install
+# Or:      mae install
 
-# Default dashboard URL (override with MAE_DASHBOARD_URL env)
-export MAE_DASHBOARD_URL="${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}"
+MAE_VERSION="0.2.34"
+MAE_REPO="King-Capital/multi-agent-engine"
+MAE_GIT_URL="git@github.com:${MAE_REPO}.git"
+MAE_DASHBOARD_URL="${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}"
+MAE_INSTALL_DIR="${MAE_HOME:-$HOME/.mae}"
+MAE_BIN="/usr/local/bin/mae"
 
-exec bun run "$ENGINE_DIR/cli.ts" "$@"
+# ── Locate MAE root ──────────────────────────────────────────────────
+find_mae_root() {
+  # 1. MAE_ROOT env var
+  if [[ -n "${MAE_ROOT:-}" ]] && [[ -f "$MAE_ROOT/engine/cli.ts" ]]; then
+    echo "$MAE_ROOT"; return
+  fi
+  # 2. Installed location
+  if [[ -f "$MAE_INSTALL_DIR/engine/cli.ts" ]]; then
+    echo "$MAE_INSTALL_DIR"; return
+  fi
+  # 3. Walk up from script location (dev checkout)
+  local dir="$(cd "$(dirname "$0")" && pwd)"
+  while [[ "$dir" != "/" ]]; do
+    if [[ -f "$dir/engine/cli.ts" ]] && [[ -f "$dir/VERSION" ]]; then
+      echo "$dir"; return
+    fi
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
+# ── Check dependencies ───────────────────────────────────────────────
+check_deps() {
+  local missing=()
+  command -v bun >/dev/null 2>&1 || missing+=("bun")
+  command -v git >/dev/null 2>&1 || missing+=("git")
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "Missing dependencies: ${missing[*]}"
+    if [[ " ${missing[*]} " == *" bun "* ]]; then
+      echo "Install bun: curl -fsSL https://bun.sh/install | bash"
+    fi
+    exit 1
+  fi
+}
+
+# ── Install ──────────────────────────────────────────────────────────
+do_install() {
+  check_deps
+  echo "Installing MAE to $MAE_INSTALL_DIR..."
+
+  if [[ -d "$MAE_INSTALL_DIR/.git" ]]; then
+    echo "MAE already installed at $MAE_INSTALL_DIR"
+    echo "Run 'mae update' to pull latest."
+    exit 0
+  fi
+
+  # Clone
+  echo "Cloning $MAE_REPO..."
+  git clone "$MAE_GIT_URL" "$MAE_INSTALL_DIR" 2>&1
+
+  # Install engine dependencies
+  echo "Installing engine dependencies..."
+  cd "$MAE_INSTALL_DIR/engine" && bun install
+
+  # Copy this script to /usr/local/bin
+  echo "Installing mae CLI to $MAE_BIN..."
+  cp "$MAE_INSTALL_DIR/scripts/mae" "$MAE_BIN" 2>/dev/null || {
+    echo "Can't write to $MAE_BIN -- trying with sudo..."
+    sudo cp "$MAE_INSTALL_DIR/scripts/mae" "$MAE_BIN"
+  }
+  chmod +x "$MAE_BIN"
+
+  echo ""
+  echo "✓ MAE installed successfully"
+  echo "  Root:      $MAE_INSTALL_DIR"
+  echo "  CLI:       $MAE_BIN"
+  echo "  Dashboard: $MAE_DASHBOARD_URL"
+  echo ""
+  echo "Try: mae info"
+}
+
+# ── Update ───────────────────────────────────────────────────────────
+do_update() {
+  local root
+  root="$(find_mae_root)" || { echo "MAE not found. Run 'mae install' first."; exit 1; }
+
+  echo "Updating MAE at $root..."
+
+  cd "$root"
+  local before=$(git rev-parse HEAD)
+  git pull --ff-only 2>&1
+  local after=$(git rev-parse HEAD)
+
+  if [[ "$before" == "$after" ]]; then
+    echo "Already up to date."
+  else
+    echo "Updated: $(git log --oneline ${before}..${after} | wc -l | tr -d ' ') new commits"
+    git log --oneline "${before}..${after}"
+  fi
+
+  # Reinstall engine deps in case they changed
+  echo "Updating engine dependencies..."
+  cd "$root/engine" && bun install
+
+  # Update the CLI script itself
+  if [[ -f "$MAE_BIN" ]]; then
+    cp "$root/scripts/mae" "$MAE_BIN" 2>/dev/null || sudo cp "$root/scripts/mae" "$MAE_BIN"
+    chmod +x "$MAE_BIN"
+    echo "CLI updated."
+  fi
+
+  echo ""
+  echo "✓ MAE updated"
+  local ver=$(cat "$root/VERSION" 2>/dev/null || echo "unknown")
+  echo "  Version: $ver"
+}
+
+# ── Uninstall ────────────────────────────────────────────────────────
+do_uninstall() {
+  echo "Uninstalling MAE..."
+  if [[ -f "$MAE_BIN" ]]; then
+    rm "$MAE_BIN" 2>/dev/null || sudo rm "$MAE_BIN"
+    echo "Removed $MAE_BIN"
+  fi
+  if [[ -d "$MAE_INSTALL_DIR" ]]; then
+    read -p "Remove $MAE_INSTALL_DIR? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+      rm -rf "$MAE_INSTALL_DIR"
+      echo "Removed $MAE_INSTALL_DIR"
+    fi
+  fi
+  echo "✓ MAE uninstalled"
+}
+
+# ── Main dispatch ────────────────────────────────────────────────────
+case "${1:-}" in
+  install)
+    do_install
+    ;;
+  update)
+    do_update
+    ;;
+  uninstall)
+    do_uninstall
+    ;;
+  *)
+    # All other commands: forward to the bun CLI
+    root="$(find_mae_root)" || {
+      echo "MAE not found. Run: mae install"
+      echo "Or set MAE_ROOT to your checkout."
+      exit 1
+    }
+    export MAE_ROOT="$root"
+    export MAE_DASHBOARD_URL
+    exec bun run "$root/engine/cli.ts" "$@"
+    ;;
+esac
