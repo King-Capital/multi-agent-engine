@@ -3,7 +3,7 @@ import {
   loadExpertise,
   loadTeams,
   buildSystemPrompt,
-  resolveModel,
+  resolveModelForRole,
 } from "./config";
 import { delegateWithHealing } from "./self-healing";
 import { summarizeOutput } from "./output-parsing";
@@ -49,8 +49,10 @@ export async function retryWorker(
 
   console.log(`[orchestrator] Retrying ${member.name} (attempt ${attempt}) with reworked prompt`);
 
+  const retryResolved = resolveModelForRole("worker", member.model);
+
   await emitter.agentSpawn(session.id, workerId, leadId, `${member.name} (retry ${attempt})`, "worker",
-    resolveModel(member.model), teamConfig["team-name"], member.color ?? teamConfig["team-color"]);
+    retryResolved.model, teamConfig["team-name"], member.color ?? teamConfig["team-color"]);
 
   const retryUserPrompt = [
     `RETRY (attempt ${attempt}): Your previous output was reviewed and needs rework.`,
@@ -68,8 +70,8 @@ export async function retryWorker(
     persona: workerPersona,
     systemPrompt: buildSystemPrompt(workerPersona),
     userPrompt: retryUserPrompt,
-    model: resolveModel(member.model),
-    thinking: "medium" as const,
+    model: retryResolved.model,
+    thinking: retryResolved.thinking,
     tools: workerPersona.tools,
     domain: workerPersona.domain,
     workingDir: session.workingDir,
@@ -188,9 +190,11 @@ export async function spawnSenior(
     `Complete the task using your combined domain expertise.`,
   ].join("\n");
 
+  const srResolved = resolveModelForRole("sr");
+
   await emitter.agentSpawn(session.id, srId, leadId,
     `Sr. (${domainNames.join("+")})`, "sr",
-    resolveModel("quality"), teamConfig["team-name"], "#ffaa00");
+    srResolved.model, teamConfig["team-name"], "#ffaa00");
 
   await emitter.message(session.id, srId, teamConfig.lead.name, "user",
     `📋 **Sr. assignment (${domainNames.join("+")})**:\n\n${srPrompt.slice(0, 3000)}`);
@@ -199,8 +203,8 @@ export async function spawnSenior(
     persona: { ...memberPersonas[0]!, name: `Sr. (${domainNames.join("+")})`, body: mergedBody },
     systemPrompt: srSystemPrompt,
     userPrompt: srPrompt,
-    model: resolveModel("quality"),
-    thinking: "high" as const,
+    model: srResolved.model,
+    thinking: srResolved.thinking,
     tools: mergedTools,
     domain: { read: mergedRead, write: mergedWrite, update: mergedUpdate },
     workingDir: session.workingDir,
@@ -303,12 +307,14 @@ export async function leadReviewWorkers(
     ? buildSystemPrompt(leadPersona) + "\n\n" + step.system_prompt_append
     : buildSystemPrompt(leadPersona);
 
+  const reviewResolved = resolveModelForRole("lead", teamConfig.lead.model);
+
   const reviewOpts: DelegateOptions = {
     persona: leadPersona,
     systemPrompt: reviewSystemPrompt,
     userPrompt: reviewPrompt,
-    model: resolveModel(teamConfig.lead.model),
-    thinking: "high" as const,
+    model: reviewResolved.model,
+    thinking: reviewResolved.thinking,
     tools: ["read", "grep", "glob", "find"],
     domain: leadPersona.domain,
     workingDir: session.workingDir,

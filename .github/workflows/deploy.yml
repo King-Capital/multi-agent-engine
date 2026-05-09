@@ -1,21 +1,20 @@
-name: Deploy MAE
+name: Deploy Engine
 
 on:
   push:
     branches: [main]
     paths:
       - 'engine/**'
-      - 'dashboard/**'
       - 'agents/**'
       - 'configs/**'
-      - 'deploy/**'
+      - 'prompts/**'
       - 'library.yaml'
 
 permissions:
   contents: read
 
 concurrency:
-  group: mae-deploy
+  group: mae-deploy-engine
   cancel-in-progress: false
 
 jobs:
@@ -38,18 +37,6 @@ jobs:
         working-directory: engine
         run: bun test
 
-      - name: Generate templ
-        working-directory: dashboard
-        run: templ generate ./templates/
-
-      - name: Dashboard build check
-        working-directory: dashboard
-        run: go build -o mae-dashboard .
-
-      - name: Dashboard vet
-        working-directory: dashboard
-        run: go vet ./...
-
   deploy:
     needs: test
     runs-on: [self-hosted, mae]
@@ -59,47 +46,18 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Sync to /opt/mae
+      - name: Sync engine + configs
         run: |
-          rsync -a --delete \
-            --exclude='node_modules' \
-            --exclude='.git' \
-            --exclude='dashboard/mae-dashboard' \
-            --exclude='dashboard/data' \
-            ./ /opt/mae/
+          rsync -a --delete engine/ /opt/mae/engine/
+          rsync -a --delete agents/ /opt/mae/agents/
+          rsync -a --delete configs/ /opt/mae/configs/
+          rsync -a prompts/ /opt/mae/prompts/ 2>/dev/null || true
+          cp -f library.yaml /opt/mae/library.yaml 2>/dev/null || true
 
       - name: Install engine dependencies
         run: cd /opt/mae/engine && bun install
 
-      - name: Run migrations
-        run: |
-          for f in /opt/mae/dashboard/migrations/*.sql; do
-            PGPASSWORD=mae psql -h localhost -U mae -d mae -f "$f" 2>/dev/null || true
-          done
-
-      - name: Build dashboard
-        run: cd /opt/mae/dashboard && templ generate ./templates/ && go build -o mae-dashboard .
-
-      - name: Set ownership
-        run: chown -R mae:mae /opt/mae
-
-      - name: Restart dashboard
-        run: |
-          pkill mae-dashboard || true
-          sleep 3
-          # systemd Restart=always will restart the service
-          # Verify it came back up
-          for i in 1 2 3 4 5; do
-            if curl -sf http://localhost:8400/api/health > /dev/null 2>&1; then
-              echo "Dashboard restarted successfully"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "Dashboard failed to restart"
-          exit 1
-
       - name: Health check
         run: |
           curl -sf http://localhost:8400/api/health > /dev/null
-          echo "Dashboard healthy"
+          echo "Engine deployed, dashboard healthy"

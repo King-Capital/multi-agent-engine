@@ -3,7 +3,7 @@ import {
   loadTeams,
   loadPersona,
   buildSystemPrompt,
-  resolveModel,
+  resolveModelForRole,
   getChain,
   loadPrompt,
 } from "./config";
@@ -160,8 +160,9 @@ export class Orchestrator {
 
     const teams = loadTeams();
     const orchPersona = loadPersona(teams.orchestrator.path);
+    const orchResolved = resolveModelForRole("orchestrator", teams.orchestrator.model);
     await this.emitter.agentSpawn(sessionId, "orch-1", "", orchPersona.name, "orchestrator",
-      resolveModel(teams.orchestrator.model), "Orchestration", teams.orchestrator.color ?? "#36f9f6");
+      orchResolved.model, "Orchestration", teams.orchestrator.color ?? "#36f9f6");
     await this.emitter.pgCreateAgent({ sessionId, agentId: "orch-1", role: "orchestrator", persona: orchPersona.name });
 
     console.log(`\n[orchestrator] Session: ${sessionName}`);
@@ -339,8 +340,10 @@ export class Orchestrator {
 
     trackActivity(this.agentActivity, agentId, agentConfig.name, "worker");
 
+    const agentResolved = resolveModelForRole("worker", agentConfig.model);
+
     await this.emitter.agentSpawn(session.id, agentId, parentId, agentConfig.name, "worker",
-      resolveModel(agentConfig.model), teamName, teamColor);
+      agentResolved.model, teamName, teamColor);
 
     const prompt = [
       `Task: ${task}`,
@@ -351,8 +354,8 @@ export class Orchestrator {
       persona,
       systemPrompt: buildSystemPrompt(persona),
       userPrompt: prompt,
-      model: resolveModel(agentConfig.model),
-      thinking: "medium" as const,
+      model: agentResolved.model,
+      thinking: agentResolved.thinking,
       tools: persona.tools,
       domain: persona.domain,
       workingDir: session.workingDir,

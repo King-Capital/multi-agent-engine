@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -28,7 +30,48 @@ type contextKey string
 
 const userContextKey contextKey = "user"
 
+func initLogger() {
+	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+	log.SetOutput(&slogWriter{logger: logger})
+}
+
+type slogWriter struct {
+	logger *slog.Logger
+}
+
+func (w *slogWriter) Write(p []byte) (int, error) {
+	w.logger.Info(strings.TrimSpace(string(p)))
+	return len(p), nil
+}
+
+func structuredLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		next.ServeHTTP(ww, r)
+
+		if strings.HasSuffix(r.URL.Path, "/stream") {
+			return
+		}
+
+		slog.Info("http",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", ww.Status(),
+			"bytes", ww.BytesWritten(),
+			"duration_ms", fmt.Sprintf("%.1f", float64(time.Since(start).Microseconds())/1000),
+			"remote", r.RemoteAddr,
+		)
+	})
+}
+
 func main() {
+	initLogger()
+
 	dataDir := os.Getenv("DASHBOARD_DATA_DIR")
 	if dataDir == "" {
 		dataDir = filepath.Join(".", "data", "sessions")
@@ -236,7 +279,7 @@ func main() {
 	}
 
 	r := chi.NewRouter()
-	r.Use(middleware.Logger)
+	r.Use(structuredLogger)
 	r.Use(middleware.Recoverer)
 	r.Use(corsMiddleware)
 	r.Use(authMiddleware)
@@ -251,7 +294,7 @@ func main() {
 	// Dashboard Next SPA (React) -- serves from dashboard-next-dist/
 	spaDir := filepath.Join(filepath.Dir(os.Args[0]), "..", "dashboard-next-dist")
 	if info, err := os.Stat(spaDir); err == nil && info.IsDir() {
-		log.Printf("Serving SPA from %s", spaDir)
+		slog.Info("spa_enabled", "dir", spaDir)
 		spaFS := http.FileServer(http.Dir(spaDir))
 		// Serve SPA assets (hashed filenames)
 		r.Handle("/assets/*", spaFS)
@@ -264,6 +307,8 @@ func main() {
 			}
 			http.ServeFile(w, r, filepath.Join(spaDir, "index.html"))
 		})
+	} else {
+		slog.Warn("spa_disabled", "dir", spaDir, "reason", "directory not found — UI routes will return 404. Run: cd dashboard-next && bun run build && cp -r dist ../dashboard-next-dist")
 	}
 
 	// Prometheus metrics (public, no auth needed - handled by authMiddleware allowing GET on non-API paths)
@@ -337,7 +382,7 @@ func main() {
 		srv.Shutdown(ctx)
 	}()
 
-	log.Printf("Dashboard running at http://localhost:%s", port)
+	slog.Info("dashboard_start", "port", port, "addr", "http://localhost:"+port)
 	log.Fatal(srv.ListenAndServe())
 }
 

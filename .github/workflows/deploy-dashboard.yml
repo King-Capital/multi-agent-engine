@@ -1,0 +1,81 @@
+name: Deploy Dashboard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'dashboard/**'
+      - 'dashboard-next/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mae-deploy-dashboard
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: [self-hosted, mae]
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Build React SPA
+        working-directory: dashboard-next
+        run: |
+          bun install
+          ./node_modules/.bin/vite build
+
+      - name: Generate templ
+        working-directory: dashboard
+        run: templ generate ./templates/
+
+      - name: Build Go binary
+        working-directory: dashboard
+        run: go build -o mae-dashboard .
+
+      - name: Deploy SPA
+        run: |
+          rm -rf /opt/mae/dashboard-next-dist
+          cp -r dashboard-next/dist /opt/mae/dashboard-next-dist
+
+      - name: Deploy Go binary
+        run: |
+          cp dashboard/mae-dashboard /opt/mae/dashboard/mae-dashboard
+
+      - name: Deploy dashboard source
+        run: |
+          rsync -a --delete \
+            --exclude='mae-dashboard' \
+            --exclude='data' \
+            dashboard/ /opt/mae/dashboard/
+
+      - name: Run migrations
+        run: |
+          for f in /opt/mae/dashboard/migrations/*.sql; do
+            PGPASSWORD=mae psql -h localhost -U mae -d mae -f "$f" 2>/dev/null || true
+          done
+
+      - name: Restart dashboard
+        run: |
+          systemctl restart mae-dashboard
+          for i in 1 2 3 4 5; do
+            if curl -sf http://localhost:8400/api/health > /dev/null 2>&1; then
+              echo "Dashboard restarted successfully"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Dashboard failed to restart"
+          exit 1
+
+      - name: Verify SPA serving
+        run: |
+          status=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8400/)
+          if [ "$status" != "200" ]; then
+            echo "SPA not serving (got $status). Check dashboard-next-dist/ exists."
+            exit 1
+          fi
+          echo "SPA serving OK"

@@ -8,6 +8,9 @@ import type {
   PromptConfig,
   Chain,
   TeamConfig,
+  AgentRole,
+  ThinkingLevel,
+  ModelRoutingConfig,
 } from "./types";
 
 const BASE_DIR = process.env.MAE_ROOT ?? join(import.meta.dir, "..");
@@ -137,12 +140,8 @@ export function resolveToolGroup(groupOrTools: string | string[]): string[] {
   return group?.tools ?? [groupOrTools];
 }
 
-export function loadModelRouting(): {
-  budgets?: { max_per_session_usd: number; warn_at_usd: number; max_per_agent_usd: number; max_total_tokens: number };
-  aliases?: Record<string, string>;
-  models?: Record<string, { primary: string }>;
-} {
-  return cachedRead("configs/model-routing.yaml");
+export function loadModelRouting(): ModelRoutingConfig {
+  return cachedRead<ModelRoutingConfig>("configs/model-routing.yaml");
 }
 
 export function resolveModel(alias: string): string {
@@ -153,6 +152,30 @@ export function resolveModel(alias: string): string {
   if (config.aliases?.[alias]) return config.aliases[alias];
   if (config.models?.[alias]) return config.models[alias].primary;
   return alias;
+}
+
+export function resolveModelForRole(
+  role: AgentRole,
+  preferredAlias?: string,
+): { model: string; thinking: ThinkingLevel } {
+  const config = cachedRead<ModelRoutingConfig>("configs/model-routing.yaml");
+  const roleDefault = config.roleDefaults?.[role];
+
+  if (!roleDefault) {
+    return { model: resolveModel(preferredAlias ?? "main"), thinking: "medium" };
+  }
+
+  const tier = config.tiers?.[roleDefault.tier];
+  if (!tier) {
+    return { model: resolveModel(preferredAlias ?? "main"), thinking: roleDefault.thinking };
+  }
+
+  if (preferredAlias) {
+    const resolved = resolveModel(preferredAlias);
+    return { model: resolved, thinking: roleDefault.thinking };
+  }
+
+  return { model: tier.default, thinking: roleDefault.thinking };
 }
 
 // --- Cross-Model Pair Enforcement ---
@@ -206,15 +229,13 @@ export function isDifferentModelFamily(modelA: string, modelB: string): boolean 
   return familyA !== familyB;
 }
 
-// Model fallback chain -- if primary fails, try next
 export function getModelFallbacks(model: string): string[] {
   const routing = loadModelRouting();
   const fallbacks: string[] = [];
-  
-  // Check each tier for the model and return alternatives
-  for (const [, tier] of Object.entries((routing as any).tiers ?? {})) {
-    const options = (tier as { options?: { model: string }[] }).options ?? [];
-    const hasModel = options.some(o => o.model === model);
+
+  for (const [, tier] of Object.entries(routing.tiers ?? {})) {
+    const options = tier.options ?? [];
+    const hasModel = options.some((o) => o.model === model);
     if (hasModel) {
       for (const opt of options) {
         if (opt.model !== model) {
@@ -224,6 +245,6 @@ export function getModelFallbacks(model: string): string[] {
       break;
     }
   }
-  
+
   return fallbacks;
 }
