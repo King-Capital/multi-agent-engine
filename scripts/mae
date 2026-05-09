@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# mae -- Multi-Agent Engine CLI
+# Install: curl -fsSL https://raw.githubusercontent.com/King-Capital/multi-agent-engine/main/scripts/mae | bash -s install
+# Or:      mae install
+
+MAE_VERSION="0.2.34"
+MAE_REPO="King-Capital/multi-agent-engine"
+MAE_GIT_URL="git@github.com:${MAE_REPO}.git"
+MAE_DASHBOARD_URL="${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}"
+MAE_INSTALL_DIR="${MAE_HOME:-$HOME/.mae}"
+MAE_BIN="/usr/local/bin/mae"
+
+# ── Locate MAE root ──────────────────────────────────────────────────
+find_mae_root() {
+  # 1. MAE_ROOT env var
+  if [[ -n "${MAE_ROOT:-}" ]] && [[ -f "$MAE_ROOT/engine/cli.ts" ]]; then
+    echo "$MAE_ROOT"; return
+  fi
+  # 2. Installed location
+  if [[ -f "$MAE_INSTALL_DIR/engine/cli.ts" ]]; then
+    echo "$MAE_INSTALL_DIR"; return
+  fi
+  # 3. Walk up from script location (dev checkout)
+  local dir="$(cd "$(dirname "$0")" && pwd)"
+  while [[ "$dir" != "/" ]]; do
+    if [[ -f "$dir/engine/cli.ts" ]] && [[ -f "$dir/VERSION" ]]; then
+      echo "$dir"; return
+    fi
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
+# ── Check dependencies ───────────────────────────────────────────────
+check_deps() {
+  local missing=()
+  command -v bun >/dev/null 2>&1 || missing+=("bun")
+  command -v git >/dev/null 2>&1 || missing+=("git")
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "Missing dependencies: ${missing[*]}"
+    if [[ " ${missing[*]} " == *" bun "* ]]; then
+      echo "Install bun: curl -fsSL https://bun.sh/install | bash"
+    fi
+    exit 1
+  fi
+}
+
+# ── Install ──────────────────────────────────────────────────────────
+do_install() {
+  check_deps
+  echo "Installing MAE to $MAE_INSTALL_DIR..."
+
+  if [[ -d "$MAE_INSTALL_DIR/.git" ]]; then
+    echo "MAE already installed at $MAE_INSTALL_DIR"
+    echo "Run 'mae update' to pull latest."
+    exit 0
+  fi
+
+  # Clone
+  echo "Cloning $MAE_REPO..."
+  git clone "$MAE_GIT_URL" "$MAE_INSTALL_DIR" 2>&1
+
+  # Install engine dependencies
+  echo "Installing engine dependencies..."
+  cd "$MAE_INSTALL_DIR/engine" && bun install
+
+  # Copy this script to /usr/local/bin
+  echo "Installing mae CLI to $MAE_BIN..."
+  cp "$MAE_INSTALL_DIR/scripts/mae" "$MAE_BIN" 2>/dev/null || {
+    echo "Can't write to $MAE_BIN -- trying with sudo..."
+    sudo cp "$MAE_INSTALL_DIR/scripts/mae" "$MAE_BIN"
+  }
+  chmod +x "$MAE_BIN"
+
+  echo ""
+  echo "✓ MAE installed successfully"
+  echo "  Root:      $MAE_INSTALL_DIR"
+  echo "  CLI:       $MAE_BIN"
+  echo "  Dashboard: $MAE_DASHBOARD_URL"
+  echo ""
+  echo "Try: mae info"
+}
+
+# ── Update ───────────────────────────────────────────────────────────
+do_update() {
+  local root
+  root="$(find_mae_root)" || { echo "MAE not found. Run 'mae install' first."; exit 1; }
+
+  echo "Updating MAE at $root..."
+
+  cd "$root"
+  local before=$(git rev-parse HEAD)
+  git pull --ff-only 2>&1
+  local after=$(git rev-parse HEAD)
+
+  if [[ "$before" == "$after" ]]; then
+    echo "Already up to date."
+  else
+    echo "Updated: $(git log --oneline ${before}..${after} | wc -l | tr -d ' ') new commits"
+    git log --oneline "${before}..${after}"
+  fi
+
+  # Reinstall engine deps in case they changed
+  echo "Updating engine dependencies..."
+  cd "$root/engine" && bun install
+
+  # Update the CLI script itself
+  if [[ -f "$MAE_BIN" ]]; then
+    cp "$root/scripts/mae" "$MAE_BIN" 2>/dev/null || sudo cp "$root/scripts/mae" "$MAE_BIN"
+    chmod +x "$MAE_BIN"
+    echo "CLI updated."
+  fi
+
+  echo ""
+  echo "✓ MAE updated"
+  local ver=$(cat "$root/VERSION" 2>/dev/null || echo "unknown")
+  echo "  Version: $ver"
+}
+
+# ── Uninstall ────────────────────────────────────────────────────────
+do_uninstall() {
+  echo "Uninstalling MAE..."
+  if [[ -f "$MAE_BIN" ]]; then
+    rm "$MAE_BIN" 2>/dev/null || sudo rm "$MAE_BIN"
+    echo "Removed $MAE_BIN"
+  fi
+  if [[ -d "$MAE_INSTALL_DIR" ]]; then
+    read -p "Remove $MAE_INSTALL_DIR? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+      rm -rf "$MAE_INSTALL_DIR"
+      echo "Removed $MAE_INSTALL_DIR"
+    fi
+  fi
+  echo "✓ MAE uninstalled"
+}
+
+# ── Help ─────────────────────────────────────────────────────────────
+do_help() {
+  cat <<HELP
+mae -- Multi-Agent Engine CLI v${MAE_VERSION}
+
+Lifecycle:
+  mae install              Clone repo, install deps, set up CLI
+  mae update               Pull latest, reinstall deps, update CLI
+  mae uninstall            Remove CLI and optionally the repo
+
+Run swarms:
+  mae task <description>   Run plan-build-review on a task (default chain)
+  mae chain <name> <task>  Run a specific chain
+  mae run <prompt> [args]  Run a reusable prompt workflow
+
+Chains:
+  plan-build-review        Plan → build → validate (default)
+  full-stack-specialized   Frontend + Backend + Systems + QA + Security leads
+  backend-only             Backend + QA + Security
+  frontend-only            Frontend + QA
+  review-only              Red + Blue team code review
+  build-verify             Builder-verifier loop with escalation
+
+Sessions:
+  mae session list         List all sessions
+  mae session close <id>   Close a session (--status done|error)
+
+Info:
+  mae info                 System overview (chains, adapters, routing, health)
+  mae version              Version and connection info
+  mae adapters             List available adapters
+  mae discover <url>       Discover a remote A2A agent
+
+Agents:
+  mae new-agent <name> <role> <team>   Scaffold a new agent persona
+
+Options:
+  --adapter <name>         Use specific adapter (pi, claude-code, codex, a2a, echo)
+  --dashboard <url>        Dashboard URL (default: \$MAE_DASHBOARD_URL or http://10.71.20.72:8400)
+  --dry-run                Use echo adapter (no real agents, test the flow)
+  --cwd <path>             Working directory for agents
+  --a2a-url <url>          Remote A2A agent endpoint
+  --a2a-token <token>      Bearer token for A2A auth
+
+Examples:
+  mae task "Add input validation to the login form"
+  mae chain full-stack-specialized "Build user settings page"
+  mae run review "git diff HEAD~3"
+  mae task "Fix the auth bug" --adapter claude-code
+  mae task "review this PR" --adapter a2a --a2a-url http://10.71.20.71:41271
+  mae info
+  mae session list
+
+Environment:
+  MAE_DASHBOARD_URL   Dashboard API (default: http://10.71.20.72:8400)
+  MAE_ROOT            Override repo location
+  MAE_HOME            Install directory (default: ~/.mae)
+  MAE_API_TOKEN       API auth token
+  MAE_A2A_URL         Default A2A endpoint
+HELP
+}
+
+# ── Main dispatch ────────────────────────────────────────────────────
+case "${1:-}" in
+  -h|--help|help)
+    do_help
+    exit 0
+    ;;
+  install)
+    do_install
+    ;;
+  update)
+    do_update
+    ;;
+  uninstall)
+    do_uninstall
+    ;;
+  *)
+    # All other commands: forward to the bun CLI
+    root="$(find_mae_root)" || {
+      echo "MAE not found. Run: mae install"
+      echo "Or set MAE_ROOT to your checkout."
+      exit 1
+    }
+    export MAE_ROOT="$root"
+    export MAE_DASHBOARD_URL
+    exec bun run "$root/engine/cli.ts" "$@"
+    ;;
+esac

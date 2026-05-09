@@ -350,10 +350,16 @@ func HydrateRecentSessions(ctx context.Context, limit int) ([]DBSession, map[str
 
 // MarkStaleSessions marks active sessions with no recent events as error.
 func MarkStaleSessions(ctx context.Context, maxIdleMinutes int) (int, error) {
+	// Mark active sessions as error if no events received within the idle window.
+	// Uses COALESCE: last event time → session updated_at → session created_at.
 	result, err := db.ExecContext(ctx, `
-		UPDATE sessions SET status = 'error', updated_at = NOW()
-		WHERE status = 'active'
-		  AND updated_at < NOW() - make_interval(mins := $1)
+		UPDATE sessions s SET status = 'error', updated_at = NOW()
+		WHERE s.status = 'active'
+		  AND COALESCE(
+			(SELECT MAX(e.created_at) FROM events e WHERE e.session_id = s.id),
+			s.updated_at,
+			s.created_at
+		  ) < NOW() - make_interval(mins := $1)
 	`, maxIdleMinutes)
 	if err != nil {
 		return 0, err
