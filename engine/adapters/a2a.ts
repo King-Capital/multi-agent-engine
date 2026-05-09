@@ -97,7 +97,7 @@ interface JsonRpcResponse {
 // --- Configuration ---
 
 export interface A2AEndpoint {
-  /** Base URL of the remote A2A agent (e.g., "http://10.71.20.71:41271") */
+  /** Base URL of the remote A2A agent (e.g., "http://localhost:41271") */
   url: string;
   /** Optional bearer token for auth */
   token?: string;

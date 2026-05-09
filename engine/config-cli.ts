@@ -112,8 +112,12 @@ export function configImport(fileOrStdin?: string): void {
 
 export async function configDiscover(): Promise<void> {
   const config = loadModelRouting();
-  const litellmUrl = process.env.LITELLM_URL ?? "http://10.71.20.72:4000";
-  const apiKey = process.env.LITELLM_API_KEY ?? process.env.MAE_LITELLM_KEY ?? "";
+  const gatewayUrl = process.env.MAE_LLM_GATEWAY_URL ?? process.env.LITELLM_URL;
+  if (!gatewayUrl) {
+    console.error("Error: MAE_LLM_GATEWAY_URL not set. Configure in ~/.mae/config");
+    return;
+  }
+  const apiKey = process.env.MAE_LLM_GATEWAY_KEY ?? process.env.LITELLM_API_KEY ?? "";
 
   const models = new Set<string>();
   for (const tier of Object.values(config.tiers ?? {})) {
@@ -123,12 +127,12 @@ export async function configDiscover(): Promise<void> {
     }
   }
 
-  console.log(`\nProbing ${models.size} models via ${litellmUrl}...\n`);
+  console.log(`\nProbing ${models.size} models via ${gatewayUrl}...\n`);
 
   for (const model of models) {
     const start = Date.now();
     try {
-      const resp = await fetch(`${litellmUrl}/v1/chat/completions`, {
+      const resp = await fetch(`${gatewayUrl}/v1/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

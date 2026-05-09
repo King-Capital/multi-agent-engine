@@ -310,13 +310,20 @@ func handleAIAssist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	litellmURL := os.Getenv("LITELLM_URL")
-	if litellmURL == "" {
-		litellmURL = "http://10.71.1.33:4000"
+	llmGatewayURL := os.Getenv("MAE_LLM_GATEWAY_URL")
+	if llmGatewayURL == "" {
+		llmGatewayURL = os.Getenv("LITELLM_URL")
 	}
-	litellmKey := os.Getenv("LITELLM_KEY")
-	if litellmKey == "" {
-		litellmKey = os.Getenv("ANTHROPIC_API_KEY")
+	if llmGatewayURL == "" {
+		http.Error(w, `{"error":"MAE_LLM_GATEWAY_URL not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+	llmGatewayKey := os.Getenv("MAE_LLM_GATEWAY_KEY")
+	if llmGatewayKey == "" {
+		llmGatewayKey = os.Getenv("LITELLM_KEY")
+	}
+	if llmGatewayKey == "" {
+		llmGatewayKey = os.Getenv("ANTHROPIC_API_KEY")
 	}
 
 	aiPrompt := fmt.Sprintf(`You are an expert at building multi-agent system personas.
@@ -344,9 +351,9 @@ Return ONLY the improved system prompt markdown, no explanation.`, slug, strings
 		"max_tokens": 2000,
 	})
 
-	httpReq, _ := http.NewRequest("POST", litellmURL+"/v1/chat/completions", strings.NewReader(string(body)))
+	httpReq, _ := http.NewRequest("POST", llmGatewayURL+"/v1/chat/completions", strings.NewReader(string(body)))
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+litellmKey)
+	httpReq.Header.Set("Authorization", "Bearer "+llmGatewayKey)
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(httpReq)

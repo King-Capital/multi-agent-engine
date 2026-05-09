@@ -6,21 +6,21 @@ MAE has two components that can run on different hosts:
 
 | Component | Type | Where | Notes |
 |-----------|------|-------|-------|
-| **Dashboard** | Persistent Go server | CT 272 (10.71.20.72) | Serves UI + API, receives events |
+| **Dashboard** | Persistent Go server | `$MAE_DASHBOARD_HOST` | Serves UI + API, receives events |
 | **Engine CLI** | Per-invocation | Any host with bun | Runs agents, streams events to dashboard |
-| PostgreSQL 18 | Database | CT 272 (localhost:5432) | Session state, users, agents, events |
-| Caddy | Reverse proxy | CT 205 (10.71.20.55) | TLS termination for ai-agents.rodaddy.live |
+| PostgreSQL 18 | Database | localhost:5432 (on dashboard host) | Session state, users, agents, events |
+| Caddy | Reverse proxy | `$MAE_PROXY_HOST` | TLS termination for your-domain.example.com |
 
 The engine CLI can run from **any machine** and stream events to the central dashboard using:
 ```bash
 # Environment variable (recommended -- add to .bashrc/.zshrc)
-export MAE_DASHBOARD_URL=http://10.71.20.72:8400
+export MAE_DASHBOARD_URL="http://your-dashboard:8400"  # Set in ~/.mae/config
 
 # Or per-invocation flag
-bun engine/cli.ts task "your task" --dashboard http://10.71.20.72:8400
+bun engine/cli.ts task "your task" --dashboard "$MAE_DASHBOARD_URL"
 ```
 
-## Dashboard Server Setup (CT 272)
+## Dashboard Server Setup
 
 ### Prerequisites
 
@@ -40,11 +40,11 @@ bun engine/cli.ts task "your task" --dashboard http://10.71.20.72:8400
    systemctl daemon-reload
    systemctl enable --now mae-dashboard
    ```
-4. **Add Caddy snippet** to CT 205's Caddyfile (see `caddy-snippet.txt`)
-5. **Add DNS record:** `ai-agents.rodaddy.live` -> CT 205 (10.71.20.55) via Pi-hole
+4. **Add Caddy snippet** to your reverse proxy's Caddyfile (see `caddy-snippet.txt`)
+5. **Add DNS record:** `your-domain.example.com` -> `$MAE_PROXY_HOST` via your DNS provider
 6. **Verify:**
    ```bash
-   curl https://ai-agents.rodaddy.live/api/users
+   curl https://your-domain.example.com/api/users
    ```
 
 ### Dashboard Port
@@ -57,7 +57,7 @@ The dashboard listens on **port 8400** (set via `DASHBOARD_PORT` in the systemd 
 journalctl -u mae-dashboard -f
 ```
 
-## Remote CLI Setup (Mac Mini, CC-King, or any host)
+## Remote CLI Setup (any host)
 
 For hosts that only need to **run the engine** (not the dashboard), setup is lightweight:
 
@@ -65,7 +65,7 @@ For hosts that only need to **run the engine** (not the dashboard), setup is lig
 
 - bun (any recent version)
 - git with SSH access to King-Capital org
-- Network access to CT 272 (10.71.20.72:8400)
+- Network access to `$MAE_DASHBOARD_HOST`:8400
 
 ### Steps
 
@@ -78,11 +78,11 @@ cd multi-agent-engine
 cd engine && bun install && cd ..
 
 # 3. Set dashboard URL (add to shell profile)
-echo 'export MAE_DASHBOARD_URL=http://10.71.20.72:8400' >> ~/.bashrc
+echo 'export MAE_DASHBOARD_URL="http://your-dashboard:8400"  # Set in ~/.mae/config' >> ~/.bashrc
 source ~/.bashrc
 
 # 4. Verify connectivity
-curl -s http://10.71.20.72:8400/api/users | head -5
+curl -s "$MAE_DASHBOARD_URL/api/users" | head -5
 
 # 5. Test with dry run (echo adapter, no LLM calls)
 bun engine/cli.ts task "test connectivity" --dry-run
@@ -96,9 +96,9 @@ cd engine && bun build cli.ts --target=bun --outfile=../agent && cd ..
 
 | Host | IP | Role | Status |
 |------|-----|------|--------|
-| CT 272 | 10.71.20.72 | Dashboard + PG + full stack | Deployed |
-| Mac Mini M4 (skippy-oc) | 10.71.1.21 | CLI client, streams to CT 272 | Setup ready |
-| CC-King LXC | 10.71.20.120 | CLI client, streams to CT 272 | Pending setup |
+| Dashboard server | `$MAE_DASHBOARD_HOST` | Dashboard + PG + full stack | Deployed |
+| Agent host | `$MAE_AGENT_HOST` | CLI client, streams to dashboard | Setup ready |
+| Additional client | `$MAE_CLIENT_HOST` | CLI client, streams to dashboard | Pending setup |
 
 ### Adapter Selection
 
@@ -116,14 +116,11 @@ bun engine/cli.ts task "your task" --dry-run
 
 ## Users (seeded by migration)
 
+Customize users in `dashboard/migrations/001_initial.sql`. Default seed:
+
 | User | UID | Role |
 |------|-----|------|
-| rico | 3000 | admin |
-| kevin | 3001 | user |
-| lisa | 3005 | user |
-| geetesh | 3002 | user |
-| skippy | 3004 | agent |
-| bilby | 3006 | agent |
+| admin | 3000 | admin |
 
 ## Running the Engine
 
@@ -145,4 +142,4 @@ just swarm "review security module"
 just dry "test the pipeline"
 ```
 
-Events stream to the dashboard in real-time. Open https://ai-agents.rodaddy.live to watch.
+Events stream to the dashboard in real-time. Open https://your-domain.example.com to watch.

@@ -10,7 +10,7 @@ import type { DelegateOptions } from "./types";
 export interface SandboxInfo {
   id: number;       // 1-4
   vmid: number;     // 801-804
-  ip: string;       // 10.71.20.81-84
+  ip: string;
   hostname: string; // mae-sandbox-1 through 4
   assignedTo?: string; // agent ID
   active: boolean;  // true = 4GB, false = 512MB
@@ -22,15 +22,17 @@ export class SandboxPool {
   private pveToken: string;
 
   constructor(opts?: { pveApi?: string; pveToken?: string; poolSize?: number }) {
-    this.pveApi = opts?.pveApi ?? process.env.PVE_API ?? "https://10.71.1.9:8006/api2/json";
+    this.pveApi = opts?.pveApi ?? process.env.PVE_API ?? "";
     this.pveToken = opts?.pveToken ?? process.env.PVE_TOKEN ?? "";
     const poolSize = opts?.poolSize ?? 4;
+    const sandboxSubnet = process.env.MAE_SANDBOX_SUBNET ?? "10.0.0";
+    const sandboxHostOffset = parseInt(process.env.MAE_SANDBOX_HOST_OFFSET ?? "81");
 
     for (let i = 1; i <= poolSize; i++) {
       this.sandboxes.set(i, {
         id: i,
         vmid: 800 + i,
-        ip: `10.71.20.${80 + i}`,
+        ip: `${sandboxSubnet}.${sandboxHostOffset + i - 1}`,
         hostname: `mae-sandbox-${i}`,
         active: false,
       });

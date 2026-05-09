@@ -1,13 +1,13 @@
 # MAE Roadmap — From Prototype to Pro Harness
 
 **Created:** 2026-05-05
-**Status:** Active development, CT 272 deployed, PR #3 open
+**Status:** Active development, dashboard deployed, PR #3 open
 
 ## Current State (v0.1)
 
 Working: YAML-configured teams/chains, 4 adapters (CC, Codex, Pi, echo), PG persistence,
 user scoping (6 users), dashboard API + basic UI, `mae` CLI installed globally, LXC deployed
-at ai-agents.rodaddy.live, 54 tests passing.
+at your-domain.example.com, 54 tests passing.
 
 ## Phase 1 — Live Observability
 
@@ -44,7 +44,7 @@ at ai-agents.rodaddy.live, 54 tests passing.
 - [ ] A2A adapter implementing PlatformAdapter interface
 - [ ] Agent card generation: `/.well-known/agent-card.json` for each spawned agent
 - [ ] Agent discovery: query remote A2A endpoints to find available agents
-- [ ] Bilby interop: MAE can delegate tasks to Bilby (CT 271, port 41271)
+- [ ] Bilby interop: MAE can delegate tasks to external A2A agents
 - [ ] External agent registration: any A2A-compatible agent can join MAE sessions
 - [ ] Task routing via A2A protocol (not just HTTP POST)
 - [ ] Dashboard shows A2A agents alongside native agents
@@ -82,14 +82,14 @@ at ai-agents.rodaddy.live, 54 tests passing.
 
 **Goal:** Reliable, monitored, self-healing production system.
 
-- [ ] GitHub self-hosted runner on CT 272 for auto-deploy on merge
+- [ ] GitHub self-hosted runner for auto-deploy on merge
 - [ ] Health check endpoint (`/healthz`) with PG connectivity status
 - [ ] Graceful shutdown (drain active sessions, persist state)
 - [ ] Session recovery: resume interrupted sessions from PG state
 - [ ] Agent timeout enforcement (configurable per-role)
 - [ ] Budget enforcement: hard stop at per-session and per-agent limits
 - [ ] Prometheus metrics export (agent count, cost, latency, error rate)
-- [ ] Grafana dashboard on existing monitoring stack (CT 200)
+- [ ] Grafana dashboard on existing monitoring stack
 - [ ] Log aggregation to journald with structured fields
 - [ ] Alerting: budget exceeded, agent stuck, dashboard down
 
@@ -103,7 +103,7 @@ at ai-agents.rodaddy.live, 54 tests passing.
 - [ ] Notification system: session complete, agent failed, budget warning
 - [ ] Mobile-friendly dashboard (responsive CSS)
 - [ ] Concurrent session support (multiple users running simultaneously)
-- [ ] Admin view: rico sees all sessions, others see only theirs
+- [ ] Admin view: admin sees all sessions, others see only theirs
 
 ## Phase 8 — Agent Intelligence
 

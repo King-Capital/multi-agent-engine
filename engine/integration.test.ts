@@ -191,7 +191,7 @@ describe("sandbox pool", () => {
     const sb1 = await pool.assign("agent-1");
     expect(sb1).not.toBeNull();
     expect(sb1!.id).toBe(1);
-    expect(sb1!.ip).toBe("10.71.20.81");
+    expect(sb1!.ip).toBe("10.0.0.81");
     expect(sb1!.active).toBe(true);
 
     const sb2 = await pool.assign("agent-2");
