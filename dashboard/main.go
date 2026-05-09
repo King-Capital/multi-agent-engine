@@ -243,16 +243,28 @@ func main() {
 	r.Use(maxBodySize)
 	r.Use(rateLimitMiddleware)
 
-	// Page routes
-	r.Get("/", handleDashboard)
-	r.Get("/session/{sessionID}", handleSession)
-	r.Get("/agents", handleAgentsList)
-	r.Get("/history", handleHistoryPage)
-	r.Get("/compare", handleComparePage)
-	r.Get("/agents/{slug}", handleAgentDetail)
+	// Legacy templ page routes removed -- React SPA serves all UI
 
 	// Static files (favicon, etc.)
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+
+	// Dashboard Next SPA (React) -- serves from dashboard-next-dist/
+	spaDir := filepath.Join(filepath.Dir(os.Args[0]), "..", "dashboard-next-dist")
+	if info, err := os.Stat(spaDir); err == nil && info.IsDir() {
+		log.Printf("Serving SPA from %s", spaDir)
+		spaFS := http.FileServer(http.Dir(spaDir))
+		// Serve SPA assets (hashed filenames)
+		r.Handle("/assets/*", spaFS)
+		// SPA catch-all: any non-API, non-HTMX route falls through to index.html
+		r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+			// Don't serve SPA for API or HTMX routes
+			if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/htmx/") {
+				http.NotFound(w, r)
+				return
+			}
+			http.ServeFile(w, r, filepath.Join(spaDir, "index.html"))
+		})
+	}
 
 	// Prometheus metrics (public, no auth needed - handled by authMiddleware allowing GET on non-API paths)
 	r.Get("/metrics", handleMetrics)
@@ -383,7 +395,7 @@ func authMiddleware(next http.Handler) http.Handler {
 
 		path := r.URL.Path
 		isAPI := strings.HasPrefix(path, "/api/")
-		isPublicAPI := path == "/api/health" || path == "/api/users" || strings.HasSuffix(path, "/stream") || strings.HasSuffix(path, "/message") || strings.HasPrefix(path, "/api/sessions/")
+		isPublicAPI := path == "/api/health" || path == "/api/users" || strings.HasSuffix(path, "/stream") || strings.HasSuffix(path, "/message") || strings.HasPrefix(path, "/api/sessions/") || strings.HasPrefix(path, "/api/pg/")
 		isUIPage := !isAPI
 
 		// Allow unauthenticated GET/HEAD for UI pages and public API endpoints

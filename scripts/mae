@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# mae -- Multi-Agent Engine CLI wrapper
+# Usage: mae task "Add input validation"
+#        mae chain full-stack-specialized "Build the login page"
+#        mae run review "git diff HEAD~1"
+#        mae session list
+#        mae info
+#        mae version
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ENGINE_DIR="$SCRIPT_DIR/../engine"
+
+# Default dashboard URL (override with MAE_DASHBOARD_URL env)
+export MAE_DASHBOARD_URL="${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}"
+
+exec bun run "$ENGINE_DIR/cli.ts" "$@"
