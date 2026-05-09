@@ -18,7 +18,9 @@ chains:
           max_retries: 1
       - team: Validation
         till_done:
-          - "Code reviewed — grade assigned"
+          - text: "Code reviewed — grade assigned"
+            type: output_match
+            verify: "GRADE:\\s*(PASS|FEEDBACK|FAILED)"
           - "Security reviewed — no P0/P1 vulnerabilities"
           - "All corrections applied or escalated"
 

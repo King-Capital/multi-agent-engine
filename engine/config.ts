@@ -87,11 +87,32 @@ function resolveSkillPath(s: string | { path: string; "use-when"?: string }): st
   return typeof s === "string" ? s : s.path;
 }
 
-export function buildSystemPrompt(persona: PersonaConfig): string {
+export function loadPreamble(role: AgentRole, personaName?: string): string {
+  if (role === "scout") {
+    const p = join(BASE_DIR, "agents/preambles/scout.md");
+    return existsSync(p) ? readFileSync(p, "utf-8").trim() : "";
+  }
+  if (role === "orchestrator" || role === "lead" || role === "sr") {
+    const p = join(BASE_DIR, "agents/preambles/lead.md");
+    return existsSync(p) ? readFileSync(p, "utf-8").trim() : "";
+  }
+  const lower = (personaName ?? "").toLowerCase();
+  if (lower.includes("review") || lower.includes("validat") || lower.includes("adversarial") || lower.includes("red-team")) {
+    const p = join(BASE_DIR, "agents/preambles/reviewer.md");
+    return existsSync(p) ? readFileSync(p, "utf-8").trim() : "";
+  }
+  const p = join(BASE_DIR, "agents/preambles/worker.md");
+  return existsSync(p) ? readFileSync(p, "utf-8").trim() : "";
+}
+
+export function buildSystemPrompt(persona: PersonaConfig, role?: AgentRole): string {
+  const preamble = role ? loadPreamble(role, persona.name) : "";
   const skills = persona.skills.map((s) => loadSkill(resolveSkillPath(s))).join("\n\n---\n\n");
   const expertise = loadExpertise(persona.expertise);
 
   return [
+    preamble,
+    "",
     `# ${persona.name}`,
     "",
     `Model: ${persona.model}`,

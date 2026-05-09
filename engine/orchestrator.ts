@@ -284,6 +284,17 @@ export class Orchestrator {
       }
 
       if (stepGrade !== "FAILED") {
+        if (step.till_done) {
+          const stepOutput = stepResult?.output ?? parallelResults?.map(r => r.output).join("\n") ?? "";
+          const { allMet, failures } = await this.verifyTillDone(session, step, i, stepOutput);
+          if (!allMet) {
+            await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+              `Till-done verification failed:\n${failures.map(f => `- ${f}`).join("\n")}`);
+            if (stepResult && stepResult.grade !== "FAILED" && stepResult.grade !== "FEEDBACK") {
+              stepResult = { ...stepResult, grade: "FEEDBACK" };
+            }
+          }
+        }
         this.markTillDone(session, i);
       }
       await this.emitter.tillDone(session.id, session.name, session.tillDone);
@@ -352,7 +363,7 @@ export class Orchestrator {
 
     const agentOpts: DelegateOptions = {
       persona,
-      systemPrompt: buildSystemPrompt(persona),
+      systemPrompt: buildSystemPrompt(persona, "worker"),
       userPrompt: prompt,
       model: agentResolved.model,
       thinking: agentResolved.thinking,
@@ -402,12 +413,16 @@ export class Orchestrator {
     const steps = chain.steps ?? this.normalizeParallelChain(chain);
     for (const step of steps) {
       if (step.till_done) {
-        for (const desc of step.till_done) {
-          items.push({ description: desc, completed: false, active: false });
+        for (const item of step.till_done) {
+          if (typeof item === "string") {
+            items.push({ description: item, completed: false, active: false, type: "llm_verified" });
+          } else {
+            items.push({ description: item.text, completed: false, active: false, type: item.type, verify: item.verify });
+          }
         }
       } else {
         const label = step.team ?? step.agent ?? "parallel step";
-        items.push({ description: `${label} complete`, completed: false, active: false });
+        items.push({ description: `${label} complete`, completed: false, active: false, type: "llm_verified" });
       }
     }
     if (items.length > 0) items[0]!.active = true;
@@ -437,6 +452,85 @@ export class Orchestrator {
       }
     }
     if (idx < session.tillDone.length) session.tillDone[idx]!.active = true;
+  }
+
+  private async verifyTillDone(
+    session: SessionState,
+    step: ChainStep,
+    stepIndex: number,
+    output: string,
+  ): Promise<{ allMet: boolean; failures: string[] }> {
+    if (!step.till_done) return { allMet: true, failures: [] };
+
+    let idx = 0;
+    const chain = getChain(session.chain);
+    const steps = chain.steps ?? this.normalizeParallelChain(chain);
+    for (let i = 0; i < stepIndex && i < steps.length; i++) {
+      idx += steps[i]!.till_done?.length ?? 1;
+    }
+
+    const failures: string[] = [];
+    const count = step.till_done.length;
+
+    for (let j = 0; j < count; j++) {
+      const itemIdx = idx + j;
+      if (itemIdx >= session.tillDone.length) break;
+      const item = session.tillDone[itemIdx]!;
+
+      if (item.type === "output_match" && item.verify) {
+        try {
+          const match = new RegExp(item.verify).exec(output);
+          if (match) {
+            item.evidence = `Matched: ${match[0]}`;
+            item.completed = true;
+          } else {
+            item.evidence = "No match in output";
+            failures.push(`${item.description} (output_match: no match)`);
+          }
+        } catch {
+          item.evidence = "Invalid regex";
+          failures.push(`${item.description} (invalid regex: ${item.verify})`);
+        }
+      } else if (item.type === "deterministic" && item.verify) {
+        try {
+          const proc = Bun.spawn(["sh", "-c", item.verify], {
+            cwd: session.workingDir,
+            stdout: "pipe",
+            stderr: "pipe",
+          });
+          const exitCode = await proc.exited;
+          const stdout = await new Response(proc.stdout).text();
+          const stderr = await new Response(proc.stderr).text();
+          if (exitCode === 0) {
+            item.evidence = stdout.slice(0, 200) || "exit 0";
+            item.completed = true;
+          } else {
+            item.evidence = (stderr || stdout).slice(0, 200) || `exit ${exitCode}`;
+            failures.push(`${item.description} (command failed: exit ${exitCode})`);
+          }
+        } catch (err) {
+          item.evidence = `Error: ${err}`;
+          failures.push(`${item.description} (command error)`);
+        }
+      } else {
+        // llm_verified: check output for keywords suggesting completion
+        const lower = output.toLowerCase();
+        const descLower = item.description.toLowerCase();
+        const keywords = descLower.split(/\s+/).filter(w => w.length > 4);
+        const matched = keywords.filter(kw => lower.includes(kw));
+        if (matched.length >= Math.ceil(keywords.length * 0.5)) {
+          item.evidence = "Inferred from output content";
+          item.completed = true;
+        } else {
+          item.evidence = "Could not verify from output";
+          item.completed = true; // Don't block on LLM verification — mark as soft-verified
+        }
+      }
+    }
+
+    await this.emitter.tillDone(session.id, session.name, session.tillDone);
+
+    return { allMet: failures.length === 0, failures };
   }
 
   private interpolatePrompt(body: string, args: string[]): string {

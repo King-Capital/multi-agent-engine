@@ -36,14 +36,16 @@ jobs:
         working-directory: dashboard
         run: go build -o mae-dashboard .
 
+      - name: Stop dashboard
+        run: systemctl stop mae-dashboard
+
       - name: Deploy SPA
         run: |
           rm -rf /opt/mae/dashboard-next-dist
           cp -r dashboard-next/dist /opt/mae/dashboard-next-dist
 
       - name: Deploy Go binary
-        run: |
-          cp dashboard/mae-dashboard /opt/mae/dashboard/mae-dashboard
+        run: cp dashboard/mae-dashboard /opt/mae/dashboard/mae-dashboard
 
       - name: Deploy dashboard source
         run: |
@@ -58,9 +60,8 @@ jobs:
             PGPASSWORD=mae psql -h localhost -U mae -d mae -f "$f" 2>/dev/null || true
           done
 
-      - name: Restart dashboard
-        run: |
-          systemctl restart mae-dashboard
+      - name: Start dashboard
+        run: systemctl start mae-dashboard
           for i in 1 2 3 4 5; do
             if curl -sf http://localhost:8400/api/health > /dev/null 2>&1; then
               echo "Dashboard restarted successfully"

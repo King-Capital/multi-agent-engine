@@ -3,6 +3,7 @@ import {
   loadExpertise,
   loadTeams,
   buildSystemPrompt,
+  loadPreamble,
   resolveModelForRole,
 } from "./config";
 import { delegateWithHealing } from "./self-healing";
@@ -68,7 +69,7 @@ export async function retryWorker(
 
   const workerOpts: DelegateOptions = {
     persona: workerPersona,
-    systemPrompt: buildSystemPrompt(workerPersona),
+    systemPrompt: buildSystemPrompt(workerPersona, "worker"),
     userPrompt: retryUserPrompt,
     model: retryResolved.model,
     thinking: retryResolved.thinking,
@@ -164,7 +165,10 @@ export async function spawnSenior(
   const mergedExpertise = memberPersonas.map(p => loadExpertise(p.expertise)).filter(Boolean).join("\n\n---\n\n");
   const mergedBody = memberPersonas.map(p => p.body ?? "").filter(Boolean).join("\n\n---\n\n");
 
+  const srPreamble = loadPreamble("sr");
   const srSystemPrompt = [
+    srPreamble,
+    "",
     `# Sr. Engineer (${domainNames.join(" + ")})`,
     "",
     `You are a Senior agent combining expertise from: ${domainNames.join(", ")}.`,
@@ -304,8 +308,8 @@ export async function leadReviewWorkers(
   ].join("\n");
 
   const reviewSystemPrompt = step.system_prompt_append
-    ? buildSystemPrompt(leadPersona) + "\n\n" + step.system_prompt_append
-    : buildSystemPrompt(leadPersona);
+    ? buildSystemPrompt(leadPersona, "lead") + "\n\n" + step.system_prompt_append
+    : buildSystemPrompt(leadPersona, "lead");
 
   const reviewResolved = resolveModelForRole("lead", teamConfig.lead.model);
 
