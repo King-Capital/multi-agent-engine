@@ -52,10 +52,10 @@ describe("config CLI (#146)", () => {
 
     test("partial alias merge adds new aliases", () => {
       const current = loadModelRouting();
-      const partial = { aliases: { ...current.aliases, test: "litellm/test-model" } };
-      const merged = { ...current, aliases: { ...current.aliases, ...partial.aliases } };
-      expect(merged.aliases!["test"]).toBe("litellm/test-model");
-      expect(merged.aliases!["quality"]).toBe(current.aliases!["quality"]);
+      const newAliases: Record<string, string> = { ...current.aliases, test: "litellm/test-model" };
+      const merged = { ...current, aliases: newAliases };
+      expect(merged.aliases["test"]).toBe("litellm/test-model");
+      expect(merged.aliases["quality"]).toBe(current.aliases!["quality"]);
     });
   });
 
