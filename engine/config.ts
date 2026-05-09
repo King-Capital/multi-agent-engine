@@ -1,6 +1,6 @@
-import { readFileSync, existsSync, statSync } from "fs";
+import { readFileSync, existsSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type {
   TeamsFile,
   ChainsFile,
@@ -163,6 +163,12 @@ export function resolveToolGroup(groupOrTools: string | string[]): string[] {
 
 export function loadModelRouting(): ModelRoutingConfig {
   return cachedRead<ModelRoutingConfig>("configs/model-routing.yaml");
+}
+
+export function writeModelRouting(config: ModelRoutingConfig): void {
+  const path = join(BASE_DIR, "configs/model-routing.yaml");
+  writeFileSync(path, stringifyYaml(config));
+  cache.delete("configs/model-routing.yaml");
 }
 
 export function resolveModel(alias: string): string {

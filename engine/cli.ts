@@ -6,6 +6,7 @@ import { PiAdapter } from "./adapters/pi";
 import { CodexAdapter } from "./adapters/codex";
 import { A2AAdapter } from "./adapters/a2a";
 import { loadChains, loadModelRouting } from "./config";
+import { configShow, configExport, configImport, configDiscover, configInteractive } from "./config-cli";
 import { readFileSync as readFile } from "fs";
 import { join } from "path";
 
@@ -328,6 +329,23 @@ Chains:    ${chainCount} configured
     for (const adapter of adapters) {
       const available = await adapter.isAvailable();
       console.log(`  ${available ? "✓" : "✗"} ${adapter.name}${available ? "" : " (not installed/configured)"}`);
+    }
+    break;
+  }
+
+  case "config": {
+    const sub = args[1];
+    if (args.includes("--export")) {
+      configExport();
+    } else if (args.includes("--json")) {
+      const file = getFlag(args, "--json") ?? sub;
+      configImport(file);
+    } else if (sub === "show") {
+      configShow();
+    } else if (sub === "discover") {
+      await configDiscover();
+    } else {
+      await configInteractive();
     }
     break;
   }

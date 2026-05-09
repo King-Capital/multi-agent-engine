@@ -15,11 +15,11 @@ describe("steering commands (#147)", () => {
     test("@mention routes to specific agent", () => {
       const received: Record<string, string[]> = { a1: [], a2: [] };
       const senders = new Map<string, (msg: string) => void>();
-      senders.set("sess-1:agent-1", (msg) => received.a1.push(msg));
-      senders.set("sess-1:agent-2", (msg) => received.a2.push(msg));
+      senders.set("sess-1:agent-1", (msg) => received["a1"]!.push(msg));
+      senders.set("sess-1:agent-2", (msg) => received["a2"]!.push(msg));
 
       sendUserMessage(senders, "sess-1", "@agent-2 check the tests");
-      expect(received.a2.length).toBeGreaterThan(0);
+      expect(received["a2"]!.length).toBeGreaterThan(0);
     });
 
     test("message to unknown session is a no-op", () => {

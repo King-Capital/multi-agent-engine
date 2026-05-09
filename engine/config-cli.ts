@@ -1,0 +1,339 @@
+import { createInterface } from "readline";
+import { readFileSync } from "fs";
+import { loadModelRouting, writeModelRouting } from "./config";
+import type { ModelRoutingConfig, ThinkingLevel } from "./types";
+
+async function prompt(question: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
+function printDivider(char = "─", len = 50) {
+  console.log(char.repeat(len));
+}
+
+// --- Show ---
+
+export function configShow(): void {
+  const config = loadModelRouting();
+
+  console.log("\nMAE Configuration");
+  printDivider();
+
+  if (config.budgets) {
+    const b = config.budgets;
+    console.log(`  Budget:   $${b.max_per_session_usd}/session  $${b.max_per_agent_usd}/agent  warn at $${b.warn_at_usd}`);
+    console.log(`            ${(b.max_total_tokens / 1_000_000).toFixed(0)}M token limit`);
+  }
+
+  console.log("\n  Tiers:");
+  for (const [name, tier] of Object.entries(config.tiers ?? {})) {
+    const opts = tier.options?.length ?? 0;
+    console.log(`    ${name.padEnd(10)} default: ${tier.default.padEnd(28)} thinking: ${tier.default_thinking}  (${opts} options)`);
+  }
+
+  if (config.aliases) {
+    const aliasStr = Object.entries(config.aliases).map(([k, v]) => {
+      const short = v.split("/").pop() ?? v;
+      return `${k}→${short}`;
+    }).join("  ");
+    console.log(`\n  Aliases:  ${aliasStr}`);
+  }
+
+  if (config.roleDefaults) {
+    const roleStr = Object.entries(config.roleDefaults).map(([k, v]) => `${k}→${v.tier}`).join("  ");
+    console.log(`  Roles:    ${roleStr}`);
+  }
+
+  if (config.crossModelPairs?.length) {
+    console.log(`\n  Cross-model pairs: ${config.crossModelPairs.length}`);
+    for (const pair of config.crossModelPairs) {
+      const b = pair.builder.split("/").pop() ?? pair.builder;
+      const v = pair.verifier.split("/").pop() ?? pair.verifier;
+      console.log(`    ${b} ↔ ${v}`);
+    }
+  }
+
+  console.log();
+}
+
+// --- Export ---
+
+export function configExport(): void {
+  const config = loadModelRouting();
+  console.log(JSON.stringify(config, null, 2));
+}
+
+// --- Import ---
+
+export function configImport(fileOrStdin?: string): void {
+  let json: string;
+  if (!fileOrStdin || fileOrStdin === "-") {
+    json = readFileSync("/dev/stdin", "utf-8");
+  } else {
+    json = readFileSync(fileOrStdin, "utf-8");
+  }
+
+  let partial: Partial<ModelRoutingConfig>;
+  try {
+    partial = JSON.parse(json);
+  } catch {
+    console.error("Error: Invalid JSON");
+    process.exit(1);
+  }
+
+  const current = loadModelRouting();
+  const merged: ModelRoutingConfig = {
+    ...current,
+    ...partial,
+    tiers: { ...current.tiers, ...partial.tiers },
+    aliases: { ...current.aliases, ...partial.aliases },
+    roleDefaults: { ...current.roleDefaults, ...partial.roleDefaults },
+  };
+
+  if (partial.budgets) {
+    merged.budgets = { ...current.budgets, ...partial.budgets };
+  }
+  if (partial.crossModelPairs) {
+    merged.crossModelPairs = partial.crossModelPairs;
+  }
+
+  writeModelRouting(merged);
+  console.log("Config updated successfully.");
+  configShow();
+}
+
+// --- Discover ---
+
+export async function configDiscover(): Promise<void> {
+  const config = loadModelRouting();
+  const litellmUrl = process.env.LITELLM_URL ?? "http://10.71.20.72:4000";
+  const apiKey = process.env.LITELLM_API_KEY ?? process.env.MAE_LITELLM_KEY ?? "";
+
+  const models = new Set<string>();
+  for (const tier of Object.values(config.tiers ?? {})) {
+    if (tier.default) models.add(tier.default);
+    for (const opt of tier.options ?? []) {
+      models.add(opt.model);
+    }
+  }
+
+  console.log(`\nProbing ${models.size} models via ${litellmUrl}...\n`);
+
+  for (const model of models) {
+    const start = Date.now();
+    try {
+      const resp = await fetch(`${litellmUrl}/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: "Reply with just the word ok." }],
+          max_tokens: 5,
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+      const latencyMs = Date.now() - start;
+      if (resp.ok) {
+        console.log(`  ${model.padEnd(30)} ✓  ${String(latencyMs).padStart(5)}ms`);
+      } else {
+        const body = await resp.text().catch(() => "");
+        console.log(`  ${model.padEnd(30)} ✗  ${String(latencyMs).padStart(5)}ms  HTTP ${resp.status} ${body.slice(0, 60)}`);
+      }
+    } catch (e: any) {
+      const latencyMs = Date.now() - start;
+      console.log(`  ${model.padEnd(30)} ✗  ${String(latencyMs).padStart(5)}ms  ${e.message?.slice(0, 40) ?? "error"}`);
+    }
+  }
+  console.log();
+}
+
+// --- Interactive TUI ---
+
+export async function configInteractive(): Promise<void> {
+  let running = true;
+  while (running) {
+    console.log("\nMAE Configuration");
+    printDivider();
+    console.log("  1. Show current config");
+    console.log("  2. Budget settings");
+    console.log("  3. Model tiers");
+    console.log("  4. Aliases");
+    console.log("  5. Role defaults");
+    console.log("  6. Discover models");
+    console.log("  7. Export as JSON");
+    console.log("  q. Exit");
+
+    const choice = await prompt("\n> ");
+    switch (choice) {
+      case "1": configShow(); break;
+      case "2": await budgetMenu(); break;
+      case "3": await tiersMenu(); break;
+      case "4": await aliasesMenu(); break;
+      case "5": await roleDefaultsMenu(); break;
+      case "6": await configDiscover(); break;
+      case "7": configExport(); break;
+      case "q": case "Q": case "": running = false; break;
+      default: console.log("Invalid choice.");
+    }
+  }
+}
+
+async function budgetMenu(): Promise<void> {
+  const config = loadModelRouting();
+  const b = config.budgets ?? { max_per_session_usd: 50, warn_at_usd: 25, max_per_agent_usd: 15, max_total_tokens: 10_000_000 };
+
+  console.log("\n  Budget Settings");
+  printDivider("─", 40);
+  console.log(`  Session limit:  $${b.max_per_session_usd}`);
+  console.log(`  Agent limit:    $${b.max_per_agent_usd}`);
+  console.log(`  Warn at:        $${b.warn_at_usd}`);
+  console.log(`  Token limit:    ${(b.max_total_tokens / 1_000_000).toFixed(0)}M`);
+
+  console.log("\n  1. Edit values");
+  console.log("  2. Reset to defaults");
+  console.log("  q. Back");
+
+  const choice = await prompt("\n> ");
+  if (choice === "1") {
+    const session = await prompt(`  Session limit [$${b.max_per_session_usd}]: `);
+    const agent = await prompt(`  Agent limit [$${b.max_per_agent_usd}]: `);
+    const warn = await prompt(`  Warn at [$${b.warn_at_usd}]: `);
+
+    if (session) b.max_per_session_usd = parseFloat(session);
+    if (agent) b.max_per_agent_usd = parseFloat(agent);
+    if (warn) b.warn_at_usd = parseFloat(warn);
+
+    config.budgets = b;
+    writeModelRouting(config);
+    console.log("  Budget updated.");
+  } else if (choice === "2") {
+    config.budgets = { max_per_session_usd: 50, warn_at_usd: 25, max_per_agent_usd: 15, max_total_tokens: 10_000_000 };
+    writeModelRouting(config);
+    console.log("  Budget reset to defaults.");
+  }
+}
+
+async function tiersMenu(): Promise<void> {
+  const config = loadModelRouting();
+
+  console.log("\n  Model Tiers");
+  printDivider("─", 40);
+  const tierNames = Object.keys(config.tiers ?? {});
+  for (let i = 0; i < tierNames.length; i++) {
+    const name = tierNames[i]!;
+    const tier = config.tiers[name]!;
+    console.log(`  ${i + 1}. ${name.padEnd(10)} default: ${tier.default}`);
+    console.log(`                  thinking: ${tier.default_thinking}`);
+    for (const opt of tier.options ?? []) {
+      console.log(`                  - ${opt.model} (${opt.thinking})`);
+    }
+  }
+  console.log("  q. Back");
+
+  const choice = await prompt("\n  Edit tier (1-" + tierNames.length + "): ");
+  const idx = parseInt(choice) - 1;
+  if (idx >= 0 && idx < tierNames.length) {
+    const name = tierNames[idx]!;
+    const tier = config.tiers[name]!;
+    const models = tier.options?.map(o => o.model) ?? [tier.default];
+
+    console.log(`\n  Current default: ${tier.default}`);
+    for (let i = 0; i < models.length; i++) {
+      console.log(`    ${i + 1}. ${models[i]}`);
+    }
+    const modelChoice = await prompt("  New default (number or model name): ");
+    const modelIdx = parseInt(modelChoice) - 1;
+    if (modelIdx >= 0 && modelIdx < models.length) {
+      tier.default = models[modelIdx]!;
+    } else if (modelChoice) {
+      tier.default = modelChoice;
+    }
+
+    const thinkingLevels: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+    const thinking = await prompt(`  Thinking level [${tier.default_thinking}] (${thinkingLevels.join("/")}): `);
+    if (thinking && thinkingLevels.includes(thinking as ThinkingLevel)) {
+      tier.default_thinking = thinking;
+    }
+
+    writeModelRouting(config);
+    console.log(`  Tier "${name}" updated.`);
+  }
+}
+
+async function aliasesMenu(): Promise<void> {
+  const config = loadModelRouting();
+
+  console.log("\n  Model Aliases");
+  printDivider("─", 40);
+  for (const [alias, model] of Object.entries(config.aliases ?? {})) {
+    console.log(`  ${alias.padEnd(12)} → ${model}`);
+  }
+
+  console.log("\n  1. Add/edit alias");
+  console.log("  2. Remove alias");
+  console.log("  q. Back");
+
+  const choice = await prompt("\n> ");
+  if (choice === "1") {
+    const alias = await prompt("  Alias name: ");
+    const model = await prompt("  Model: ");
+    if (alias && model) {
+      if (!config.aliases) config.aliases = {};
+      config.aliases[alias] = model;
+      writeModelRouting(config);
+      console.log(`  Alias "${alias}" → "${model}" saved.`);
+    }
+  } else if (choice === "2") {
+    const alias = await prompt("  Alias to remove: ");
+    if (alias && config.aliases?.[alias]) {
+      delete config.aliases[alias];
+      writeModelRouting(config);
+      console.log(`  Alias "${alias}" removed.`);
+    }
+  }
+}
+
+async function roleDefaultsMenu(): Promise<void> {
+  const config = loadModelRouting();
+  const tierNames = Object.keys(config.tiers ?? {});
+
+  console.log("\n  Role Defaults");
+  printDivider("─", 40);
+  const roles = Object.keys(config.roleDefaults ?? {});
+  for (let i = 0; i < roles.length; i++) {
+    const role = roles[i]!;
+    const defaults = config.roleDefaults[role]!;
+    console.log(`  ${(i + 1)}. ${role.padEnd(14)} tier: ${defaults.tier.padEnd(8)} thinking: ${defaults.thinking}`);
+  }
+  console.log("  q. Back");
+
+  const choice = await prompt("\n  Edit role (1-" + roles.length + "): ");
+  const idx = parseInt(choice) - 1;
+  if (idx >= 0 && idx < roles.length) {
+    const role = roles[idx]!;
+    const defaults = config.roleDefaults[role]!;
+
+    const tier = await prompt(`  Tier [${defaults.tier}] (${tierNames.join("/")}): `);
+    if (tier && tierNames.includes(tier)) {
+      defaults.tier = tier;
+    }
+
+    const thinkingLevels: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+    const thinking = await prompt(`  Thinking [${defaults.thinking}] (${thinkingLevels.join("/")}): `);
+    if (thinking && thinkingLevels.includes(thinking as ThinkingLevel)) {
+      defaults.thinking = thinking as ThinkingLevel;
+    }
+
+    writeModelRouting(config);
+    console.log(`  Role "${role}" updated.`);
+  }
+}
