@@ -22,6 +22,7 @@ import {
 	agentColor,
 	cn,
 	formatCurrency,
+	formatNumber,
 	shortId,
 	statusColor,
 	statusDot,
