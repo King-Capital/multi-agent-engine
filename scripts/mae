@@ -8,9 +8,21 @@ set -euo pipefail
 MAE_VERSION="0.2.34"
 MAE_REPO="King-Capital/multi-agent-engine"
 MAE_GIT_URL="git@github.com:${MAE_REPO}.git"
-MAE_DASHBOARD_URL="${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}"
 MAE_INSTALL_DIR="${MAE_HOME:-$HOME/.mae}"
-MAE_BIN="/usr/local/bin/mae"
+MAE_CONFIG="$MAE_INSTALL_DIR/config"
+MAE_BIN="${HOME}/.local/bin/mae"
+
+# ── Load config (created during install, user-editable) ─────────────
+if [[ -f "$MAE_CONFIG" ]]; then
+  # shellcheck source=/dev/null
+  source "$MAE_CONFIG"
+fi
+
+# Apply defaults for anything not set by config or env
+MAE_DASHBOARD_URL="${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}"
+DATABASE_URL="${DATABASE_URL:-postgres://mae:mae@10.71.20.72:5432/mae?sslmode=disable}"
+MAE_API_URL="${MAE_API_URL:-http://10.71.20.72:8400}"
+export MAE_DASHBOARD_URL DATABASE_URL MAE_API_URL
 
 # ── Locate MAE root ──────────────────────────────────────────────────
 find_mae_root() {
@@ -49,8 +61,17 @@ check_deps() {
 
 # ── Install ──────────────────────────────────────────────────────────
 do_install() {
+  local dry_run=false
+  if [[ "${1:-}" == "--dry-run" ]]; then
+    dry_run=true
+    echo "DRY RUN -- showing what would happen (no changes made)"
+    echo ""
+  fi
+
   check_deps
-  echo "Installing MAE to $MAE_INSTALL_DIR..."
+
+  echo "Install target: $MAE_INSTALL_DIR"
+  echo ""
 
   if [[ -d "$MAE_INSTALL_DIR/.git" ]]; then
     echo "MAE already installed at $MAE_INSTALL_DIR"
@@ -58,29 +79,113 @@ do_install() {
     exit 0
   fi
 
-  # Clone
-  echo "Cloning $MAE_REPO..."
-  git clone "$MAE_GIT_URL" "$MAE_INSTALL_DIR" 2>&1
+  # Step 1: Clone
+  echo "[1/4] Clone $MAE_REPO → $MAE_INSTALL_DIR"
+  if ! $dry_run; then
+    git clone "$MAE_GIT_URL" "$MAE_INSTALL_DIR" 2>&1
+  fi
 
-  # Install engine dependencies
-  echo "Installing engine dependencies..."
-  cd "$MAE_INSTALL_DIR/engine" && bun install
+  # Step 2: Engine deps
+  echo "[2/4] Install engine dependencies (bun install)"
+  if ! $dry_run; then
+    cd "$MAE_INSTALL_DIR/engine" && bun install
+  fi
 
-  # Copy this script to /usr/local/bin
-  echo "Installing mae CLI to $MAE_BIN..."
-  cp "$MAE_INSTALL_DIR/scripts/mae" "$MAE_BIN" 2>/dev/null || {
-    echo "Can't write to $MAE_BIN -- trying with sudo..."
-    sudo cp "$MAE_INSTALL_DIR/scripts/mae" "$MAE_BIN"
-  }
-  chmod +x "$MAE_BIN"
+  # Step 3: Config
+  if [[ -f "$MAE_CONFIG" ]] && ! $dry_run; then
+    echo "[3/4] Config exists at $MAE_CONFIG (keeping current)"
+  else
+    echo "[3/4] Create config: $MAE_CONFIG"
+    echo "      MAE_DASHBOARD_URL = http://10.71.20.72:8400"
+    echo "      DATABASE_URL      = postgres://mae:mae@10.71.20.72:5432/mae"
+    echo "      MAE_API_URL       = http://10.71.20.72:8400"
+    if ! $dry_run; then
+      cat > "$MAE_CONFIG" << 'CONF'
+# MAE Configuration -- edit these values for your environment
+# Sourced by the mae CLI on every invocation
+
+# Dashboard / Go API server
+MAE_DASHBOARD_URL="http://10.71.20.72:8400"
+
+# PostgreSQL connection (used by Go dashboard)
+DATABASE_URL="postgres://mae:mae@10.71.20.72:5432/mae?sslmode=disable"
+
+# API URL for dashboard-next Vite proxy
+MAE_API_URL="http://10.71.20.72:8400"
+
+# Default adapter (pi, claude-code, codex, a2a, echo)
+# MAE_DEFAULT_ADAPTER="claude-code"
+
+# API auth token (set if dashboard requires auth)
+# MAE_API_TOKEN=""
+
+# Default A2A endpoint (for remote agent delegation)
+# MAE_A2A_URL=""
+CONF
+    fi
+  fi
+
+  # Step 4: CLI binary
+  echo "[4/4] Install CLI: $MAE_BIN"
+  if ! $dry_run; then
+    mkdir -p "$(dirname "$MAE_BIN")"
+    cp "$MAE_INSTALL_DIR/scripts/mae" "$MAE_BIN"
+    chmod +x "$MAE_BIN"
+  fi
 
   echo ""
-  echo "✓ MAE installed successfully"
-  echo "  Root:      $MAE_INSTALL_DIR"
-  echo "  CLI:       $MAE_BIN"
-  echo "  Dashboard: $MAE_DASHBOARD_URL"
-  echo ""
-  echo "Try: mae info"
+  if $dry_run; then
+    echo "DRY RUN complete. Run 'mae install' to execute."
+  else
+    echo "✓ MAE installed (engine only -- no frontend)"
+    echo "  Root:      $MAE_INSTALL_DIR"
+    echo "  Config:    $MAE_CONFIG"
+    echo "  CLI:       $MAE_BIN"
+    echo "  Dashboard: $MAE_DASHBOARD_URL"
+    echo "  Database:  $DATABASE_URL"
+    echo ""
+    echo "Edit $MAE_CONFIG to customize. Then try: mae info"
+    echo "To install the dashboard frontend: mae dashboard install"
+  fi
+}
+
+# ── Dashboard management (opt-in) ──────────────────────────────────
+do_dashboard() {
+  local root
+  root="$(find_mae_root)" || { echo "MAE not found. Run 'mae install' first."; exit 1; }
+
+  local subcmd="${1:-help}"
+  case "$subcmd" in
+    install)
+      echo "Installing dashboard-next frontend..."
+      cd "$root/dashboard-next" && bun install
+      echo "✓ Frontend deps installed."
+      echo "  Start dev server: mae dashboard dev"
+      echo "  Build for prod:   mae dashboard build"
+      ;;
+    dev)
+      echo "Starting dashboard-next dev server (proxying to $MAE_API_URL)..."
+      cd "$root/dashboard-next" && MAE_API_URL="$MAE_API_URL" bun run dev
+      ;;
+    build)
+      echo "Building dashboard-next for production..."
+      cd "$root/dashboard-next" && bun run build
+      echo "✓ Built to dashboard-next/dist/"
+      ;;
+    *)
+      local installed="no"
+      [[ -d "$root/dashboard-next/node_modules" ]] && installed="yes"
+      echo "MAE Dashboard Frontend"
+      echo "  Installed: $installed"
+      echo "  API:       $MAE_API_URL"
+      echo "  Database:  $DATABASE_URL"
+      echo ""
+      echo "Commands:"
+      echo "  mae dashboard install   Install frontend dependencies"
+      echo "  mae dashboard dev       Start Vite dev server (port 5173)"
+      echo "  mae dashboard build     Build for production to dist/"
+      ;;
+  esac
 }
 
 # ── Update ───────────────────────────────────────────────────────────
@@ -108,7 +213,7 @@ do_update() {
 
   # Update the CLI script itself
   if [[ -f "$MAE_BIN" ]]; then
-    cp "$root/scripts/mae" "$MAE_BIN" 2>/dev/null || sudo cp "$root/scripts/mae" "$MAE_BIN"
+    cp "$root/scripts/mae" "$MAE_BIN"
     chmod +x "$MAE_BIN"
     echo "CLI updated."
   fi
@@ -123,7 +228,7 @@ do_update() {
 do_uninstall() {
   echo "Uninstalling MAE..."
   if [[ -f "$MAE_BIN" ]]; then
-    rm "$MAE_BIN" 2>/dev/null || sudo rm "$MAE_BIN"
+    rm "$MAE_BIN"
     echo "Removed $MAE_BIN"
   fi
   if [[ -d "$MAE_INSTALL_DIR" ]]; then
@@ -143,9 +248,16 @@ do_help() {
 mae -- Multi-Agent Engine CLI v${MAE_VERSION}
 
 Lifecycle:
-  mae install              Clone repo, install deps, set up CLI
+  mae install              Clone repo, install engine deps, create config
+  mae install --dry-run    Preview install steps without making changes
   mae update               Pull latest, reinstall deps, update CLI
   mae uninstall            Remove CLI and optionally the repo
+
+Dashboard (opt-in):
+  mae dashboard            Show dashboard status
+  mae dashboard install    Install frontend deps (dashboard-next)
+  mae dashboard dev        Start Vite dev server (port 5173)
+  mae dashboard build      Build frontend for production
 
 Run swarms:
   mae task <description>   Run plan-build-review on a task (default chain)
@@ -169,6 +281,8 @@ Info:
   mae version              Version and connection info
   mae adapters             List available adapters
   mae discover <url>       Discover a remote A2A agent
+  mae config               Show current config
+  mae config edit          Open config in \$EDITOR
 
 Agents:
   mae new-agent <name> <role> <team>   Scaffold a new agent persona
@@ -190,8 +304,17 @@ Examples:
   mae info
   mae session list
 
-Environment:
-  MAE_DASHBOARD_URL   Dashboard API (default: http://10.71.20.72:8400)
+Config:
+  ~/.mae/config            Sourced on every invocation (created by 'mae install')
+  Defaults:
+    MAE_DASHBOARD_URL      http://10.71.20.72:8400
+    DATABASE_URL           postgres://mae:mae@10.71.20.72:5432/mae
+    MAE_API_URL            http://10.71.20.72:8400
+
+Environment (override config):
+  MAE_DASHBOARD_URL   Dashboard API
+  DATABASE_URL        PostgreSQL connection string
+  MAE_API_URL         Vite dev proxy target
   MAE_ROOT            Override repo location
   MAE_HOME            Install directory (default: ~/.mae)
   MAE_API_TOKEN       API auth token
@@ -206,13 +329,35 @@ case "${1:-}" in
     exit 0
     ;;
   install)
-    do_install
+    shift
+    do_install "$@"
     ;;
   update)
     do_update
     ;;
   uninstall)
     do_uninstall
+    ;;
+  dashboard)
+    shift
+    do_dashboard "$@"
+    exit 0
+    ;;
+  config)
+    if [[ -f "$MAE_CONFIG" ]]; then
+      if [[ "${2:-}" == "edit" ]]; then
+        ${EDITOR:-vi} "$MAE_CONFIG"
+      else
+        echo "MAE Config: $MAE_CONFIG"
+        echo "────────────────────────────────────"
+        cat "$MAE_CONFIG"
+        echo ""
+        echo "Run 'mae config edit' to modify."
+      fi
+    else
+      echo "No config found. Run 'mae install' to create one."
+    fi
+    exit 0
     ;;
   *)
     # All other commands: forward to the bun CLI
@@ -222,7 +367,7 @@ case "${1:-}" in
       exit 1
     }
     export MAE_ROOT="$root"
-    export MAE_DASHBOARD_URL
+    export MAE_DASHBOARD_URL DATABASE_URL MAE_API_URL
     exec bun run "$root/engine/cli.ts" "$@"
     ;;
 esac

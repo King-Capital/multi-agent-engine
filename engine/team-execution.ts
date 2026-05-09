@@ -1,0 +1,389 @@
+import {
+  getTeam,
+  loadPersona,
+  buildSystemPrompt,
+  resolveModel,
+} from "./config";
+import { delegateWithHealing } from "./self-healing";
+import { isGitRepo, createWorktree, mergeWorktree, cleanupWorktree } from "./worktree";
+import { parseAssignment, summarizeOutput, worstGrade } from "./output-parsing";
+import { retryWorker, spawnSenior, leadReviewWorkers } from "./worker-lifecycle";
+import type { EventEmitter } from "./event-emitter";
+import type { SandboxPool } from "./sandbox-pool";
+import type {
+  PlatformAdapter,
+  DelegateOptions,
+  DelegateResult,
+  SessionState,
+  ChainStep,
+  GradeLevel,
+  WorkerReview,
+} from "./types";
+
+export interface TeamExecutionDeps {
+  emitter: EventEmitter;
+  messageSenders: Map<string, (msg: string) => void>;
+  sandboxPool: SandboxPool | null;
+  trackActivity: (agentId: string, name: string, role: string) => void;
+  trackToolCall: (agentId: string, tool: string) => void;
+  checkBudget: (session: SessionState, agentId: string, agentCost: number) => void;
+  getAdapter: (name?: string) => PlatformAdapter;
+}
+
+/**
+ * Run a single team step: delegate to lead, spawn workers, review, retry loop.
+ */
+export async function runTeamStep(
+  deps: TeamExecutionDeps,
+  session: SessionState,
+  step: ChainStep,
+  task: string,
+  previousOutput: string,
+  adapterName?: string,
+): Promise<DelegateResult> {
+  const { emitter, messageSenders, sandboxPool, trackActivity, trackToolCall, checkBudget, getAdapter } = deps;
+  const teamConfig = getTeam(step.team!);
+  const adapter = getAdapter(adapterName);
+  const leadPersona = loadPersona(teamConfig.lead.path);
+  const leadId = `${step.team}-lead`;
+
+  console.log(`[orchestrator] Delegating to team: ${teamConfig["team-name"]}`);
+
+  trackActivity(leadId, teamConfig.lead.name, "lead");
+
+  await emitter.agentSpawn(session.id, leadId, "orch-1", teamConfig.lead.name, "lead",
+    resolveModel(teamConfig.lead.model), teamConfig["team-name"], teamConfig["team-color"]);
+
+  // Lead gets the task + team roster -- produces a briefing for workers
+  const members = teamConfig.members.map((m) => `- ${m.name}: ${m["consult-when"] ?? "general tasks"}`).join("\n");
+  const leadPrompt = [
+    `Task: ${task}`,
+    previousOutput ? `\nContext from previous step:\n${previousOutput}` : "",
+    `\nYour team:\n${members}`,
+    `\nBrief each worker with specific assignments. Use this format for each:`,
+    ...teamConfig.members.map((m) => `\n### ASSIGNMENT: ${m.name}\n[What this worker should focus on, which files to review, what to look for]`),
+    step.till_done ? `\nTill done:\n${step.till_done.map((t) => `- [ ] ${t}`).join("\n")}` : "",
+  ].join("\n");
+
+  // Apply per-step overrides from chain config
+  const leadSystemPrompt = step.system_prompt_append
+    ? buildSystemPrompt(leadPersona) + "\n\n" + step.system_prompt_append
+    : buildSystemPrompt(leadPersona);
+  const leadTools = step.tools_override ?? leadPersona.tools;
+
+  // Emit the prompt being sent to the lead
+  await emitter.message(session.id, leadId, "Orchestrator", "user",
+    "📋 **Prompt to " + teamConfig.lead.name + ":**\n\n" + leadPrompt.slice(0, 3000));
+
+  const leadOpts: DelegateOptions = {
+    persona: leadPersona,
+    systemPrompt: leadSystemPrompt,
+    userPrompt: leadPrompt,
+    model: resolveModel(teamConfig.lead.model),
+    thinking: "high" as const,
+    tools: leadTools,
+    domain: leadPersona.domain,
+    workingDir: session.workingDir,
+    sessionDir: `data/sessions/${session.id}`,
+    parentId: "orch-1",
+    teamName: teamConfig["team-name"],
+    teamColor: teamConfig["team-color"],
+    onStreamEvent: (streamEvt) => {
+      if (streamEvt.type === "tool_call") {
+        trackToolCall(leadId, streamEvt.tool ?? "");
+        emitter.toolCall(session.id, leadId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
+      } else if (streamEvt.type === "cost") {
+        emitter.costUpdate(session.id, leadId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
+      }
+    },
+    sendMessage: (fn) => {
+      messageSenders.set(`${session.id}:${leadId}`, fn);
+    },
+  };
+
+  const leadResult = await adapter.delegate(leadOpts);
+  session.totalCost += leadResult.costUsd;
+  session.totalTokens += leadResult.tokensUsed;
+  await emitter.costUpdate(session.id, leadId, leadResult.costUsd, leadResult.tokensUsed, 0);
+  checkBudget(session, leadId, leadResult.costUsd);
+
+  // Emit lead output summary to conversation stream
+  const leadSummary = summarizeOutput(leadResult.output, 2000);
+  await emitter.message(session.id, leadId, teamConfig.lead.name, "user", leadSummary);
+  await emitter.agentDone(session.id, leadId, leadResult.grade);
+
+  if (leadResult.grade === "FAILED" || !teamConfig.members.length) {
+    const msg = leadResult.grade === "FAILED"
+      ? `${teamConfig["team-name"]} lead could not complete the task.`
+      : `${teamConfig["team-name"]} complete (lead only).`;
+    await emitter.message(session.id, "orch-1", "Orchestrator", "user", msg);
+    return leadResult;
+  }
+
+  // Spawn workers in parallel -- each gets their assignment from the lead's brief
+  const useWorktrees = teamConfig.members.length > 1 && await isGitRepo(session.workingDir);
+  const workerWtIds: string[] = [];
+
+  console.log(`[orchestrator] Lead briefed. Spawning ${teamConfig.members.length} workers: ${teamConfig.members.map((m) => m.name).join(", ")}`);
+  await emitter.message(session.id, "orch-1", "Orchestrator", "user",
+    `${teamConfig["team-name"]} lead assigned ${teamConfig.members.length} workers: ${teamConfig.members.map((m) => m.name).join(", ")}.`);
+
+  const workerAssignments = new Map<string, string>();
+
+  const workerPromises = teamConfig.members.map(async (member) => {
+    const workerPersona = loadPersona(member.path);
+    const workerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+
+    trackActivity(workerId, member.name, "worker");
+
+    let workerDir = session.workingDir;
+
+    // Assign sandbox if pool is enabled
+    const sandbox = sandboxPool ? await sandboxPool.assign(workerId) : null;
+    if (sandbox) {
+      console.log(`[orchestrator] Agent ${member.name} assigned to sandbox ${sandbox.id} (${sandbox.ip})`);
+    }
+
+    if (useWorktrees) {
+      const wtId = `${session.id.slice(0, 8)}-${workerId}`;
+      workerDir = await createWorktree(session.workingDir, wtId);
+      workerWtIds.push(wtId);
+    }
+
+    await emitter.agentSpawn(session.id, workerId, leadId, member.name, "worker",
+      resolveModel(member.model), teamConfig["team-name"], member.color ?? teamConfig["team-color"]);
+
+    // Extract this worker's assignment from the lead brief, or give full brief
+    const assignment = parseAssignment(leadResult.output, member.name);
+    const workerPrompt = assignment
+      ? `Your assignment from ${teamConfig.lead.name}:\n${assignment}\n\nOriginal task: ${task}`
+      : `Brief from ${teamConfig.lead.name}:\n${leadResult.output}\n\nOriginal task: ${task}`;
+    workerAssignments.set(workerId, assignment ?? leadResult.output);
+
+    // Emit the prompt being sent to the worker
+    await emitter.message(session.id, workerId, teamConfig.lead.name, "user",
+      "📋 **Assignment to " + member.name + ":**\n\n" + workerPrompt.slice(0, 3000));
+
+    const workerOpts: DelegateOptions = {
+      persona: workerPersona,
+      systemPrompt: buildSystemPrompt(workerPersona),
+      userPrompt: workerPrompt,
+      model: resolveModel(member.model),
+      thinking: "medium" as const,
+      tools: workerPersona.tools,
+      domain: workerPersona.domain,
+      workingDir: workerDir,
+      sessionDir: `data/sessions/${session.id}`,
+      parentId: leadId,
+      teamName: teamConfig["team-name"],
+      teamColor: member.color ?? teamConfig["team-color"],
+      onStreamEvent: (streamEvt) => {
+        if (streamEvt.type === "tool_call") {
+          trackToolCall(workerId, streamEvt.tool ?? "");
+          emitter.toolCall(session.id, workerId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
+        } else if (streamEvt.type === "cost") {
+          emitter.costUpdate(session.id, workerId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
+        }
+      },
+      sendMessage: (fn) => {
+        messageSenders.set(`${session.id}:${workerId}`, fn);
+      },
+    };
+
+    const result = await delegateWithHealing({
+      adapter,
+      opts: workerOpts,
+      sessionId: session.id,
+      agentRole: "worker",
+      onEvent: async (_type, data) => {
+        await emitter.selfHeal(session.id, workerId, data.failed_worker as string, data.heal_action as string);
+      },
+    });
+
+    session.totalCost += result.costUsd;
+    session.totalTokens += result.tokensUsed;
+    await emitter.costUpdate(session.id, workerId, result.costUsd, result.tokensUsed, 0);
+    checkBudget(session, workerId, result.costUsd);
+
+    // Release sandbox if assigned
+    if (sandboxPool) {
+      await sandboxPool.release(workerId);
+    }
+
+    // Emit worker output summary to conversation stream
+    const workerSummary = summarizeOutput(result.output, 1500);
+    await emitter.message(session.id, workerId, member.name, "user", workerSummary);
+    await emitter.agentDone(session.id, workerId, result.grade);
+
+    return result;
+  });
+
+  const workerResults = await Promise.all(workerPromises);
+
+  // Merge & cleanup worktrees
+  for (const wtId of workerWtIds) {
+    const { merged, hadChanges } = await mergeWorktree(session.workingDir, wtId);
+    if (hadChanges) {
+      if (merged) {
+        console.log(`[orchestrator] Merged worktree ${wtId} (had changes)`);
+      } else {
+        console.warn(`[orchestrator] WARN: Failed to merge worktree ${wtId} -- changes may be lost`);
+      }
+    }
+    await cleanupWorktree(session.workingDir, wtId);
+  }
+
+  // Build worker lifecycle deps for review/retry
+  const lifecycleDeps = {
+    emitter,
+    messageSenders,
+    trackToolCall,
+    checkBudget,
+  };
+
+  // Lead reviews worker output
+  let reviews = await leadReviewWorkers(
+    lifecycleDeps, session, teamConfig, leadPersona, workerResults,
+    workerAssignments, task, adapter, step, leadId
+  );
+
+  // Retry loop: NEEDS_WORK workers get reworked prompts and retry
+  const maxRetries = step.max_worker_retries ?? 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const needsWork = reviews.filter(r => r.grade === "NEEDS_WORK");
+    if (needsWork.length === 0) break;
+
+    console.log(`[orchestrator] Retry cycle ${attempt}/${maxRetries}: ${needsWork.length} workers need rework`);
+    await emitter.message(session.id, leadId, "Orchestrator", "user",
+      `Retry cycle ${attempt}/${maxRetries}: ${needsWork.map(r => r.workerName).join(", ")} need rework.`);
+
+    for (const review of needsWork) {
+      if (review.directFix) {
+        console.log(`[orchestrator] ${review.workerName}: lead applying direct fix`);
+        await emitter.message(session.id, leadId, teamConfig.lead.name, "user",
+          `Applying direct fix for ${review.workerName}:\n${review.directFix.slice(0, 500)}`);
+        review.grade = "PASS";
+        const idx = workerResults.findIndex(r => r.agentId === review.workerId);
+        if (idx !== -1) {
+          workerResults[idx]!.output += `\n\n--- Lead Direct Fix ---\n${review.directFix}`;
+        }
+        continue;
+      }
+
+      if (review.spawnSr && review.srDomains?.length) {
+        const srResult = await spawnSenior(
+          lifecycleDeps, session, teamConfig, review, task, adapter, leadId, step
+        );
+        const idx = workerResults.findIndex(r => r.agentId === review.workerId);
+        if (idx !== -1) workerResults[idx] = srResult;
+        review.grade = "PASS";
+        continue;
+      }
+
+      if (review.reworkedPrompt) {
+        const member = teamConfig.members.find(
+          m => m.name.toLowerCase().replace(/[^a-z0-9]+/g, "-") === review.workerId.replace(`${step.team}-`, "")
+        );
+        if (!member) continue;
+
+        const retryResult = await retryWorker(
+          lifecycleDeps, session, teamConfig, member, review.reworkedPrompt, task,
+          adapter, leadId, attempt, step
+        );
+
+        const idx = workerResults.findIndex(r => r.agentId === review.workerId);
+        if (idx !== -1) workerResults[idx] = retryResult;
+        workerAssignments.set(review.workerId, review.reworkedPrompt);
+      }
+    }
+
+    // Re-review only retried workers
+    const retriedResults = workerResults.filter(r =>
+      needsWork.some(nw => nw.workerId === r.agentId && nw.grade === "NEEDS_WORK")
+    );
+    if (retriedResults.length > 0) {
+      reviews = await leadReviewWorkers(
+        lifecycleDeps, session, teamConfig, leadPersona, retriedResults,
+        workerAssignments, task, adapter, step, leadId
+      );
+      // Update reviews with retried results
+      for (const retried of reviews) {
+        const origIdx = reviews.findIndex(r => r.workerId === retried.workerId);
+        if (origIdx !== -1) reviews[origIdx] = retried;
+      }
+    }
+  }
+
+  const allPass = reviews.every(r => r.grade === "PASS");
+  const reviewGrade: GradeLevel = allPass ? "VERIFIED" : "FAILED";
+  const combinedOutput = workerResults.map((r) => `[${r.agentName}]:\n${r.output}`).join("\n\n---\n\n");
+  const totalCost = leadResult.costUsd + workerResults.reduce((s, r) => s + r.costUsd, 0);
+
+  await emitter.message(session.id, "orch-1", "Orchestrator", "user",
+    `${teamConfig["team-name"]} complete. Lead reviewed ${reviews.length} workers: ${reviews.map(r => `${r.workerName}=${r.grade}`).join(", ")}. Grade: ${reviewGrade}. Cost: $${totalCost.toFixed(3)}.`);
+
+  return {
+    agentId: leadId,
+    agentName: teamConfig.lead.name,
+    output: combinedOutput,
+    grade: reviewGrade,
+    findings: [
+      ...workerResults.flatMap((r) => r.findings ?? []),
+      ...reviews.filter(r => r.feedback).map(r => `[${r.workerName}] ${r.feedback}`),
+    ],
+    qualityNotes: reviews.flatMap(r => r.qualityNotes ?? []),
+    reviews,
+    costUsd: totalCost,
+    tokensUsed: leadResult.tokensUsed + workerResults.reduce((s, r) => s + r.tokensUsed, 0),
+  };
+}
+
+/**
+ * Run multiple teams in parallel, each in their own worktree if applicable.
+ */
+export async function runParallelStep(
+  deps: TeamExecutionDeps,
+  session: SessionState,
+  step: ChainStep,
+  task: string,
+  previousOutput: string,
+  adapterName?: string,
+): Promise<DelegateResult[]> {
+  const teams = step.parallel!;
+  console.log(`[orchestrator] Running ${teams.length} teams in parallel: ${teams.map((t) => t.team).join(", ")}`);
+
+  const useWorktrees = teams.length > 1 && await isGitRepo(session.workingDir);
+  const teamWtIds: string[] = [];
+
+  const promises = teams.map(async (t, idx) => {
+    const teamSession: SessionState = useWorktrees ? {
+      ...session,
+      agents: new Map(session.agents),
+      tillDone: session.tillDone.map(item => ({ ...item })),
+      events: [...session.events],
+    } : session;
+    if (useWorktrees) {
+      const wtId = `${session.id.slice(0, 8)}-team-${idx}`;
+      teamSession.workingDir = await createWorktree(session.workingDir, wtId);
+      teamWtIds.push(wtId);
+      console.log(`[orchestrator] Created team worktree for ${t.team}: ${teamSession.workingDir}`);
+    }
+    return runTeamStep(deps, teamSession, { ...step, team: t.team }, task, previousOutput, adapterName);
+  });
+
+  const results = await Promise.all(promises);
+
+  for (const wtId of teamWtIds) {
+    const { merged, hadChanges } = await mergeWorktree(session.workingDir, wtId);
+    if (hadChanges) {
+      if (merged) {
+        console.log(`[orchestrator] Merged team worktree ${wtId} (had changes)`);
+      } else {
+        console.warn(`[orchestrator] WARN: Failed to merge team worktree ${wtId} -- changes may be lost`);
+      }
+    }
+    await cleanupWorktree(session.workingDir, wtId);
+  }
+
+  return results;
+}

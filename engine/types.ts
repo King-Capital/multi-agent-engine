@@ -1,4 +1,4 @@
-export type AgentRole = "orchestrator" | "lead" | "worker";
+export type AgentRole = "orchestrator" | "lead" | "sr" | "worker";
 export type AgentStatus = "idle" | "running" | "done" | "error" | "blocked";
 export type GradeLevel = "PERFECT" | "VERIFIED" | "PARTIAL" | "FEEDBACK" | "FAILED";
 
@@ -15,6 +15,7 @@ export interface PersonaConfig {
   skills: (string | SkillRef)[];
   tools: string[];
   domain: DomainConfig;
+  body?: string;
 }
 
 export interface DomainConfig {
@@ -58,6 +59,7 @@ export interface ChainStep {
   tools_override?: string[];
   system_prompt_append?: string;
   till_done?: string[];
+  max_worker_retries?: number;
   on_feedback?: {
     retry_team: string;
     max_attempts: number;
@@ -129,12 +131,26 @@ export interface TillDoneItem {
   active: boolean;
 }
 
+export interface WorkerReview {
+  workerId: string;
+  workerName: string;
+  grade: "PASS" | "NEEDS_WORK";
+  feedback?: string;
+  reworkedPrompt?: string;
+  directFix?: string;
+  qualityNotes?: string[];
+  spawnSr?: boolean;
+  srDomains?: string[];
+}
+
 export interface DelegateResult {
   agentId: string;
   agentName: string;
   output: string;
   grade?: GradeLevel;
   findings?: string[];
+  qualityNotes?: string[];
+  reviews?: WorkerReview[];
   costUsd: number;
   tokensUsed: number;
 }
