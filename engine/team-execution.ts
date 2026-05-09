@@ -69,8 +69,8 @@ export async function runTeamStep(
 
   // Apply per-step overrides from chain config
   const leadSystemPrompt = step.system_prompt_append
-    ? buildSystemPrompt(leadPersona) + "\n\n" + step.system_prompt_append
-    : buildSystemPrompt(leadPersona);
+    ? buildSystemPrompt(leadPersona, "lead") + "\n\n" + step.system_prompt_append
+    : buildSystemPrompt(leadPersona, "lead");
   const leadTools = step.tools_override ?? leadPersona.tools;
 
   // Emit the prompt being sent to the lead
@@ -170,7 +170,7 @@ export async function runTeamStep(
 
     const workerOpts: DelegateOptions = {
       persona: workerPersona,
-      systemPrompt: buildSystemPrompt(workerPersona),
+      systemPrompt: buildSystemPrompt(workerPersona, "worker"),
       userPrompt: workerPrompt,
       model: workerResolved.model,
       thinking: workerResolved.thinking,

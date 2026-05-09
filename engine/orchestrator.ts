@@ -363,7 +363,7 @@ export class Orchestrator {
 
     const agentOpts: DelegateOptions = {
       persona,
-      systemPrompt: buildSystemPrompt(persona),
+      systemPrompt: buildSystemPrompt(persona, "worker"),
       userPrompt: prompt,
       model: agentResolved.model,
       thinking: agentResolved.thinking,
