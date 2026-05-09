@@ -58,7 +58,7 @@ export interface ChainStep {
   };
   tools_override?: string[];
   system_prompt_append?: string;
-  till_done?: string[];
+  till_done?: (string | { text: string; type: TillDoneVerifyType; verify?: string })[];
   max_worker_retries?: number;
   on_feedback?: {
     retry_team: string;
@@ -125,10 +125,15 @@ export interface AgentState {
   contextTokens: number;
 }
 
+export type TillDoneVerifyType = "output_match" | "deterministic" | "llm_verified";
+
 export interface TillDoneItem {
   description: string;
   completed: boolean;
   active: boolean;
+  type: TillDoneVerifyType;
+  verify?: string;
+  evidence?: string;
 }
 
 export interface WorkerReview {

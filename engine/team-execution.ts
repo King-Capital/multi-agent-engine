@@ -64,7 +64,7 @@ export async function runTeamStep(
     `\nYour team:\n${members}`,
     `\nBrief each worker with specific assignments. Use this format for each:`,
     ...teamConfig.members.map((m) => `\n### ASSIGNMENT: ${m.name}\n[What this worker should focus on, which files to review, what to look for]`),
-    step.till_done ? `\nTill done:\n${step.till_done.map((t) => `- [ ] ${t}`).join("\n")}` : "",
+    step.till_done ? `\nTill done:\n${step.till_done.map((t) => `- [ ] ${typeof t === "string" ? t : t.text}`).join("\n")}` : "",
   ].join("\n");
 
   // Apply per-step overrides from chain config
