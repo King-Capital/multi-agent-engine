@@ -3,15 +3,15 @@
 # https://www.youtube.com/watch?v=LOazLNQnB80
 #
 # 4 CLI apps replace OpenClaw for Mac Mini agent management.
-# Skippy runs on Mac Mini M4 (10.71.1.21) — this config
+# Skippy runs on the agent host — this config
 # defines the target architecture for local agent control.
 #
 # STATUS: Planning — not yet implemented
 
-# Target host
+# Target host (set MAE_AGENT_HOST in ~/.mae/config)
 host:
-  name: mac-mini-m4
-  ip: 10.71.1.21
+  name: agent-host
+  ip: ${MAE_AGENT_HOST:-localhost}
   agent: skippy
   platform: openclaw  # current, migrating away
 

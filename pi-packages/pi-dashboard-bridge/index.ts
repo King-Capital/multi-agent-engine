@@ -6,7 +6,7 @@
  * by the MAE orchestrator when spawning Pi RPC sessions.
  * 
  * Env vars (set by orchestrator):
- *   MAE_DASHBOARD_URL  - Dashboard HTTP endpoint (e.g. http://10.71.20.72:8400)
+ *   MAE_DASHBOARD_URL  - Dashboard HTTP endpoint (set in ~/.mae/config)
  *   MAE_API_TOKEN      - Auth token for dashboard API
  *   MAE_SESSION_ID     - Parent session ID to attach events to
  *   MAE_AGENT_ID       - This agent's ID in the session

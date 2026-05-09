@@ -37,8 +37,11 @@ concurrency:
   group: sandbox-${{ inputs.sandbox_id }}
 
 env:
-  PVE_API: "https://10.71.1.9:8006/api2/json"
-  BACKUP: "TN01_backups_nfs:backup/vzdump-lxc-410-2026_05_07-22_13_20.tar.zst"
+  PVE_API: ${{ secrets.PVE_API_URL }}           # e.g. https://proxmox:8006/api2/json
+  BACKUP: ${{ vars.SANDBOX_BACKUP_TEMPLATE }}    # e.g. storage:backup/vzdump-lxc-xxx.tar.zst
+  SANDBOX_SUBNET: ${{ vars.SANDBOX_SUBNET }}     # e.g. 10.0.20
+  SANDBOX_GATEWAY: ${{ vars.SANDBOX_GATEWAY }}   # e.g. 10.0.20.1
+  SANDBOX_VMID_BASE: ${{ vars.SANDBOX_VMID_BASE || '800' }}
 
 jobs:
   sandbox:
@@ -49,8 +52,8 @@ jobs:
     steps:
       - name: Set sandbox vars
         run: |
-          echo "VMID=$((800 + ${{ inputs.sandbox_id }}))" >> $GITHUB_ENV
-          echo "IP=10.71.20.$((80 + ${{ inputs.sandbox_id }}))" >> $GITHUB_ENV
+          echo "VMID=$(($SANDBOX_VMID_BASE + ${{ inputs.sandbox_id }}))" >> $GITHUB_ENV
+          echo "IP=${SANDBOX_SUBNET}.$((80 + ${{ inputs.sandbox_id }}))" >> $GITHUB_ENV
           echo "HOSTNAME=mae-sandbox-${{ inputs.sandbox_id }}" >> $GITHUB_ENV
 
       - name: "📦 Create (restore from backup)"
@@ -80,7 +83,7 @@ jobs:
           echo "::group::Configure (network + nesting + 512MB)"
           curl -sk -X PUT "$PVE_API/nodes/$NODE/lxc/$VMID/config" \
             -H "Authorization: $TOKEN" \
-            -d "net0=name%3Deth0%2Cbridge%3Dvmbr0%2Ctag%3D20%2Cip%3D${IP}%2F24%2Cgw%3D10.71.20.1%2Cfirewall%3D0" \
+            -d "net0=name%3Deth0%2Cbridge%3Dvmbr0%2Ctag%3D20%2Cip%3D${IP}%2F24%2Cgw%3D${SANDBOX_GATEWAY}%2Cfirewall%3D0" \
             -d "features=nesting%3D1" \
             -d "memory=512"
           echo "::endgroup::"

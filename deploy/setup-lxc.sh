@@ -33,16 +33,14 @@ export PATH=$PATH:/usr/local/go/bin
 /usr/local/go/bin/go install github.com/a-h/templ/cmd/templ@latest
 ln -sf ~/go/bin/templ /usr/local/bin/templ
 
-# 6. Create system groups and users (matching homelab-users.conf UIDs)
-groupadd -g 3000 rico   || true
-groupadd -g 3001 collab || true
+# 6. Create system groups and users
+# Customize UIDs/usernames for your environment
+MAE_ADMIN_USER="${MAE_ADMIN_USER:-admin}"
 
-useradd -u 3000 -g 3000 -G collab -m -s /bin/bash rico       || true
-useradd -u 3001 -g 3001 -m -s /bin/bash kevin                 || true
-useradd -u 3005 -g 3001 -m -s /bin/bash lisa                  || true
-useradd -u 3002 -g 3001 -m -s /bin/bash geetesh               || true
-useradd -u 3004 -g 3001 -s /usr/sbin/nologin skippy           || true
-useradd -u 3006 -g 3001 -s /usr/sbin/nologin bilby            || true
+groupadd -g 3000 "$MAE_ADMIN_USER" || true
+groupadd -g 3001 collab            || true
+
+useradd -u 3000 -g 3000 -G collab -m -s /bin/bash "$MAE_ADMIN_USER" || true
 
 # 7. Create mae service user
 useradd -r -s /usr/sbin/nologin mae || true
@@ -89,6 +87,6 @@ echo "  1. Install systemd unit:"
 echo "     cp deploy/mae-dashboard.service /etc/systemd/system/"
 echo "     systemctl daemon-reload"
 echo "     systemctl enable --now mae-dashboard"
-echo "  2. Add Caddy reverse proxy entry on CT 205 (see deploy/caddy-snippet.txt)"
-echo "  3. Add DNS record: ai-agents.rodaddy.live -> 10.71.20.55 via Pi-hole"
+echo "  2. Add Caddy reverse proxy entry on your proxy host (see deploy/caddy-snippet.txt)"
+echo "  3. Add DNS record: \$MAE_PUBLIC_DOMAIN -> \$MAE_PROXY_HOST via your DNS provider"
 echo "  4. Dashboard listens on port 8400 (configured in systemd unit)"

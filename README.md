@@ -75,12 +75,12 @@
 The engine CLI and dashboard can run on **different hosts**. The CLI streams events to a central dashboard over HTTP:
 
 ```
-  Mac Mini (CLI)  ──── events ────▶  Dashboard Server (Go + PG)
-  CC-King  (CLI)  ──── events ────▶  Dashboard Server (Go + PG)
+  Host A (CLI)  ──── events ────▶  Dashboard Server (Go + PG)
+  Host B (CLI)  ──── events ────▶  Dashboard Server (Go + PG)
                                               │
-                                        Caddy Reverse Proxy
+                                     Reverse Proxy (optional)
                                               │
-                                     ai-agents.rodaddy.live
+                                     your-dashboard.example.com
 ```
 
 ---
@@ -111,8 +111,8 @@ cd engine && bun install && cd ..
 # (Optional) Build standalone CLI binary
 just build
 
-# Point at the dashboard server
-export MAE_DASHBOARD_URL=http://10.71.20.72:8400
+# Point at the dashboard server (set in ~/.mae/config or shell profile)
+export MAE_DASHBOARD_URL="$MAE_DASHBOARD_URL"  # e.g. http://your-dashboard:8400
 
 # Run your first task -- plan, build, and review
 just task "add input validation to the signup handler"
@@ -128,13 +128,13 @@ just dashboard-build && just dashboard
 
 ```bash
 # Add to ~/.zshrc or ~/.bashrc for persistence
-export MAE_DASHBOARD_URL=http://10.71.20.72:8400
+export MAE_DASHBOARD_URL="http://your-dashboard:8400"  # Set in ~/.mae/config
 
 # Or pass per-invocation
-bun engine/cli.ts task "your task" --dashboard http://10.71.20.72:8400
+bun engine/cli.ts task "your task" --dashboard "$MAE_DASHBOARD_URL"
 ```
 
-Any host with `bun` can run agent teams and stream results to the central dashboard at `https://ai-agents.rodaddy.live`.
+Any host with `bun` can run agent teams and stream results to the central dashboard.
 
 ---
 
@@ -199,7 +199,7 @@ The real-time dashboard is a Go server using **templ** (type-safe templates), **
 | Pipeline visualization | See chain steps, team assignments, and model routing |
 | Multi-host support | Multiple CLI hosts stream into one dashboard |
 
-**Access:** [https://ai-agents.rodaddy.live](https://ai-agents.rodaddy.live)
+**Access:** Set `MAE_DASHBOARD_URL` in `~/.mae/config` and open in your browser.
 
 ---
 

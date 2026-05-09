@@ -2,7 +2,7 @@
   "providers": [
     {
       "name": "litellm",
-      "baseUrl": "http://10.71.1.33:4000",
+      "baseUrl": "${MAE_LLM_GATEWAY_URL}",
       "models": [
         { "name": "opus-nocache", "maxTokens": 1000000 },
         { "name": "sonnet-nocache", "maxTokens": 1000000 },

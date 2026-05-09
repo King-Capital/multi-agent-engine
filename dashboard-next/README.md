@@ -1,6 +1,6 @@
 # MAE Dashboard
 
-A modern real-time dashboard for the **Multi-Agent Engine** (MAE). Built with React, Vite, TypeScript, Tailwind CSS, and Recharts. Connects to the MAE Go API at `http://10.71.20.72:8400` (configurable).
+A modern real-time dashboard for the **Multi-Agent Engine** (MAE). Built with React, Vite, TypeScript, Tailwind CSS, and Recharts. Connects to the MAE Go API at `$MAE_DASHBOARD_URL` (configurable).
 
 ---
 
@@ -10,7 +10,7 @@ A modern real-time dashboard for the **Multi-Agent Engine** (MAE). Built with Re
 |------|---------|-------|
 | Node.js | 20+ | Or Bun 1.x (compatible) |
 | npm | 10+ | Comes with Node 20 |
-| Go API | running | `http://10.71.20.72:8400` or custom |
+| Go API | running | `$MAE_DASHBOARD_URL` or custom |
 
 ---
 
@@ -22,7 +22,7 @@ npm install
 # or
 bun install
 
-# Start dev server (proxies API calls to http://10.71.20.72:8400)
+# Start dev server (proxies API calls to $MAE_DASHBOARD_URL)
 npm run dev
 # or
 bun run dev
@@ -49,7 +49,7 @@ Open **http://localhost:5173** in your browser.
 |----------|---------|-------------|
 | `VITE_API_BASE_URL` | `""` (proxy) | Override base URL for API calls in production |
 | `VITE_API_URL` | `""` (proxy) | Alias for `VITE_API_BASE_URL` |
-| `MAE_API_URL` | `http://10.71.20.72:8400` | Dev server proxy target (Vite config only) |
+| `MAE_API_URL` | `$MAE_DASHBOARD_URL` | Dev server proxy target (Vite config only) |
 
 In development, Vite proxies `/api` and `/metrics` requests to the Go API automatically — no CORS issues.
 
@@ -120,7 +120,7 @@ App
 ### Data Flow
 
 ```
-Go API (http://10.71.20.72:8400)
+Go API ($MAE_DASHBOARD_URL)
     │
     ├── REST (polling)
     │   ├── /api/pg/sessions      → SessionSidebar (5s interval)

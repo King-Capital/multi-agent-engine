@@ -41,8 +41,8 @@ Examples:
   agent run parallel-build "Implement caching layer"
   agent chain build-verify "Fix the login bug"
   agent task "Add rate limiting to API endpoints"
-  agent task "review auth" --adapter a2a --a2a-url http://10.71.20.71:41271
-  agent discover http://10.71.20.71:41271
+  agent task "review auth" --adapter a2a --a2a-url http://localhost:41271
+  agent discover http://localhost:41271
   agent session list
   agent session close 2dbc90f5 --status error
   agent new-agent billing-specialist worker Engineering

@@ -8,7 +8,9 @@ set -euo pipefail
 BACKUP="/mnt/pve/TN01_backups_nfs/dump/vzdump-lxc-410-2026_05_07-22_13_20.tar.zst"
 NODE="${NODE:-proxmox05}"
 STORAGE="px05_zfs_disk"
-PVE="https://10.71.1.9:8006/api2/json"
+PVE="${PVE_API:-https://localhost:8006/api2/json}"
+SANDBOX_SUBNET="${MAE_SANDBOX_SUBNET:-10.0.0}"
+SANDBOX_HOST_OFFSET="${MAE_SANDBOX_HOST_OFFSET:-81}"
 
 : "${PVE_TOKEN:?Set PVE_TOKEN env var}"
 
@@ -17,7 +19,7 @@ log() { echo "[$(date '+%H:%M:%S')] $*"; }
 create() {
   local num=$1
   local vmid=$((800 + num))
-  local ip="10.71.20.$((80 + num))"
+  local ip="${SANDBOX_SUBNET}.$((SANDBOX_HOST_OFFSET + num - 1))"
   local name="mae-sandbox-$num"
 
   log "Restoring backup -> CT $vmid ($name at $ip)"
@@ -33,7 +35,7 @@ create() {
   log "Configuring: network, nesting, 512MB warm"
   curl -sk -X PUT "$PVE/nodes/$NODE/lxc/$vmid/config" \
     -H "Authorization: PVEAPIToken=$PVE_TOKEN" \
-    -d "net0=name%3Deth0%2Cbridge%3Dvmbr0%2Ctag%3D20%2Cip%3D${ip}%2F24%2Cgw%3D10.71.20.1%2Cfirewall%3D0" \
+    -d "net0=name%3Deth0%2Cbridge%3Dvmbr0%2Ctag%3D20%2Cip%3D${ip}%2F24%2Cgw%3D${MAE_SANDBOX_GATEWAY:-10.0.0.1}%2Cfirewall%3D0" \
     -d "features=nesting%3D1" \
     -d "memory=512"
 
