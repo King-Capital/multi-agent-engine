@@ -137,8 +137,74 @@ do_uninstall() {
   echo "✓ MAE uninstalled"
 }
 
+# ── Help ─────────────────────────────────────────────────────────────
+do_help() {
+  cat <<HELP
+mae -- Multi-Agent Engine CLI v${MAE_VERSION}
+
+Lifecycle:
+  mae install              Clone repo, install deps, set up CLI
+  mae update               Pull latest, reinstall deps, update CLI
+  mae uninstall            Remove CLI and optionally the repo
+
+Run swarms:
+  mae task <description>   Run plan-build-review on a task (default chain)
+  mae chain <name> <task>  Run a specific chain
+  mae run <prompt> [args]  Run a reusable prompt workflow
+
+Chains:
+  plan-build-review        Plan → build → validate (default)
+  full-stack-specialized   Frontend + Backend + Systems + QA + Security leads
+  backend-only             Backend + QA + Security
+  frontend-only            Frontend + QA
+  review-only              Red + Blue team code review
+  build-verify             Builder-verifier loop with escalation
+
+Sessions:
+  mae session list         List all sessions
+  mae session close <id>   Close a session (--status done|error)
+
+Info:
+  mae info                 System overview (chains, adapters, routing, health)
+  mae version              Version and connection info
+  mae adapters             List available adapters
+  mae discover <url>       Discover a remote A2A agent
+
+Agents:
+  mae new-agent <name> <role> <team>   Scaffold a new agent persona
+
+Options:
+  --adapter <name>         Use specific adapter (pi, claude-code, codex, a2a, echo)
+  --dashboard <url>        Dashboard URL (default: \$MAE_DASHBOARD_URL or http://10.71.20.72:8400)
+  --dry-run                Use echo adapter (no real agents, test the flow)
+  --cwd <path>             Working directory for agents
+  --a2a-url <url>          Remote A2A agent endpoint
+  --a2a-token <token>      Bearer token for A2A auth
+
+Examples:
+  mae task "Add input validation to the login form"
+  mae chain full-stack-specialized "Build user settings page"
+  mae run review "git diff HEAD~3"
+  mae task "Fix the auth bug" --adapter claude-code
+  mae task "review this PR" --adapter a2a --a2a-url http://10.71.20.71:41271
+  mae info
+  mae session list
+
+Environment:
+  MAE_DASHBOARD_URL   Dashboard API (default: http://10.71.20.72:8400)
+  MAE_ROOT            Override repo location
+  MAE_HOME            Install directory (default: ~/.mae)
+  MAE_API_TOKEN       API auth token
+  MAE_A2A_URL         Default A2A endpoint
+HELP
+}
+
 # ── Main dispatch ────────────────────────────────────────────────────
 case "${1:-}" in
+  -h|--help|help)
+    do_help
+    exit 0
+    ;;
   install)
     do_install
     ;;
