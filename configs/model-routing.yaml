@@ -1,60 +1,56 @@
 tiers:
   high:
-    description: "Orchestrators, leads, deep analysis, complex reasoning"
+    description: Orchestrators, leads, deep analysis, complex reasoning
     options:
-      - model: litellm/opus-nocache
+      - model: opus
         thinking: high
-        note: "Max intelligence, full reasoning"
-      - model: openai-codex/gpt-5.5
+        note: Claude Opus 4.6 - max intelligence
+      - model: gemini-3.1-pro
         thinking: high
-        note: "Cross-model validation partner"
-    default: litellm/opus-nocache
+        note: Gemini 3.1 Pro - cross-model partner
+      - model: gpt-5.5
+        thinking: high
+        note: GPT 5.5 via Codex subscription
+    default: opus
     default_thinking: high
     context: 1000000
-
   medium:
-    description: "Builders, workers, implementation, standard tasks"
+    description: Builders, workers, implementation, standard tasks
     options:
-      - model: litellm/opus-nocache
-        thinking: low
-        note: "Opus with low thinking = fast but still smart"
-      - model: openai-codex/gpt-5.5
+      - model: sonnet
         thinking: medium
-        note: "GPT-5.5 medium thinking"
-    default: openai-codex/gpt-5.5
+        note: Claude Sonnet 4.6 - balanced worker
+      - model: gemini-3.1-pro
+        thinking: medium
+        note: Gemini 3.1 Pro medium thinking
+      - model: gpt-5.5
+        thinking: medium
+        note: GPT 5.5 medium thinking via Codex
+      - model: gpt-5.4
+        thinking: medium
+        note: GPT 5.4 Mini via Codex
+    default: sonnet
     default_thinking: medium
     context: 1000000
-
   fast:
-    description: "Scouts, triage, quick exploration, cheap passes"
+    description: Scouts, triage, quick exploration, cheap passes
     options:
-      - model: openai-codex/gpt-5.5
-        thinking: low
-        note: "GPT-5.5 low thinking for fast passes"
-      - model: litellm/opus-nocache
-        thinking: low
-        note: "Opus low thinking"
-    default: openai-codex/gpt-5.5
-    default_thinking: low
+      - model: sonnet
+        thinking: off
+        note: Sonnet with zero thinking - fast and smart
+      - model: gpt-5.4
+        thinking: off
+        note: GPT 5.4 Mini no thinking via Codex
+    default: sonnet
+    default_thinking: off
     context: 200000
-
-# Thinking level reference:
-#   off     → no reasoning, raw response (cheapest)
-#   minimal → bare minimum reasoning
-#   low     → light reasoning, fast (sonnet low ≈ fast model, opus low ≈ medium model)
-#   medium  → balanced (default for most work)
-#   high    → full reasoning chain (orchestrator/lead default)
-#   xhigh   → extended reasoning, max quality (rarely needed)
-
-# Model aliases used in persona frontmatter
 aliases:
-  quality: litellm/opus-nocache
-  main: litellm/sonnet-nocache
-  fast: litellm/sonnet-nocache
-  pro: openai-codex/gpt-5.5
-  free: litellm/sonnet-nocache
-
-# Role → tier mapping (always push leaders HIGH)
+  quality: opus
+  main: sonnet
+  fast: sonnet
+  pro: gpt-5.5
+  gpt: gpt-5.5
+  gpt-mini: gpt-5.4
 roleDefaults:
   orchestrator:
     tier: high
@@ -70,16 +66,20 @@ roleDefaults:
     thinking: medium
   scout:
     tier: fast
-    thinking: low
-
+    thinking: off
 crossModelPairs:
-  - builder: litellm/opus-nocache
-    verifier: openai-codex/gpt-5.5
-  - builder: openai-codex/gpt-5.5
-    verifier: litellm/opus-nocache
-
+  - builder: opus
+    verifier: gpt-5.5
+  - builder: gpt-5.5
+    verifier: opus
+  - builder: sonnet
+    verifier: gpt-5.5
+  - builder: opus
+    verifier: gemini-3.1-pro
+  - builder: gemini-3.1-pro
+    verifier: opus
 budgets:
-  max_per_session_usd: 50.00
-  warn_at_usd: 25.00
-  max_per_agent_usd: 15.00
+  max_per_session_usd: 50
+  warn_at_usd: 25
+  max_per_agent_usd: 15
   max_total_tokens: 10000000

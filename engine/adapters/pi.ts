@@ -1,7 +1,7 @@
 import { $ } from "bun";
 import { mkdirSync, existsSync } from "fs";
 import { join } from "path";
-import type { PlatformAdapter, DelegateOptions, DelegateResult, StreamEvent } from "../types";
+import type { PlatformAdapter, DelegateOptions, DelegateResult, StreamEvent, GradeLevel } from "../types";
 
 export class PiAdapter implements PlatformAdapter {
   name = "pi";
@@ -78,11 +78,12 @@ export class PiAdapter implements PlatformAdapter {
 
     const toolsFlag = opts.tools.filter((t) => t !== "delegate").join(",");
 
+    const piModel = this.mapModel(opts.model);
     const args = [
       "pi",
       "--mode", "rpc",
       "--no-session",
-      "--model", opts.model,
+      "--model", piModel,
       "--thinking", opts.thinking ?? "medium",
       "-p", opts.systemPrompt,
     ];
@@ -434,14 +435,37 @@ export class PiAdapter implements PlatformAdapter {
     }
   }
 
+  private static readonly PI_MODEL_MAP: Record<string, string> = {
+    "opus": "claude-opus-4-6",
+    "sonnet": "claude-sonnet-4-6",
+    "haiku": "claude-haiku-4-5",
+    "quality": "claude-opus-4-6",
+    "main": "claude-sonnet-4-6",
+    "fast": "claude-sonnet-4-6",
+    "gpt-5.5": "openai-codex/gpt-5.5",
+    "gpt-5.4": "openai-codex/gpt-5.4",
+    "gpt-5.4-mini": "openai-codex/gpt-5.4-mini",
+    "gpt": "openai-codex/gpt-5.5",
+    "gpt-mini": "openai-codex/gpt-5.4-mini",
+    "gemini-3.1-pro": "gemini-2.5-pro",
+    "gemini-3-pro": "gemini-2.5-pro",
+    "flash": "gemini-2.5-flash",
+    "pro": "openai-codex/gpt-5.5",
+  };
+
   private mapModel(model: string): string {
     const parts = model.split("/");
-    return parts[parts.length - 1]!;
+    const name = parts[parts.length - 1]!;
+    return PiAdapter.PI_MODEL_MAP[name] ?? name;
   }
 
-  private extractGrade(output: string): "PERFECT" | "VERIFIED" | "PARTIAL" | "FEEDBACK" | "FAILED" | undefined {
-    const match = output.match(/GRADE:\s*(PERFECT|VERIFIED|PARTIAL|FEEDBACK|FAILED)/i);
-    return match?.[1]?.toUpperCase() as ReturnType<typeof this.extractGrade>;
+  private extractGrade(output: string): GradeLevel | undefined {
+    const match = output.match(/GRADE:\s*(PERFECT|VERIFIED|PASS|PARTIAL|FEEDBACK|NEEDS_WORK|FAILED)/i);
+    if (!match?.[1]) return undefined;
+    const raw = match[1].toUpperCase();
+    if (raw === "PASS") return "VERIFIED";
+    if (raw === "NEEDS_WORK") return "FEEDBACK";
+    return raw as GradeLevel;
   }
 
   private extractFindings(output: string): string[] {

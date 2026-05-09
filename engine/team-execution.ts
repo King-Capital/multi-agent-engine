@@ -58,12 +58,18 @@ export async function runTeamStep(
 
   // Lead gets the task + team roster -- produces a briefing for workers
   const members = teamConfig.members.map((m) => `- ${m.name}: ${m["consult-when"] ?? "general tasks"}`).join("\n");
+  const prefilledAssignments = teamConfig.members.map((m) => {
+    const focus = m["consult-when"] ?? "general tasks";
+    return `\n### ASSIGNMENT: ${m.name}\nFocus: ${focus}\nFiles: [list target files/directories]\nExpected output: findings with file path, line number, severity (P0-P3), description, fix`;
+  });
   const leadPrompt = [
     `Task: ${task}`,
     previousOutput ? `\nContext from previous step:\n${previousOutput}` : "",
     `\nYour team:\n${members}`,
-    `\nBrief each worker with specific assignments. Use this format for each:`,
-    ...teamConfig.members.map((m) => `\n### ASSIGNMENT: ${m.name}\n[What this worker should focus on, which files to review, what to look for]`),
+    `\nYour ONLY job: produce worker assignments. Do NOT do the review yourself.`,
+    `Scan the directory structure (ls, find) to identify target files, then fill in the assignments below.`,
+    `Keep it fast — 5 tool calls max. The workers will do the deep analysis.`,
+    ...prefilledAssignments,
     step.till_done ? `\nTill done:\n${step.till_done.map((t) => `- [ ] ${typeof t === "string" ? t : t.text}`).join("\n")}` : "",
   ].join("\n");
 
