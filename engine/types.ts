@@ -1,4 +1,4 @@
-export type AgentRole = "orchestrator" | "lead" | "sr" | "worker";
+export type AgentRole = "orchestrator" | "lead" | "sr" | "worker" | "scout";
 export type AgentStatus = "idle" | "running" | "done" | "error" | "blocked";
 export type GradeLevel = "PERFECT" | "VERIFIED" | "PARTIAL" | "FEEDBACK" | "FAILED";
 
@@ -162,6 +162,27 @@ export interface PlatformAdapter {
 }
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+export interface TierConfig {
+  default: string;
+  default_thinking: string;
+  options?: { model: string; thinking: string; note?: string }[];
+  context?: number;
+}
+
+export interface RoleDefault {
+  tier: string;
+  thinking: ThinkingLevel;
+}
+
+export interface ModelRoutingConfig {
+  tiers: Record<string, TierConfig>;
+  aliases?: Record<string, string>;
+  models?: Record<string, { primary: string }>;
+  roleDefaults: Record<string, RoleDefault>;
+  crossModelPairs?: { builder: string; verifier: string }[];
+  budgets?: { max_per_session_usd: number; warn_at_usd: number; max_per_agent_usd: number; max_total_tokens: number };
+}
 
 export interface StreamEvent {
   type: "tool_call" | "tool_result" | "assistant_text" | "cost";

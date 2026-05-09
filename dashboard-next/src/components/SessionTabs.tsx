@@ -104,46 +104,46 @@ function MarkdownContent({ content }: { content: string }) {
 	return (
 		<ReactMarkdown
 			components={{
-				h1: ({ children }) => (
+				h1: ({ children }: { children: React.ReactNode }) => (
 					<h1 className="text-base font-bold text-zinc-100 mt-3 mb-1.5 first:mt-0">
 						{children}
 					</h1>
 				),
-				h2: ({ children }) => (
+				h2: ({ children }: { children: React.ReactNode }) => (
 					<h2 className="text-sm font-bold text-zinc-200 mt-2.5 mb-1 first:mt-0">
 						{children}
 					</h2>
 				),
-				h3: ({ children }) => (
+				h3: ({ children }: { children: React.ReactNode }) => (
 					<h3 className="text-sm font-semibold text-zinc-200 mt-2 mb-1 first:mt-0">
 						{children}
 					</h3>
 				),
-				p: ({ children }) => (
+				p: ({ children }: { children: React.ReactNode }) => (
 					<p className="text-sm text-zinc-300 mb-1.5 last:mb-0 leading-relaxed">
 						{children}
 					</p>
 				),
-				ul: ({ children }) => (
+				ul: ({ children }: { children: React.ReactNode }) => (
 					<ul className="text-sm text-zinc-300 list-disc pl-4 mb-1.5 space-y-0.5">
 						{children}
 					</ul>
 				),
-				ol: ({ children }) => (
+				ol: ({ children }: { children: React.ReactNode }) => (
 					<ol className="text-sm text-zinc-300 list-decimal pl-4 mb-1.5 space-y-0.5">
 						{children}
 					</ol>
 				),
-				li: ({ children }) => (
+				li: ({ children }: { children: React.ReactNode }) => (
 					<li className="text-sm text-zinc-300">{children}</li>
 				),
-				strong: ({ children }) => (
+				strong: ({ children }: { children: React.ReactNode }) => (
 					<strong className="font-bold text-zinc-100">{children}</strong>
 				),
-				em: ({ children }) => (
+				em: ({ children }: { children: React.ReactNode }) => (
 					<em className="italic text-zinc-300">{children}</em>
 				),
-				a: ({ href, children }) => (
+				a: ({ href, children }: { href?: string; children: React.ReactNode }) => (
 					<a
 						href={href}
 						className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2"
@@ -153,7 +153,7 @@ function MarkdownContent({ content }: { content: string }) {
 						{children}
 					</a>
 				),
-				code: ({ className, children, ...props }) => {
+				code: ({ className, children, ...props }: { className?: string; children: React.ReactNode; [key: string]: unknown }) => {
 					const isInline = !className;
 					if (isInline) {
 						return (
@@ -174,8 +174,8 @@ function MarkdownContent({ content }: { content: string }) {
 						</code>
 					);
 				},
-				pre: ({ children }) => <div className="mb-1.5">{children}</div>,
-				blockquote: ({ children }) => (
+				pre: ({ children }: { children: React.ReactNode }) => <div className="mb-1.5">{children}</div>,
+				blockquote: ({ children }: { children: React.ReactNode }) => (
 					<blockquote className="border-l-2 border-zinc-600 pl-3 text-sm text-zinc-400 italic mb-1.5">
 						{children}
 					</blockquote>

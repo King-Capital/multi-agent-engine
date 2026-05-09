@@ -62,6 +62,9 @@ roleDefaults:
   lead:
     tier: high
     thinking: high
+  sr:
+    tier: high
+    thinking: high
   worker:
     tier: medium
     thinking: medium

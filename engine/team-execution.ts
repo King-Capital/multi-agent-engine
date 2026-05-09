@@ -2,7 +2,7 @@ import {
   getTeam,
   loadPersona,
   buildSystemPrompt,
-  resolveModel,
+  resolveModelForRole,
 } from "./config";
 import { delegateWithHealing } from "./self-healing";
 import { isGitRepo, createWorktree, mergeWorktree, cleanupWorktree } from "./worktree";
@@ -50,9 +50,10 @@ export async function runTeamStep(
   console.log(`[orchestrator] Delegating to team: ${teamConfig["team-name"]}`);
 
   trackActivity(leadId, teamConfig.lead.name, "lead");
+  const leadResolved = resolveModelForRole("lead", teamConfig.lead.model);
 
   await emitter.agentSpawn(session.id, leadId, "orch-1", teamConfig.lead.name, "lead",
-    resolveModel(teamConfig.lead.model), teamConfig["team-name"], teamConfig["team-color"]);
+    leadResolved.model, teamConfig["team-name"], teamConfig["team-color"]);
 
   // Lead gets the task + team roster -- produces a briefing for workers
   const members = teamConfig.members.map((m) => `- ${m.name}: ${m["consult-when"] ?? "general tasks"}`).join("\n");
@@ -79,8 +80,8 @@ export async function runTeamStep(
     persona: leadPersona,
     systemPrompt: leadSystemPrompt,
     userPrompt: leadPrompt,
-    model: resolveModel(teamConfig.lead.model),
-    thinking: "high" as const,
+    model: leadResolved.model,
+    thinking: leadResolved.thinking,
     tools: leadTools,
     domain: leadPersona.domain,
     workingDir: session.workingDir,
@@ -150,8 +151,10 @@ export async function runTeamStep(
       workerWtIds.push(wtId);
     }
 
+    const workerResolved = resolveModelForRole("worker", member.model);
+
     await emitter.agentSpawn(session.id, workerId, leadId, member.name, "worker",
-      resolveModel(member.model), teamConfig["team-name"], member.color ?? teamConfig["team-color"]);
+      workerResolved.model, teamConfig["team-name"], member.color ?? teamConfig["team-color"]);
 
     // Extract this worker's assignment from the lead brief, or give full brief
     const assignment = parseAssignment(leadResult.output, member.name);
@@ -168,8 +171,8 @@ export async function runTeamStep(
       persona: workerPersona,
       systemPrompt: buildSystemPrompt(workerPersona),
       userPrompt: workerPrompt,
-      model: resolveModel(member.model),
-      thinking: "medium" as const,
+      model: workerResolved.model,
+      thinking: workerResolved.thinking,
       tools: workerPersona.tools,
       domain: workerPersona.domain,
       workingDir: workerDir,
