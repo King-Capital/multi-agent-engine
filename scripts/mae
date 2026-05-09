@@ -344,20 +344,17 @@ case "${1:-}" in
     exit 0
     ;;
   config)
-    if [[ -f "$MAE_CONFIG" ]]; then
-      if [[ "${2:-}" == "edit" ]]; then
-        ${EDITOR:-vi} "$MAE_CONFIG"
-      else
-        echo "MAE Config: $MAE_CONFIG"
-        echo "────────────────────────────────────"
-        cat "$MAE_CONFIG"
-        echo ""
-        echo "Run 'mae config edit' to modify."
-      fi
-    else
-      echo "No config found. Run 'mae install' to create one."
+    if [[ "${2:-}" == "edit" ]]; then
+      ${EDITOR:-vi} "$MAE_CONFIG"
+      exit 0
     fi
-    exit 0
+    # Forward to TypeScript CLI for interactive TUI, JSON in/out, discover
+    root="$(find_mae_root)" || {
+      echo "MAE not found. Run: mae install"
+      exit 1
+    }
+    shift
+    exec bun "$root/engine/cli.ts" config "$@"
     ;;
   *)
     # All other commands: forward to the bun CLI
