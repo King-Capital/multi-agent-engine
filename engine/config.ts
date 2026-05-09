@@ -36,9 +36,12 @@ export function loadChains(): ChainsFile {
 export function loadPersona(path: string): PersonaConfig {
   const fullPath = join(BASE_DIR, path);
   const raw = readFileSync(fullPath, "utf-8");
-  const fmMatch = raw.match(/^---\n([\s\S]*?)\n---/);
+  const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!fmMatch) throw new Error(`No frontmatter in ${path}`);
-  return parseYaml(fmMatch[1]!) as PersonaConfig;
+  const config = parseYaml(fmMatch[1]!) as PersonaConfig;
+  const body = fmMatch[2]?.trim();
+  if (body) config.body = body;
+  return config;
 }
 
 export function loadPrompt(name: string): { config: PromptConfig; body: string } {
@@ -90,6 +93,8 @@ export function buildSystemPrompt(persona: PersonaConfig): string {
     "",
     `Model: ${persona.model}`,
     `Tools: ${persona.tools.join(", ")}`,
+    "",
+    persona.body ? `## Instructions\n\n${persona.body}` : "",
     "",
     "## Domain",
     `Read: ${persona.domain.read.join(", ")}`,

@@ -66,13 +66,17 @@ chains:
           - "Winner verified"
 
   review-only:
-    description: "Code review and security check on existing changes"
+    description: "Full parallel review: red team + blue team + validation"
     steps:
-      - team: Validation
+      - parallel:
+          - team: Red Team
+          - team: Blue Team
+          - team: Validation
         till_done:
-          - "Code reviewed"
-          - "Security checked"
-          - "Grade assigned"
+          - "Red team adversarial + security review complete"
+          - "Blue team correctness + quality review complete"
+          - "Validation code review + grade assigned"
+          - "All findings graded P0-P3"
 
   full-sdlc:
     description: "Complete SDLC: scout, plan, build in parallel, validate, fix, re-validate"

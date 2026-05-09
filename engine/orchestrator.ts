@@ -5,9 +5,7 @@ import {
   buildSystemPrompt,
   resolveModel,
   getChain,
-  getTeam,
   loadPrompt,
-  loadModelRouting,
 } from "./config";
 import { EventEmitter } from "./event-emitter";
 import { sanitizeAgentInput, validateAgentOutput } from "./security";
@@ -15,6 +13,17 @@ import { isGitRepo, createWorktree, mergeWorktree, cleanupWorktree } from "./wor
 import { delegateWithHealing } from "./self-healing";
 import { PipelineTracker } from "./pipeline-state";
 import { SandboxPool } from "./sandbox-pool";
+
+// Extracted modules
+import { parseAssignment, parseReviews, summarizeOutput, worstGrade } from "./output-parsing";
+import { trackActivity, trackToolCall, startMonitor, stopMonitor } from "./monitoring";
+import type { AgentActivity } from "./monitoring";
+import { loadBudgets, checkBudget } from "./budget";
+import type { BudgetState } from "./budget";
+import { sendUserMessage, listenForUserMessages, stopListening } from "./messaging";
+import { retryWorker, spawnSenior, leadReviewWorkers } from "./worker-lifecycle";
+import { runTeamStep, runParallelStep } from "./team-execution";
+
 import type {
   PlatformAdapter,
   DelegateResult,
@@ -23,20 +32,8 @@ import type {
   ChainStep,
   SessionState,
   TillDoneItem,
+  GradeLevel,
 } from "./types";
-
-interface AgentActivity {
-  agentId: string;
-  name: string;
-  role: string;
-  lastEventAt: number;
-  toolCalls: number;
-  lastTool: string;
-  warned: boolean;
-}
-
-const IDLE_WARN_MS = 90_000;
-const MONITOR_INTERVAL_MS = 15_000;
 
 export class Orchestrator {
   private adapters: Map<string, PlatformAdapter> = new Map();
@@ -50,62 +47,11 @@ export class Orchestrator {
   private pipelines: Map<string, PipelineTracker> = new Map();
   private sandboxPool: SandboxPool | null = null;
   private sseAbort: AbortController | null = null;
+  private budgetState: BudgetState = { budgets: null, budgetWarned: false };
 
   constructor(dashboardUrl?: string, apiToken?: string) {
     this.dashboardUrl = dashboardUrl ?? "http://localhost:8400";
     this.emitter = new EventEmitter(dashboardUrl, apiToken);
-  }
-
-  private trackActivity(agentId: string, name: string, role: string): void {
-    this.agentActivity.set(agentId, {
-      agentId, name, role,
-      lastEventAt: Date.now(),
-      toolCalls: 0,
-      lastTool: "",
-      warned: false,
-    });
-  }
-
-  private trackToolCall(agentId: string, tool: string): void {
-    const a = this.agentActivity.get(agentId);
-    if (a) {
-      a.lastEventAt = Date.now();
-      a.toolCalls++;
-      a.lastTool = tool;
-      a.warned = false;
-    }
-  }
-
-  private startMonitor(sessionId: string): void {
-    if (this.monitorInterval) return;
-    let tick = 0;
-    this.monitorInterval = setInterval(() => {
-      const now = Date.now();
-      tick++;
-      const isHeartbeat = tick % 2 === 0;
-
-      for (const [id, a] of this.agentActivity) {
-        const idle = now - a.lastEventAt;
-
-        if (idle > IDLE_WARN_MS && !a.warned) {
-          console.warn(`[monitor] IDLE: ${a.name} (${id}) -- ${Math.round(idle / 1000)}s`);
-          a.warned = true;
-        }
-
-        if (isHeartbeat) {
-          const status = idle > IDLE_WARN_MS ? "idle" : "working";
-          console.log(`[heartbeat] ${a.name} (${a.role}): ${status} | ${a.toolCalls} tools | last: ${a.lastTool || "none"} | idle: ${Math.round(idle / 1000)}s`);
-        }
-      }
-    }, MONITOR_INTERVAL_MS);
-  }
-
-  private stopMonitor(): void {
-    if (this.monitorInterval) {
-      clearInterval(this.monitorInterval);
-      this.monitorInterval = null;
-    }
-    this.agentActivity.clear();
   }
 
   enableSandboxPool(opts?: { pveApi?: string; pveToken?: string; poolSize?: number }): void {
@@ -128,102 +74,8 @@ export class Orchestrator {
   }
 
   sendUserMessage(sessionId: string, message: string): void {
-    if (message.startsWith("@")) {
-      const prefix = `${sessionId}:`;
-      // Match longest registered agent name from the @mention
-      let bestMatch: { agentKey: string; sender: (msg: string) => void; rest: string } | null = null;
-
-      for (const [key, sender] of this.messageSenders) {
-        if (!key.startsWith(prefix)) continue;
-        const agentSlug = key.slice(prefix.length);
-        // Try matching "@code reviewer ..." or "@code-reviewer ..."
-        const variants = [agentSlug.replace(/-/g, " "), agentSlug];
-        for (const v of variants) {
-          if (message.toLowerCase().startsWith(`@${v.toLowerCase()}`)) {
-            const rest = message.slice(v.length + 1).trim(); // +1 for @
-            if (!bestMatch || v.length > bestMatch.agentKey.length) {
-              bestMatch = { agentKey: v, sender, rest };
-            }
-          }
-        }
-      }
-
-      if (bestMatch) {
-        console.log(`[orchestrator] Targeted message to ${bestMatch.agentKey}: ${bestMatch.rest.slice(0, 80)}`);
-        bestMatch.sender(bestMatch.rest);
-        return;
-      }
-      console.warn(`[orchestrator] No active agent matching @mention in: ${message.slice(0, 50)}`);
-    }
-
-    // Broadcast to first available sender
-    for (const [key, sender] of this.messageSenders) {
-      if (key.startsWith(sessionId)) {
-        sender(message);
-        return;
-      }
-    }
+    sendUserMessage(this.messageSenders, sessionId, message);
   }
-
-  private listenForUserMessages(sessionId: string): void {
-    this.sseAbort = new AbortController();
-    const url = `${this.dashboardUrl}/api/sessions/${sessionId}/stream`;
-    const RETRY_DELAY_MS = 3_000;
-
-    const connect = () => {
-      if (!this.sseAbort || this.sseAbort.signal.aborted) return;
-      fetch(url, { signal: this.sseAbort.signal }).then(async (res) => {
-        if (!res.ok || !res.body) return;
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let currentEvent = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-
-          let lineEnd: number;
-          while ((lineEnd = buffer.indexOf("\n")) !== -1) {
-            const line = buffer.slice(0, lineEnd).trim();
-            buffer = buffer.slice(lineEnd + 1);
-
-            if (line.startsWith("event:")) {
-              currentEvent = line.slice(6).trim();
-            } else if (line.startsWith("data:") && currentEvent === "message") {
-              try {
-                const evt = JSON.parse(line.slice(5));
-                if (evt.data?.from === "user" && evt.data?.content) {
-                  console.log(`[orchestrator] User message: ${evt.data.content.slice(0, 80)}`);
-                  this.sendUserMessage(sessionId, evt.data.content);
-                }
-              } catch { /* not JSON */ }
-            } else if (line === "") {
-              currentEvent = "";
-            }
-          }
-        }
-
-        if (!this.sseAbort?.signal.aborted) {
-          console.log(`[orchestrator] SSE stream ended, reconnecting in ${RETRY_DELAY_MS}ms`);
-          setTimeout(connect, RETRY_DELAY_MS);
-        }
-      }).catch((err) => {
-        if (this.sseAbort?.signal.aborted) return;
-        console.warn(`[orchestrator] SSE connection failed, retrying in ${RETRY_DELAY_MS}ms:`, err.message ?? err);
-        setTimeout(connect, RETRY_DELAY_MS);
-      });
-    };
-
-    connect();
-  }
-
-  private stopListening(): void {
-    this.sseAbort?.abort();
-    this.sseAbort = null;
-  }
-
 
   async resume(sessionId: string, opts?: { adapter?: string }): Promise<SessionState | null> {
     const pipeline = PipelineTracker.resume(sessionId);
@@ -317,11 +169,12 @@ export class Orchestrator {
     console.log(`[orchestrator] Dashboard: ${this.dashboardUrl}/session/${sessionId}`);
     console.log(`[orchestrator] Task: ${opts.task}\n`);
 
-    this.loadBudgets();
-    this.budgetWarned = false;
+    this.budgetState = loadBudgets();
     await this.emitter.tillDone(sessionId, sessionName, session.tillDone);
-    this.startMonitor(sessionId);
-    this.listenForUserMessages(sessionId);
+    this.monitorInterval = startMonitor(this.agentActivity, sessionId);
+    this.sseAbort = listenForUserMessages(this.dashboardUrl, sessionId, (sid, content) => {
+      this.sendUserMessage(sid, content);
+    });
 
     try {
       await this.runChain(session, chain, taskBody, opts.adapter);
@@ -334,13 +187,15 @@ export class Orchestrator {
       await this.emitter.pgUpdateSession(sessionId, { status: "failed" });
     }
 
-    this.stopMonitor();
-    this.stopListening();
+    stopMonitor(this.monitorInterval, this.agentActivity);
+    this.monitorInterval = null;
+    await this.emitter.sessionEnd(sessionId);
+    stopListening(this.sseAbort);
+    this.sseAbort = null;
     const prefix = `${sessionId}:`;
     for (const key of this.messageSenders.keys()) {
       if (key.startsWith(prefix)) this.messageSenders.delete(key);
     }
-    await this.emitter.sessionEnd(sessionId);
     console.log(`\nSession ${sessionId} ${session.status}. Cost: $${session.totalCost.toFixed(3)}`);
     return session;
   }
@@ -350,6 +205,9 @@ export class Orchestrator {
     let previousOutput = "";
     let stepResult: DelegateResult | undefined;
     let parallelResults: DelegateResult[] | undefined;
+
+    // Build shared deps for team execution
+    const teamDeps = this.buildTeamDeps();
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
@@ -374,10 +232,10 @@ export class Orchestrator {
           previousOutput = detResult;
         }
       } else if (step.parallel) {
-        parallelResults = await this.runParallelStep(session, step, task, previousOutput, adapterName);
+        parallelResults = await runParallelStep(teamDeps, session, step, task, previousOutput, adapterName);
         previousOutput = parallelResults.map((r) => `[${r.agentName}]: ${r.output}`).join("\n\n");
       } else if (step.team) {
-        stepResult = await this.runTeamStep(session, step, task, previousOutput, adapterName);
+        stepResult = await runTeamStep(teamDeps, session, step, task, previousOutput, adapterName);
         previousOutput = stepResult.output;
       } else if (step.agent) {
         stepResult = await this.runAgent(session, step.agent, task, previousOutput, "orch-1", adapterName);
@@ -396,7 +254,7 @@ export class Orchestrator {
 
           const retryStep: ChainStep = { team: fb.retry_team };
           const feedbackContext = `Previous attempt graded ${stepResult.grade}. Feedback/output:\n${stepResult.output}\n\nPlease address the issues and try again.`;
-          stepResult = await this.runTeamStep(session, retryStep, task, feedbackContext, adapterName);
+          stepResult = await runTeamStep(teamDeps, session, retryStep, task, feedbackContext, adapterName);
           previousOutput = stepResult.output;
         }
         if (stepResult.grade === "FEEDBACK" || stepResult.grade === "FAILED") {
@@ -407,7 +265,7 @@ export class Orchestrator {
       }
 
       // Issue #65: Only mark till_done if the step didn't FAIL
-      const stepGrade = stepResult?.grade ?? (parallelResults ? this.worstGrade(parallelResults.map((r) => r.grade)) : undefined);
+      const stepGrade = stepResult?.grade ?? (parallelResults ? worstGrade(parallelResults.map((r) => r.grade)) : undefined);
       // Update pipeline state
       if (stepResult) {
         pipeline?.completeStage(stageIdx, {
@@ -431,286 +289,27 @@ export class Orchestrator {
     }
   }
 
+  /** Build the dependency bag for team/parallel execution functions */
+  private buildTeamDeps() {
+    return {
+      emitter: this.emitter,
+      messageSenders: this.messageSenders,
+      sandboxPool: this.sandboxPool,
+      trackActivity: (agentId: string, name: string, role: string) =>
+        trackActivity(this.agentActivity, agentId, name, role),
+      trackToolCall: (agentId: string, tool: string) =>
+        trackToolCall(this.agentActivity, agentId, tool),
+      checkBudget: (session: SessionState, agentId: string, agentCost: number) =>
+        checkBudget(this.budgetState, session, agentId, agentCost, this.emitter),
+      getAdapter: (name?: string) => this.getAdapter(name),
+    };
+  }
+
   private normalizeParallelChain(chain: Chain): ChainStep[] {
     const steps: ChainStep[] = [];
     if (chain.parallel) steps.push({ parallel: chain.parallel });
     if (chain.then) steps.push(...chain.then);
     return steps;
-  }
-
-  private async runTeamStep(
-    session: SessionState, step: ChainStep, task: string,
-    previousOutput: string, adapterName?: string
-  ): Promise<DelegateResult> {
-    const teamConfig = getTeam(step.team!);
-    const adapter = this.getAdapter(adapterName);
-    const leadPersona = loadPersona(teamConfig.lead.path);
-    const leadId = `${step.team}-lead`;
-
-    console.log(`[orchestrator] Delegating to team: ${teamConfig["team-name"]}`);
-
-    this.trackActivity(leadId, teamConfig.lead.name, "lead");
-
-    await this.emitter.agentSpawn(session.id, leadId, "orch-1", teamConfig.lead.name, "lead",
-      resolveModel(teamConfig.lead.model), teamConfig["team-name"], teamConfig["team-color"]);
-
-    // Lead gets the task + team roster — produces a briefing for workers
-    const members = teamConfig.members.map((m) => `- ${m.name}: ${m["consult-when"] ?? "general tasks"}`).join("\n");
-    const leadPrompt = [
-      `Task: ${task}`,
-      previousOutput ? `\nContext from previous step:\n${previousOutput}` : "",
-      `\nYour team:\n${members}`,
-      `\nBrief each worker with specific assignments. Use this format for each:`,
-      ...teamConfig.members.map((m) => `\n### ASSIGNMENT: ${m.name}\n[What this worker should focus on, which files to review, what to look for]`),
-      step.till_done ? `\nTill done:\n${step.till_done.map((t) => `- [ ] ${t}`).join("\n")}` : "",
-    ].join("\n");
-
-    // Apply per-step overrides from chain config
-    const leadSystemPrompt = step.system_prompt_append
-      ? buildSystemPrompt(leadPersona) + "\n\n" + step.system_prompt_append
-      : buildSystemPrompt(leadPersona);
-    const leadTools = step.tools_override ?? leadPersona.tools;
-
-    // Emit the prompt being sent to the lead
-    await this.emitter.message(session.id, leadId, "Orchestrator", "user",
-      "📋 **Prompt to " + teamConfig.lead.name + ":**\n\n" + leadPrompt.slice(0, 3000));
-
-    const leadOpts: DelegateOptions = {
-      persona: leadPersona,
-      systemPrompt: leadSystemPrompt,
-      userPrompt: leadPrompt,
-      model: resolveModel(teamConfig.lead.model),
-      thinking: "high" as const,
-      tools: leadTools,
-      domain: leadPersona.domain,
-      workingDir: session.workingDir,
-      sessionDir: `data/sessions/${session.id}`,
-      parentId: "orch-1",
-      teamName: teamConfig["team-name"],
-      teamColor: teamConfig["team-color"],
-      onStreamEvent: (streamEvt) => {
-        if (streamEvt.type === "tool_call") {
-          this.trackToolCall(leadId, streamEvt.tool ?? "");
-          this.emitter.toolCall(session.id, leadId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
-        } else if (streamEvt.type === "cost") {
-          this.emitter.costUpdate(session.id, leadId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
-        }
-      },
-      sendMessage: (fn) => {
-        this.messageSenders.set(`${session.id}:${leadId}`, fn);
-      },
-    };
-
-    const leadResult = await adapter.delegate(leadOpts);
-    session.totalCost += leadResult.costUsd;
-    session.totalTokens += leadResult.tokensUsed;
-    await this.emitter.costUpdate(session.id, leadId, leadResult.costUsd, leadResult.tokensUsed, 0);
-    this.checkBudget(session, leadId, leadResult.costUsd);
-
-    // Emit lead output summary to conversation stream
-    const leadSummary = this.summarizeOutput(leadResult.output, 2000);
-    await this.emitter.message(session.id, leadId, teamConfig.lead.name, "user", leadSummary);
-    await this.emitter.agentDone(session.id, leadId, leadResult.grade);
-
-    if (leadResult.grade === "FAILED" || !teamConfig.members.length) {
-      const msg = leadResult.grade === "FAILED"
-        ? `${teamConfig["team-name"]} lead could not complete the task.`
-        : `${teamConfig["team-name"]} complete (lead only).`;
-      await this.emitter.message(session.id, "orch-1", "Orchestrator", "user", msg);
-      return leadResult;
-    }
-
-    // Spawn workers in parallel — each gets their assignment from the lead's brief
-    const useWorktrees = teamConfig.members.length > 1 && await isGitRepo(session.workingDir);
-    const workerWtIds: string[] = [];
-
-    console.log(`[orchestrator] Lead briefed. Spawning ${teamConfig.members.length} workers: ${teamConfig.members.map((m) => m.name).join(", ")}`);
-    await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
-      `${teamConfig["team-name"]} lead assigned ${teamConfig.members.length} workers: ${teamConfig.members.map((m) => m.name).join(", ")}.`);
-
-    const workerPromises = teamConfig.members.map(async (member) => {
-      const workerPersona = loadPersona(member.path);
-      const workerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
-
-      this.trackActivity(workerId, member.name, "worker");
-
-      let workerDir = session.workingDir;
-      
-      // Assign sandbox if pool is enabled
-      const sandbox = this.sandboxPool ? await this.sandboxPool.assign(workerId) : null;
-      if (sandbox) {
-        console.log(`[orchestrator] Agent ${member.name} assigned to sandbox ${sandbox.id} (${sandbox.ip})`);
-        // TODO: SSH into sandbox and use it as working dir
-        // For now, just track the assignment
-      }
-      
-      if (useWorktrees) {
-        const wtId = `${session.id.slice(0, 8)}-${workerId}`;
-        workerDir = await createWorktree(session.workingDir, wtId);
-        workerWtIds.push(wtId);
-      }
-
-      await this.emitter.agentSpawn(session.id, workerId, leadId, member.name, "worker",
-        resolveModel(member.model), teamConfig["team-name"], member.color ?? teamConfig["team-color"]);
-
-      // Extract this worker's assignment from the lead brief, or give full brief
-      const assignment = this.parseAssignment(leadResult.output, member.name);
-      const workerPrompt = assignment
-        ? `Your assignment from ${teamConfig.lead.name}:\n${assignment}\n\nOriginal task: ${task}`
-        : `Brief from ${teamConfig.lead.name}:\n${leadResult.output}\n\nOriginal task: ${task}`;
-
-      // Emit the prompt being sent to the worker
-      await this.emitter.message(session.id, workerId, teamConfig.lead.name, "user",
-        "📋 **Assignment to " + member.name + ":**\n\n" + workerPrompt.slice(0, 3000));
-
-      const workerOpts: DelegateOptions = {
-        persona: workerPersona,
-        systemPrompt: buildSystemPrompt(workerPersona),
-        userPrompt: workerPrompt,
-        model: resolveModel(member.model),
-        thinking: "medium" as const,
-        tools: workerPersona.tools,
-        domain: workerPersona.domain,
-        workingDir: workerDir,
-        sessionDir: `data/sessions/${session.id}`,
-        parentId: leadId,
-        teamName: teamConfig["team-name"],
-        teamColor: member.color ?? teamConfig["team-color"],
-        onStreamEvent: (streamEvt) => {
-          if (streamEvt.type === "tool_call") {
-            this.trackToolCall(workerId, streamEvt.tool ?? "");
-            this.emitter.toolCall(session.id, workerId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
-          } else if (streamEvt.type === "cost") {
-            this.emitter.costUpdate(session.id, workerId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
-          }
-        },
-        sendMessage: (fn) => {
-          this.messageSenders.set(`${session.id}:${workerId}`, fn);
-        },
-      };
-
-      const result = await delegateWithHealing({
-        adapter,
-        opts: workerOpts,
-        sessionId: session.id,
-        agentRole: "worker",
-        onEvent: async (_type, data) => {
-          await this.emitter.selfHeal(session.id, workerId, data.failed_worker as string, data.heal_action as string);
-        },
-      });
-
-      session.totalCost += result.costUsd;
-      session.totalTokens += result.tokensUsed;
-      await this.emitter.costUpdate(session.id, workerId, result.costUsd, result.tokensUsed, 0);
-      this.checkBudget(session, workerId, result.costUsd);
-
-      // Release sandbox if assigned
-      if (this.sandboxPool) {
-        await this.sandboxPool.release(workerId);
-      }
-
-      // Emit worker output summary to conversation stream
-      const workerSummary = this.summarizeOutput(result.output, 1500);
-      await this.emitter.message(session.id, workerId, member.name, "user", workerSummary);
-      await this.emitter.agentDone(session.id, workerId, result.grade);
-
-      return result;
-    });
-
-    const workerResults = await Promise.all(workerPromises);
-
-    // Merge & cleanup worktrees
-    for (const wtId of workerWtIds) {
-      const { merged, hadChanges } = await mergeWorktree(session.workingDir, wtId);
-      if (hadChanges) {
-        if (merged) {
-          console.log(`[orchestrator] Merged worktree ${wtId} (had changes)`);
-        } else {
-          console.warn(`[orchestrator] WARN: Failed to merge worktree ${wtId} -- changes may be lost`);
-        }
-      }
-      await cleanupWorktree(session.workingDir, wtId);
-    }
-
-    const combinedOutput = workerResults.map((r) => `[${r.agentName}]:\n${r.output}`).join("\n\n---\n\n");
-    const worstGrade = this.worstGrade(workerResults.map((r) => r.grade));
-    const succeeded = workerResults.filter((r) => r.grade !== "FAILED").length;
-
-    await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
-      `${teamConfig["team-name"]} complete. ${succeeded}/${workerResults.length} workers finished. Grade: ${worstGrade ?? "pending"}. Cost: $${(leadResult.costUsd + workerResults.reduce((s, r) => s + r.costUsd, 0)).toFixed(3)}.`);
-
-    return {
-      agentId: leadId,
-      agentName: teamConfig.lead.name,
-      output: combinedOutput,
-      grade: worstGrade,
-      findings: workerResults.flatMap((r) => r.findings ?? []),
-      costUsd: leadResult.costUsd + workerResults.reduce((s, r) => s + r.costUsd, 0),
-      tokensUsed: leadResult.tokensUsed + workerResults.reduce((s, r) => s + r.tokensUsed, 0),
-    };
-  }
-
-  private parseAssignment(leadOutput: string, workerName: string): string | null {
-    const pattern = new RegExp(
-      `### ASSIGNMENT:\\s*${workerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\n([\\s\\S]*?)(?=### ASSIGNMENT:|$)`, "i"
-    );
-    const match = leadOutput.match(pattern);
-    if (!match?.[1]) return null;
-    const assignment = match[1].trim();
-    return assignment.startsWith("SKIP:") ? null : assignment;
-  }
-
-  private worstGrade(grades: (string | undefined)[]): "PERFECT" | "VERIFIED" | "PARTIAL" | "FEEDBACK" | "FAILED" | undefined {
-    const order: Record<string, number> = { PERFECT: 0, VERIFIED: 1, PARTIAL: 2, FEEDBACK: 3, FAILED: 4 };
-    let worst: string | undefined;
-    for (const g of grades) {
-      if (!g) continue;
-      if (!worst || (order[g] ?? 0) > (order[worst] ?? 0)) worst = g;
-    }
-    return worst as ReturnType<typeof this.worstGrade>;
-  }
-
-  private async runParallelStep(
-    session: SessionState, step: ChainStep, task: string,
-    previousOutput: string, adapterName?: string
-  ): Promise<DelegateResult[]> {
-    const teams = step.parallel!;
-    console.log(`[orchestrator] Running ${teams.length} teams in parallel: ${teams.map((t) => t.team).join(", ")}`);
-
-    const useWorktrees = teams.length > 1 && await isGitRepo(session.workingDir);
-    const teamWtIds: string[] = [];
-
-    const promises = teams.map(async (t, idx) => {
-      const teamSession: SessionState = useWorktrees ? {
-        ...session,
-        agents: new Map(session.agents),
-        tillDone: session.tillDone.map(item => ({ ...item })),
-        events: [...session.events],
-      } : session;
-      if (useWorktrees) {
-        const wtId = `${session.id.slice(0, 8)}-team-${idx}`;
-        teamSession.workingDir = await createWorktree(session.workingDir, wtId);
-        teamWtIds.push(wtId);
-        console.log(`[orchestrator] Created team worktree for ${t.team}: ${teamSession.workingDir}`);
-      }
-      return this.runTeamStep(teamSession, { ...step, team: t.team }, task, previousOutput, adapterName);
-    });
-
-    const results = await Promise.all(promises);
-
-    for (const wtId of teamWtIds) {
-      const { merged, hadChanges } = await mergeWorktree(session.workingDir, wtId);
-      if (hadChanges) {
-        if (merged) {
-          console.log(`[orchestrator] Merged team worktree ${wtId} (had changes)`);
-        } else {
-          console.warn(`[orchestrator] WARN: Failed to merge team worktree ${wtId} -- changes may be lost`);
-        }
-      }
-      await cleanupWorktree(session.workingDir, wtId);
-    }
-
-    return results;
   }
 
   private async runAgent(
@@ -738,7 +337,7 @@ export class Orchestrator {
     const adapter = this.getAdapter(adapterName);
     const agentId = agentName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
-    this.trackActivity(agentId, agentConfig.name, "worker");
+    trackActivity(this.agentActivity, agentId, agentConfig.name, "worker");
 
     await this.emitter.agentSpawn(session.id, agentId, parentId, agentConfig.name, "worker",
       resolveModel(agentConfig.model), teamName, teamColor);
@@ -763,7 +362,7 @@ export class Orchestrator {
       teamColor,
       onStreamEvent: (streamEvt) => {
         if (streamEvt.type === "tool_call") {
-          this.trackToolCall(agentId, streamEvt.tool ?? "");
+          trackToolCall(this.agentActivity, agentId, streamEvt.tool ?? "");
           this.emitter.toolCall(session.id, agentId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
         } else if (streamEvt.type === "cost") {
           this.emitter.costUpdate(session.id, agentId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
@@ -786,10 +385,10 @@ export class Orchestrator {
 
     session.totalCost += result.costUsd;
     session.totalTokens += result.tokensUsed;
-    this.checkBudget(session, agentId, result.costUsd);
+    checkBudget(this.budgetState, session, agentId, result.costUsd, this.emitter);
 
     // Emit agent output summary
-    const agentSummary = this.summarizeOutput(result.output, 2000);
+    const agentSummary = summarizeOutput(result.output, 2000);
     await this.emitter.message(session.id, agentId, persona.name, "user", agentSummary);
 
     return result;
@@ -843,67 +442,6 @@ export class Orchestrator {
       return idx >= 0 && idx < args.length ? args[idx]! : match;
     });
   }
-
-  private budgets: {
-    max_per_session_usd: number;
-    warn_at_usd: number;
-    max_per_agent_usd: number;
-    max_total_tokens: number;
-  } | null = null;
-  private budgetWarned = false;
-
-  private loadBudgets(): void {
-    try {
-      this.budgets = loadModelRouting().budgets ?? null;
-      if (this.budgets) {
-        console.log(`[budget] Limits: $${this.budgets.max_per_session_usd}/session, $${this.budgets.max_per_agent_usd}/agent, ${(this.budgets.max_total_tokens / 1e6).toFixed(0)}M tokens`);
-      }
-    } catch { this.budgets = null; }
-  }
-
-  private checkBudget(session: SessionState, agentId: string, agentCost: number): void {
-    if (!this.budgets) return;
-
-    if (agentCost > this.budgets.max_per_agent_usd) {
-      console.warn(`[budget] Agent ${agentId} exceeded per-agent limit: $${agentCost.toFixed(3)} > $${this.budgets.max_per_agent_usd}`);
-    }
-
-    if (!this.budgetWarned && session.totalCost >= this.budgets.warn_at_usd) {
-      this.budgetWarned = true;
-      console.warn(`[budget] WARNING: Session cost $${session.totalCost.toFixed(3)} passed warn threshold $${this.budgets.warn_at_usd}`);
-      this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
-        `Budget warning: session cost $${session.totalCost.toFixed(2)} has passed the $${this.budgets.warn_at_usd} threshold.`);
-    }
-
-    if (session.totalCost >= this.budgets.max_per_session_usd) {
-      throw new Error(`Budget exceeded: session cost $${session.totalCost.toFixed(3)} >= limit $${this.budgets.max_per_session_usd}`);
-    }
-
-    if (session.totalTokens >= this.budgets.max_total_tokens) {
-      throw new Error(`Token budget exceeded: ${session.totalTokens} >= limit ${this.budgets.max_total_tokens}`);
-    }
-  }
-
-
-  private summarizeOutput(output: string, maxLen: number): string {
-    if (!output || output.length === 0) return "(no output)";
-    // Try to extract a grade line if present
-    const gradeLine = output.match(/GRADE:\s*\w+.*/i)?.[0] ?? "";
-    // Try to extract findings
-    const findings = output.split("\n")
-      .filter(l => /^\s*-\s*P[0-3]:/.test(l) || /^\s*\d+\./.test(l) || /^##\s/.test(l))
-      .slice(0, 5)
-      .join("\n");
-    
-    if (gradeLine || findings) {
-      const parts = [gradeLine, findings].filter(Boolean).join("\n\n");
-      return parts.length <= maxLen ? parts : parts.slice(0, maxLen) + "...";
-    }
-    
-    // Fallback: first N chars
-    return output.length <= maxLen ? output : output.slice(0, maxLen) + "...";
-  }
-
 
   private async runDeterministicStep(session: SessionState, step: ChainStep, stepIndex: number): Promise<string | null> {
     const det = step.deterministic!;
