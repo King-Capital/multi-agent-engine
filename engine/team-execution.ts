@@ -1,5 +1,6 @@
 import {
   getTeam,
+  loadTeams,
   loadPersona,
   buildSystemPrompt,
   resolveModelForRole,
@@ -388,5 +389,78 @@ export async function runParallelStep(
     await cleanupWorktree(session.workingDir, wtId);
   }
 
-  return results;
+  // Synthesize parallel results into unified report
+  const { emitter, getAdapter, trackToolCall: trackTool, checkBudget: budgetCheck, messageSenders } = deps;
+  const allTeams = loadTeams();
+  const synthPersona = loadPersona(allTeams.orchestrator.path);
+  const synthResolved = resolveModelForRole("orchestrator");
+  const synthId = `synth-${session.id.slice(0, 8)}`;
+  const adapter = getAdapter(adapterName);
+
+  console.log(`[orchestrator] Synthesizing ${results.length} parallel team outputs`);
+
+  await emitter.agentSpawn(session.id, synthId, "orch-1", "Synthesis", "orchestrator",
+    synthResolved.model, "Synthesis", "#a855f7");
+
+  const teamOutputs = results.map((r, i) =>
+    `### Team: ${teams[i]?.team ?? `Team ${i + 1}`}\nGrade: ${r.grade ?? "UNGRADED"}\n\n${r.output}`
+  ).join("\n\n---\n\n");
+
+  const synthesisPrompt = [
+    "Multiple teams completed this task in parallel. Synthesize their findings:",
+    "",
+    teamOutputs,
+    "",
+    "Produce a unified report:",
+    "1. **Agreements** — findings all teams agree on",
+    "2. **Conflicts** — where teams disagree, resolve each with reasoning",
+    "3. **Unique findings** — found by only one team, validate or dismiss",
+    "4. **Final prioritized list** (P0-P3)",
+    "5. **GRADE:** PASS | FEEDBACK | FAILED",
+  ].join("\n");
+
+  await emitter.message(session.id, synthId, "Orchestrator", "user",
+    `📋 **Synthesis prompt:**\n\n${synthesisPrompt.slice(0, 3000)}`);
+
+  const synthOpts: DelegateOptions = {
+    persona: synthPersona,
+    systemPrompt: "You are synthesizing parallel team outputs into a unified report. Be objective. Resolve conflicts with evidence. Deduplicate findings.",
+    userPrompt: synthesisPrompt,
+    model: synthResolved.model,
+    thinking: synthResolved.thinking,
+    tools: ["read", "grep", "glob"],
+    domain: synthPersona.domain,
+    workingDir: session.workingDir,
+    sessionDir: `data/sessions/${session.id}`,
+    parentId: "orch-1",
+    teamName: "Synthesis",
+    teamColor: "#a855f7",
+    onStreamEvent: (streamEvt) => {
+      if (streamEvt.type === "tool_call") {
+        trackTool(synthId, streamEvt.tool ?? "");
+        emitter.toolCall(session.id, synthId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
+      } else if (streamEvt.type === "cost") {
+        emitter.costUpdate(session.id, synthId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
+      }
+    },
+    sendMessage: (fn) => {
+      messageSenders.set(`${session.id}:${synthId}`, fn);
+    },
+  };
+
+  const synthResult = await adapter.delegate(synthOpts);
+  session.totalCost += synthResult.costUsd;
+  session.totalTokens += synthResult.tokensUsed;
+  await emitter.costUpdate(session.id, synthId, synthResult.costUsd, synthResult.tokensUsed, 0);
+  budgetCheck(session, synthId, synthResult.costUsd);
+
+  const synthSummary = summarizeOutput(synthResult.output, 2000);
+  await emitter.message(session.id, synthId, "Synthesis", "user", synthSummary);
+  await emitter.agentDone(session.id, synthId, synthResult.grade ?? "VERIFIED");
+
+  return [{
+    ...synthResult,
+    agentName: "Synthesis",
+    agentId: synthId,
+  }];
 }
