@@ -339,9 +339,9 @@ Chains:    ${chainCount} configured
       configExport();
     } else if (args.includes("--json")) {
       const file = getFlag(args, "--json") ?? sub;
-      configImport(file);
+      await configImport(file);
     } else if (sub === "show") {
-      configShow();
+      await configShow();
     } else if (sub === "discover") {
       await configDiscover();
     } else {

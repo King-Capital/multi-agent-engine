@@ -23,6 +23,7 @@ import type { BudgetState } from "./budget";
 import { sendUserMessage, listenForUserMessages, stopListening } from "./messaging";
 import { retryWorker, spawnSenior, leadReviewWorkers } from "./worker-lifecycle";
 import { runTeamStep, runParallelStep } from "./team-execution";
+import { logPerformance } from "./perf-log";
 
 import type {
   PlatformAdapter,
@@ -385,8 +386,8 @@ export class Orchestrator {
         trackActivity(this.agentActivity, agentId, name, role),
       trackToolCall: (agentId: string, tool: string) =>
         trackToolCall(this.agentActivity, agentId, tool),
-      checkBudget: (session: SessionState, agentId: string, agentCost: number) =>
-        checkBudget(this.budgetState, session, agentId, agentCost, this.emitter),
+      checkBudget: (session: SessionState, agentId: string, agentCost: number, agentTokens: number) =>
+        checkBudget(this.budgetState, session, agentId, agentCost, agentTokens, this.emitter),
       getAdapter: (name?: string) => this.getAdapter(name),
     };
   }
@@ -461,6 +462,7 @@ export class Orchestrator {
       },
     };
 
+    const agentStartTime = Date.now();
     const result = await delegateWithHealing({
       adapter,
       opts: agentOpts,
@@ -471,9 +473,21 @@ export class Orchestrator {
       },
     });
 
+    checkBudget(this.budgetState, session, agentId, result.costUsd, result.tokensUsed, this.emitter);
     session.totalCost += result.costUsd;
     session.totalTokens += result.tokensUsed;
-    checkBudget(this.budgetState, session, agentId, result.costUsd, this.emitter);
+
+    logPerformance({
+      model: agentResolved.model,
+      role: "worker",
+      grade: result.grade ?? "UNGRADED",
+      cost_usd: result.costUsd,
+      latency_ms: Date.now() - agentStartTime,
+      findings_count: result.findings?.length ?? 0,
+      agent_name: agentConfig.name,
+      session_id: session.id,
+      timestamp: new Date().toISOString(),
+    });
 
     // Emit agent output summary
     const agentSummary = summarizeOutput(result.output, 2000);

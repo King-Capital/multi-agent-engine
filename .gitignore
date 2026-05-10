@@ -14,8 +14,12 @@ dashboard/data/
 
 # Session data
 data/sessions/
+data/pipelines/
+data/model-performance.jsonl
 agent
 engine/data/sessions/
 engine/.pi/
-data/pipelines/
 engine/data/
+
+# Added by ggshield
+.cache_ggshield

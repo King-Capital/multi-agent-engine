@@ -55,12 +55,15 @@ function agentDisplay(ev: LiveEvent): {
 	name: string;
 	color: string;
 	role: string;
+	model: string;
 } {
 	const d = ev.data ?? {};
 	const name = d.agent_name ?? ev.agent_id ?? "unknown";
 	const color = agentColor(d.agent_role as string | undefined, d.team_color as string | undefined);
 	const role = (d.agent_role as string) ?? "";
-	return { name, color, role };
+	const rawModel = (d.model as string) ?? "";
+	const model = rawModel || (role === "orchestrator" ? "coordinator" : "");
+	return { name, color, role, model };
 }
 
 function formatEventTime(ts?: string): string {
@@ -101,49 +104,50 @@ function toolStatusColor(status?: string): string {
 // ── Markdown renderer with styling ────────────────────────────────────────────
 
 function MarkdownContent({ content }: { content: string }) {
+	type C = { children?: React.ReactNode };
 	return (
 		<ReactMarkdown
 			components={{
-				h1: ({ children }: { children: React.ReactNode }) => (
+				h1: ({ children }: C) => (
 					<h1 className="text-base font-bold text-zinc-100 mt-3 mb-1.5 first:mt-0">
 						{children}
 					</h1>
 				),
-				h2: ({ children }: { children: React.ReactNode }) => (
+				h2: ({ children }: C) => (
 					<h2 className="text-sm font-bold text-zinc-200 mt-2.5 mb-1 first:mt-0">
 						{children}
 					</h2>
 				),
-				h3: ({ children }: { children: React.ReactNode }) => (
+				h3: ({ children }: C) => (
 					<h3 className="text-sm font-semibold text-zinc-200 mt-2 mb-1 first:mt-0">
 						{children}
 					</h3>
 				),
-				p: ({ children }: { children: React.ReactNode }) => (
+				p: ({ children }: C) => (
 					<p className="text-sm text-zinc-300 mb-1.5 last:mb-0 leading-relaxed">
 						{children}
 					</p>
 				),
-				ul: ({ children }: { children: React.ReactNode }) => (
+				ul: ({ children }: C) => (
 					<ul className="text-sm text-zinc-300 list-disc pl-4 mb-1.5 space-y-0.5">
 						{children}
 					</ul>
 				),
-				ol: ({ children }: { children: React.ReactNode }) => (
+				ol: ({ children }: C) => (
 					<ol className="text-sm text-zinc-300 list-decimal pl-4 mb-1.5 space-y-0.5">
 						{children}
 					</ol>
 				),
-				li: ({ children }: { children: React.ReactNode }) => (
+				li: ({ children }: C) => (
 					<li className="text-sm text-zinc-300">{children}</li>
 				),
-				strong: ({ children }: { children: React.ReactNode }) => (
+				strong: ({ children }: C) => (
 					<strong className="font-bold text-zinc-100">{children}</strong>
 				),
-				em: ({ children }: { children: React.ReactNode }) => (
+				em: ({ children }: C) => (
 					<em className="italic text-zinc-300">{children}</em>
 				),
-				a: ({ href, children }: { href?: string; children: React.ReactNode }) => (
+				a: ({ href, children }: C & { href?: string }) => (
 					<a
 						href={href}
 						className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2"
@@ -153,7 +157,7 @@ function MarkdownContent({ content }: { content: string }) {
 						{children}
 					</a>
 				),
-				code: ({ className, children, ...props }: { className?: string; children: React.ReactNode; [key: string]: unknown }) => {
+				code: ({ className, children, ...props }: any) => {
 					const isInline = !className;
 					if (isInline) {
 						return (
@@ -174,8 +178,8 @@ function MarkdownContent({ content }: { content: string }) {
 						</code>
 					);
 				},
-				pre: ({ children }: { children: React.ReactNode }) => <div className="mb-1.5">{children}</div>,
-				blockquote: ({ children }: { children: React.ReactNode }) => (
+				pre: ({ children }: C) => <div className="mb-1.5">{children}</div>,
+				blockquote: ({ children }: C) => (
 					<blockquote className="border-l-2 border-zinc-600 pl-3 text-sm text-zinc-400 italic mb-1.5">
 						{children}
 					</blockquote>
@@ -372,6 +376,8 @@ interface StreamTabProps {
 	sendError: string | null;
 	onMessageChange: (v: string) => void;
 	onSend: () => void;
+	selectedAgentId?: string | null;
+	onClearFilter?: () => void;
 }
 
 /** Unique key for an agent — uses agent_name from data, falls back to agent_id */
@@ -614,6 +620,7 @@ function AgentSectionBlock({ section }: { section: AgentSection }) {
 }
 
 function StreamTab({
+	sessionId,
 	liveEvents,
 	historyEvents,
 	streamError,
@@ -621,15 +628,29 @@ function StreamTab({
 	sendError,
 	onMessageChange,
 	onSend,
+	selectedAgentId,
+	onClearFilter,
 }: StreamTabProps) {
 	const bottomRef = React.useRef<HTMLDivElement>(null);
+	const scrollRef = React.useRef<HTMLDivElement>(null);
+	const [autoFollow, setAutoFollow] = React.useState(true);
 	const [activeFilters, setActiveFilters] = React.useState<Set<string>>(
 		new Set(),
 	);
 
 	React.useEffect(() => {
-		bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-	}, [liveEvents.length]);
+		if (autoFollow) {
+			bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+		}
+	}, [liveEvents.length, autoFollow]);
+
+	const handleScroll = React.useCallback(() => {
+		const el = scrollRef.current;
+		if (!el) return;
+		const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+		if (!nearBottom && autoFollow) setAutoFollow(false);
+		if (nearBottom && !autoFollow) setAutoFollow(true);
+	}, [autoFollow]);
 
 	const allEvents: LiveEvent[] = React.useMemo(() => {
 		const hist: LiveEvent[] = historyEvents.map((e) => {
@@ -644,7 +665,18 @@ function StreamTab({
 				tokens_used: p?.tokens_used,
 			};
 		});
-		return [...hist, ...liveEvents];
+		const merged = [...hist, ...liveEvents];
+
+		// Dedup: user messages can appear twice (dashboard stores + engine echoes back)
+		const seen = new Set<string>();
+		return merged.filter((ev) => {
+			if (ev.event_type !== "message") return true;
+			const content = ev.data?.content ?? "";
+			const key = `${ev.agent_id}:${content.slice(0, 120)}`;
+			if (seen.has(key)) return false;
+			seen.add(key);
+			return true;
+		});
 	}, [historyEvents, liveEvents]);
 
 	// Skip non-visual events entirely
@@ -715,8 +747,29 @@ function StreamTab({
 		});
 	}
 
-	// Show all agent sections (filtering now via agent tree panel)
-	const visibleSections = agentSections;
+	// Filter by selected agent from tree panel
+	const visibleSections = React.useMemo(() => {
+		if (!selectedAgentId) return agentSections;
+		return agentSections.filter((section) => {
+			const sectionAgentId = section.messages[0]?.agent_id ?? section.toolCalls[0]?.agent_id ?? section.otherEvents[0]?.agent_id;
+			if (!sectionAgentId) return false;
+			if (sectionAgentId === selectedAgentId) return true;
+			// Show workers under a selected lead (parent_id match)
+			const spawnEvt = section.otherEvents.find((e) => e.event_type === "agent_spawn");
+			return spawnEvt?.data?.parent_id === selectedAgentId;
+		});
+	}, [agentSections, selectedAgentId]);
+
+	// Derive session status from SSE events
+	const sessionStatus = React.useMemo(() => {
+		for (let i = liveEvents.length - 1; i >= 0; i--) {
+			const t = liveEvents[i]!.event_type;
+			if (t === "pause") return "paused" as const;
+			if (t === "resume") return "active" as const;
+			if (t === "session_end") return "completed" as const;
+		}
+		return "active" as const;
+	}, [liveEvents]);
 
 	return (
 		<div className="flex flex-col h-full min-h-0">
@@ -726,9 +779,20 @@ function StreamTab({
 				</p>
 			)}
 
-			{/* Agent filter pills removed -- agent tree panel replaces them */}
+			{/* Agent filter indicator */}
+			{selectedAgentId && (
+				<div className="flex items-center gap-2 px-3 py-1.5 bg-cyan-950/30 border-b border-cyan-900/40 text-xs">
+					<span className="text-cyan-400">Filtered to agent: {selectedAgentId}</span>
+					<button
+						className="text-cyan-300 hover:text-white transition-colors"
+						onClick={onClearFilter}
+					>
+						Clear
+					</button>
+				</div>
+			)}
 
-			<ScrollArea className="flex-1">
+			<div className="relative flex-1 overflow-y-auto" ref={scrollRef} onScroll={handleScroll}>
 				<div className="p-3">
 					{allEvents.length === 0 && (
 						<div className="flex items-center justify-center h-32 text-zinc-600 text-sm">
@@ -746,9 +810,49 @@ function StreamTab({
 
 					<div ref={bottomRef} />
 				</div>
-			</ScrollArea>
+				{!autoFollow && (
+					<button
+						className="sticky bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-cyan-600/80 hover:bg-cyan-600 text-white text-xs shadow-lg transition-colors z-10 flex items-center gap-1"
+						onClick={() => {
+							setAutoFollow(true);
+							bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+						}}
+					>
+						↓ Follow
+					</button>
+				)}
+			</div>
 			<div className="border-t border-zinc-800 p-3 space-y-2">
 				{sendError && <p className="text-xs text-red-400">{sendError}</p>}
+				{/* Session control buttons */}
+				{sessionStatus !== "completed" && (
+					<div className="flex items-center gap-2">
+						{sessionStatus === "active" ? (
+							<button
+								className="px-2.5 py-1 rounded text-xs bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 transition-colors"
+								onClick={() => api.sendMessage(sessionId, "!pause")}
+							>
+								⏸ Pause
+							</button>
+						) : sessionStatus === "paused" ? (
+							<button
+								className="px-2.5 py-1 rounded text-xs bg-green-500/15 text-green-400 hover:bg-green-500/25 transition-colors"
+								onClick={() => api.sendMessage(sessionId, "!resume")}
+							>
+								▶ Resume
+							</button>
+						) : null}
+						<button
+							className="px-2.5 py-1 rounded text-xs bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors"
+							onClick={() => api.sendMessage(sessionId, "!stop")}
+						>
+							■ Stop
+						</button>
+						<Badge variant="outline" className="text-xs ml-auto">
+							{sessionStatus}
+						</Badge>
+					</div>
+				)}
 				<div className="flex gap-2">
 					<input
 						className="flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-cyan-500"
@@ -820,12 +924,16 @@ interface SessionTabsProps {
 	session: DBSession;
 	historyEvents: DBEvent[];
 	onRefresh: () => void;
+	selectedAgentId?: string | null;
+	onClearAgentFilter?: () => void;
 }
 
 export function SessionTabs({
 	session,
 	historyEvents,
 	onRefresh,
+	selectedAgentId,
+	onClearAgentFilter,
 }: SessionTabsProps) {
 	const [tab, setTab] = React.useState("stream");
 	const [message, setMessage] = React.useState("");
@@ -944,6 +1052,8 @@ export function SessionTabs({
 									sendError={sendError}
 									onMessageChange={setMessage}
 									onSend={() => void handleSend()}
+									selectedAgentId={selectedAgentId}
+									onClearFilter={onClearAgentFilter}
 								/>
 							</CardContent>
 						</Card>

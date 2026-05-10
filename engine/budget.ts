@@ -39,26 +39,30 @@ export function checkBudget(
   session: SessionState,
   agentId: string,
   agentCost: number,
+  agentTokens: number,
   emitter: EventEmitter,
 ): void {
   if (!budgetState.budgets) return;
 
+  const projectedCost = session.totalCost + agentCost;
+  const projectedTokens = session.totalTokens + agentTokens;
+
   if (agentCost > budgetState.budgets.max_per_agent_usd) {
-    console.warn(`[budget] Agent ${agentId} exceeded per-agent limit: $${agentCost.toFixed(3)} > $${budgetState.budgets.max_per_agent_usd}`);
+    throw new Error(`Agent ${agentId} exceeded per-agent limit: $${agentCost.toFixed(3)} > $${budgetState.budgets.max_per_agent_usd}`);
   }
 
-  if (!budgetState.budgetWarned && session.totalCost >= budgetState.budgets.warn_at_usd) {
+  if (!budgetState.budgetWarned && projectedCost >= budgetState.budgets.warn_at_usd) {
     budgetState.budgetWarned = true;
-    console.warn(`[budget] WARNING: Session cost $${session.totalCost.toFixed(3)} passed warn threshold $${budgetState.budgets.warn_at_usd}`);
+    console.warn(`[budget] WARNING: Projected session cost $${projectedCost.toFixed(3)} passed warn threshold $${budgetState.budgets.warn_at_usd}`);
     emitter.message(session.id, "orch-1", "Orchestrator", "user",
-      `Budget warning: session cost $${session.totalCost.toFixed(2)} has passed the $${budgetState.budgets.warn_at_usd} threshold.`);
+      `Budget warning: projected session cost $${projectedCost.toFixed(2)} has passed the $${budgetState.budgets.warn_at_usd} threshold.`);
   }
 
-  if (session.totalCost >= budgetState.budgets.max_per_session_usd) {
-    throw new Error(`Budget exceeded: session cost $${session.totalCost.toFixed(3)} >= limit $${budgetState.budgets.max_per_session_usd}`);
+  if (projectedCost >= budgetState.budgets.max_per_session_usd) {
+    throw new Error(`Budget exceeded: projected session cost $${projectedCost.toFixed(3)} >= limit $${budgetState.budgets.max_per_session_usd}`);
   }
 
-  if (session.totalTokens >= budgetState.budgets.max_total_tokens) {
-    throw new Error(`Token budget exceeded: ${session.totalTokens} >= limit ${budgetState.budgets.max_total_tokens}`);
+  if (projectedTokens >= budgetState.budgets.max_total_tokens) {
+    throw new Error(`Token budget exceeded: projected ${projectedTokens} >= limit ${budgetState.budgets.max_total_tokens}`);
   }
 }

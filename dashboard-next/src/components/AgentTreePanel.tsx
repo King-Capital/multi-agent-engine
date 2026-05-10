@@ -113,7 +113,7 @@ function AgentRow({
 					<div className="text-xs font-semibold text-zinc-200 break-words leading-tight">
 						{agent.name}
 					</div>
-					<div className="truncate text-[10px] text-zinc-500">{agent.model}</div>
+					<div className="truncate text-[10px] text-zinc-500">{agent.model && agent.model !== "unknown" ? agent.model : (agent.role === "orchestrator" ? "coordinator" : agent.model)}</div>
 				</div>
 
 				{/* Cost / Tokens bubble */}
