@@ -6,6 +6,7 @@ import type { PlatformAdapter, DelegateOptions, DelegateResult, StreamEvent, Gra
 export class PiAdapter implements PlatformAdapter {
   name = "pi";
 
+  // Pricing as of 2026-05-10. Update when provider pricing changes.
   private static MODEL_PRICING: Record<string, { input: number; output: number; cacheRead?: number }> = {
     // Anthropic (per million tokens)
     "opus-nocache": { input: 15, output: 75, cacheRead: 1.5 },

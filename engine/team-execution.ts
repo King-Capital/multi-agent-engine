@@ -11,7 +11,6 @@ import { parseAssignment, summarizeOutput } from "./output-parsing";
 import { collectIncrementally } from "./incremental-synthesis";
 import { retryWorker, spawnSenior, leadReviewWorkers } from "./worker-lifecycle";
 import type { EventEmitter } from "./event-emitter";
-import type { SandboxPool } from "./sandbox-pool";
 import { logPerformance } from "./perf-log";
 import type {
   PlatformAdapter,
@@ -25,7 +24,6 @@ import type {
 export interface TeamExecutionDeps {
   emitter: EventEmitter;
   messageSenders: Map<string, (msg: string) => void>;
-  sandboxPool: SandboxPool | null;
   trackActivity: (agentId: string, name: string, role: string) => void;
   trackToolCall: (agentId: string, tool: string) => void;
   checkBudget: (session: SessionState, agentId: string, agentCost: number, agentTokens: number) => void;
@@ -43,7 +41,7 @@ export async function runTeamStep(
   previousOutput: string,
   adapterName?: string,
 ): Promise<DelegateResult> {
-  const { emitter, messageSenders, sandboxPool, trackActivity, trackToolCall, checkBudget, getAdapter } = deps;
+  const { emitter, messageSenders, trackActivity, trackToolCall, checkBudget, getAdapter } = deps;
   const teamConfig = getTeam(step.team!);
   const adapter = getAdapter(adapterName);
   const leadPersona = loadPersona(teamConfig.lead.path);
@@ -160,12 +158,6 @@ export async function runTeamStep(
 
     let workerDir = session.workingDir;
 
-    // Assign sandbox if pool is enabled
-    const sandbox = sandboxPool ? await sandboxPool.assign(workerId) : null;
-    if (sandbox) {
-      console.log(`[orchestrator] Agent ${member.name} assigned to sandbox ${sandbox.id} (${sandbox.ip})`);
-    }
-
     if (useWorktrees) {
       const wtId = `${session.id.slice(0, 8)}-${workerId}`;
       workerDir = await createWorktree(session.workingDir, wtId);
@@ -245,8 +237,10 @@ export async function runTeamStep(
       await emitter.agentDone(session.id, workerId, result.grade);
 
       return result;
-    } finally {
-      if (sandboxPool) await sandboxPool.release(workerId);
+    } catch (err) {
+      console.error(`[orchestrator] Worker ${member.name} threw:`, err);
+      await emitter.agentDone(session.id, workerId, "FAILED");
+      throw err;
     }
   });
 
@@ -280,7 +274,9 @@ export async function runTeamStep(
         if (merged) {
           console.log(`[orchestrator] Merged worktree ${wtId} (had changes)`);
         } else {
-          console.warn(`[orchestrator] WARN: Failed to merge worktree ${wtId} -- changes may be lost`);
+          console.error(`[orchestrator] CRITICAL: Worktree merge failed for ${wtId} — worker changes LOST. Manual recovery needed from .git/worktrees/`);
+          await emitter.message(session.id, "orch-1", "Orchestrator", "user",
+            `ERROR: Worktree merge failed for ${wtId} — worker changes were lost. Check .git/worktrees/ for manual recovery.`);
         }
       }
       await cleanupWorktree(session.workingDir, wtId);
@@ -454,7 +450,9 @@ export async function runParallelStep(
         if (merged) {
           console.log(`[orchestrator] Merged team worktree ${wtId} (had changes)`);
         } else {
-          console.warn(`[orchestrator] WARN: Failed to merge team worktree ${wtId} -- changes may be lost`);
+          console.error(`[orchestrator] CRITICAL: Team worktree merge failed for ${wtId} — worker changes LOST. Manual recovery needed from .git/worktrees/`);
+          await deps.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+            `ERROR: Team worktree merge failed for ${wtId} — worker changes were lost. Check .git/worktrees/ for manual recovery.`);
         }
       }
       await cleanupWorktree(session.workingDir, wtId);

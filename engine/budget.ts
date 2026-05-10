@@ -56,6 +56,7 @@ export function projectBudget(
   const burnRate = elapsed > 0 ? (session.totalCost / elapsed) * 60 : 0;
   const percentUsed = (session.totalCost / limit) * 100;
 
+  // Heuristic: assume 50% of elapsed time remains. Conservative for short sessions, reasonable for long ones.
   const estimatedRemainingSec = elapsed > 0 ? elapsed * 0.5 : 300;
   const projectedCost = session.totalCost + (burnRate / 60) * estimatedRemainingSec;
 

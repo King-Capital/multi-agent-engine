@@ -1,5 +1,10 @@
 export type Severity = "P0" | "P1" | "P2" | "P3" | null;
 
+// Known limitation: These patterns are intentionally broad and may produce false positives.
+// The design philosophy is "better to over-pause than miss a real P0". Agent output that
+// happens to contain words like "CRITICAL" or "SECURITY" in non-finding context can trigger
+// a false pause. This is acceptable for safety but may need tuning for specific workflows.
+
 const P0_PATTERNS = [
   /\bP0\s*:/i,
   /\bCRITICAL\b/i,
@@ -27,8 +32,21 @@ export function scanSeverity(text: string): Severity {
   return null;
 }
 
-export function shouldAutoPause(severity: Severity): boolean {
-  return severity === "P0" || severity === "P1";
+// Rate limit: track last fire time per session to avoid repeated pauses within 60s
+const lastPauseFireTime = new Map<string, number>();
+const PAUSE_COOLDOWN_MS = 60_000;
+
+export function shouldAutoPause(severity: Severity, sessionId?: string): boolean {
+  if (severity !== "P0" && severity !== "P1") return false;
+
+  if (sessionId) {
+    const lastFire = lastPauseFireTime.get(sessionId) ?? 0;
+    const now = Date.now();
+    if (now - lastFire < PAUSE_COOLDOWN_MS) return false;
+    lastPauseFireTime.set(sessionId, now);
+  }
+
+  return true;
 }
 
 export function extractFindingExcerpt(text: string, severity: Severity): string {

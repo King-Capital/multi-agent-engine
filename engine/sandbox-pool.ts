@@ -24,9 +24,24 @@ export class SandboxPool {
   constructor(opts?: { pveApi?: string; pveToken?: string; poolSize?: number }) {
     this.pveApi = opts?.pveApi ?? process.env.PVE_API ?? "";
     this.pveToken = opts?.pveToken ?? process.env.PVE_TOKEN ?? "";
+
+    if (this.pveApi && !this.pveApi.startsWith("https://")) {
+      console.warn("[sandbox] WARNING: PVE_API is not HTTPS — credentials may be transmitted in cleartext");
+    }
+
     const poolSize = opts?.poolSize ?? 4;
-    const sandboxSubnet = process.env.MAE_SANDBOX_SUBNET ?? "10.0.0";
-    const sandboxHostOffset = parseInt(process.env.MAE_SANDBOX_HOST_OFFSET ?? "81");
+
+    const rawSubnet = process.env.MAE_SANDBOX_SUBNET ?? "10.0.0";
+    const sandboxSubnet = /^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(rawSubnet) ? rawSubnet : (() => {
+      console.error(`[sandbox] Invalid MAE_SANDBOX_SUBNET "${rawSubnet}", using default "10.0.0"`);
+      return "10.0.0";
+    })();
+
+    const rawOffset = process.env.MAE_SANDBOX_HOST_OFFSET ?? "81";
+    const sandboxHostOffset = /^\d+$/.test(rawOffset) ? parseInt(rawOffset) : (() => {
+      console.error(`[sandbox] Invalid MAE_SANDBOX_HOST_OFFSET "${rawOffset}", using default 81`);
+      return 81;
+    })();
 
     for (let i = 1; i <= poolSize; i++) {
       this.sandboxes.set(i, {
