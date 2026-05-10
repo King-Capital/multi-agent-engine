@@ -48,7 +48,8 @@ export class PiAdapter implements PlatformAdapter {
     if (!pricing) return 0;
     // If we have granular token counts, use them
     if (inputTokens > 0 || outputTokens > 0) {
-      const inputCost = (inputTokens - cacheReadTokens) * pricing.input / 1_000_000;
+      const billableInput = Math.max(0, inputTokens - cacheReadTokens);
+      const inputCost = billableInput * pricing.input / 1_000_000;
       const outputCost = outputTokens * pricing.output / 1_000_000;
       const cacheCost = cacheReadTokens * (pricing.cacheRead ?? pricing.input * 0.1) / 1_000_000;
       return inputCost + outputCost + cacheCost;
@@ -146,8 +147,10 @@ export class PiAdapter implements PlatformAdapter {
 
       const timer = setTimeout(async () => {
         console.error(`[pi-rpc] ${opts.persona.name} timed out after ${timeout}ms`);
-        // Step 1: send abort RPC
+        // Step 1: send abort RPC + cancel reader
         this.sendCmd(proc, { type: "abort" });
+        try { reader.cancel(); } catch {}
+        try { const stdin = proc.stdin; if (stdin && "end" in stdin) (stdin as any).end(); } catch {}
         // Step 2: wait 5s, then SIGTERM
         await Bun.sleep(5000);
         if (resolved) return;
@@ -314,7 +317,7 @@ export class PiAdapter implements PlatformAdapter {
       };
 
       // Race: processStream vs proc.exited (handles hung stream)
-      const exitRace = proc.exited.then(async (exitCode) => {
+      void proc.exited.then(async (exitCode) => {
         // Give stream a moment to finish processing
         await Bun.sleep(1000);
         if (resolved) return;
@@ -346,6 +349,8 @@ export class PiAdapter implements PlatformAdapter {
             tokensUsed: totalTokens,
           });
         }
+      }).catch((err) => {
+        console.error(`[pi-rpc] exitRace error for ${opts.persona.name}:`, err);
       });
 
       processStream();

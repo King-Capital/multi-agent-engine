@@ -127,15 +127,17 @@ export async function executeNudge(
       nudgeMessage = searchResult;
       nudgeType = "web_search";
       state.webSearchUsed = true;
-    } else {
+    } else if (adapter) {
       nudgeMessage = await generateLLMNudge(
-        adapter!,
+        adapter,
         activity.name,
         activity.lastTool,
         idleSeconds,
         session.task,
       );
       nudgeType = "llm_escalated";
+    } else {
+      nudgeMessage = getRuleBasedNudge(state.nudgeCount);
     }
   } else if (adapter) {
     nudgeMessage = await generateLLMNudge(

@@ -370,21 +370,21 @@ async function scaffoldAgent(args: string[]) {
 
   const skillsForRole = {
     orchestrator: [
-      "skills/zero-micromanagement.md",
-      "skills/active-listener.md",
-      "skills/conversational-response.md",
-      "skills/till-done.md",
-      "skills/prompt-engineering.md",
-      "skills/mental-model.md",
+      "agents/skills/zero-micromanagement.md",
+      "agents/skills/active-listener.md",
+      "agents/skills/conversational-response.md",
+      "agents/skills/till-done.md",
+      "agents/skills/prompt-engineering.md",
+      "agents/skills/mental-model.md",
     ],
     lead: [
-      "skills/zero-micromanagement.md",
-      "skills/active-listener.md",
-      "skills/conversational-response.md",
-      "skills/till-done.md",
-      "skills/mental-model.md",
+      "agents/skills/zero-micromanagement.md",
+      "agents/skills/active-listener.md",
+      "agents/skills/conversational-response.md",
+      "agents/skills/till-done.md",
+      "agents/skills/mental-model.md",
     ],
-    worker: ["skills/active-listener.md", "skills/mental-model.md"],
+    worker: ["agents/skills/active-listener.md", "agents/skills/mental-model.md"],
   };
 
   const toolsForRole = {
@@ -396,7 +396,7 @@ async function scaffoldAgent(args: string[]) {
   const persona = `---
 name: ${name}
 model: ${model}
-expertise: expertise/${slug}.md
+expertise: agents/expertise/${slug}.md
 max_expertise_lines: 7000
 skills:
 ${skillsForRole[role].map((s) => `  - ${s}`).join("\n")}
@@ -404,8 +404,8 @@ tools:
 ${toolsForRole[role].map((t) => `  - ${t}`).join("\n")}
 domain:
   read: ["**/*"]
-  write: ["expertise/${slug}.md"]
-  update: ["expertise/${slug}.md"]
+  write: ["agents/expertise/${slug}.md"]
+  update: ["agents/expertise/${slug}.md"]
 ---
 
 # Purpose
