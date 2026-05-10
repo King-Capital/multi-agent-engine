@@ -27,6 +27,7 @@ import { TillDone } from "@/components/TillDone";
 import { FilesView } from "@/components/FilesView";
 import { CostBreakdown } from "@/components/CostBreakdown";
 import { ReplayPlayer } from "@/components/ReplayPlayer";
+import { SessionStatusBar } from "@/components/SessionStatusBar";
 import { api } from "@/lib/api";
 import { buildAgentsFromEvents, mergeAgents } from "@/lib/agents-from-events";
 import { usePolling } from "@/hooks/usePolling";
@@ -872,8 +873,18 @@ function StreamTab({
 		});
 	}, [agentSections, selectedAgentId]);
 
-	// Derive session status from SSE events
+	// Derive session status from SSE events — prefer session_state if available
+	const latestSessionState = React.useMemo(() => {
+		for (let i = liveEvents.length - 1; i >= 0; i--) {
+			if (liveEvents[i]!.event_type === "session_state") return liveEvents[i]!;
+		}
+		return null;
+	}, [liveEvents]);
+
 	const sessionStatus = React.useMemo(() => {
+		if (latestSessionState?.data?.session_status) {
+			return latestSessionState.data.session_status as "active" | "paused" | "completed" | "error";
+		}
 		for (let i = liveEvents.length - 1; i >= 0; i--) {
 			const t = liveEvents[i]!.event_type;
 			if (t === "pause") return "paused" as const;
@@ -881,7 +892,7 @@ function StreamTab({
 			if (t === "session_end") return "completed" as const;
 		}
 		return "active" as const;
-	}, [liveEvents]);
+	}, [liveEvents, latestSessionState]);
 
 	return (
 		<div className="flex flex-col h-full min-h-0">
@@ -890,6 +901,8 @@ function StreamTab({
 					{streamError}
 				</p>
 			)}
+
+			{latestSessionState && <SessionStatusBar event={latestSessionState} />}
 
 			{/* Agent filter indicator */}
 			{selectedAgentId && (

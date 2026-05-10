@@ -13,7 +13,6 @@ import { sanitizeAgentInput } from "./security";
 function wrapStepOutput(output: string): string {
   return `<previous_agent_output>\n${sanitizeAgentInput(output)}\n</previous_agent_output>`;
 }
-import { createWorktree, mergeWorktree, cleanupWorktree } from "./worktree";
 import { delegateWithHealing } from "./self-healing";
 import { PipelineTracker } from "./pipeline-state";
 import { SandboxPool } from "./sandbox-pool";
@@ -27,9 +26,9 @@ import { ActiveMonitor } from "./active-monitor";
 import { loadBudgets, checkBudget } from "./budget";
 import type { BudgetState } from "./budget";
 import { sendUserMessage, listenForUserMessages, stopListening } from "./messaging";
-import { leadReviewWorkers } from "./worker-lifecycle";
 import { runTeamStep, runParallelStep } from "./team-execution";
 import { logPerformance } from "./perf-log";
+import { OrchestratorLoop } from "./orchestrator-loop";
 
 import type {
   PlatformAdapter,
@@ -39,6 +38,7 @@ import type {
   ChainStep,
   SessionState,
   TillDoneItem,
+  OrchestratorAction,
 } from "./types";
 
 export class Orchestrator {
@@ -56,6 +56,10 @@ export class Orchestrator {
   private budgetState: BudgetState = { budgets: null, budgetWarned: false };
   private pausedSessions = new Set<string>();
   private messageBuffers = new Map<string, string[]>();
+  private actionQueues = new Map<string, OrchestratorAction[]>();
+  private skippedSteps = new Set<number>();
+  private originalStepCount = 0;
+  private orchestratorLoop: OrchestratorLoop | null = null;
 
   constructor(dashboardUrl?: string, apiToken?: string) {
     this.dashboardUrl = dashboardUrl ?? "http://localhost:8400";
@@ -101,6 +105,10 @@ export class Orchestrator {
       const args = parts.slice(1).join(" ");
       this.handleSteerCommand(sessionId, cmd, args);
       return;
+    }
+    if (this.orchestratorLoop) {
+      void this.orchestratorLoop.handleUserMessage(message).catch(err =>
+        console.error("[orchestrator] Loop handleUserMessage failed:", err));
     }
     const buf = this.messageBuffers.get(sessionId) ?? [];
     buf.push(message);
@@ -266,10 +274,23 @@ export class Orchestrator {
       getAdapter: () => this.getAdapter(),
     });
     this.activeMonitor.start();
+    const actionQueue: OrchestratorAction[] = [];
+    this.actionQueues.set(sessionId, actionQueue);
+    this.orchestratorLoop = new OrchestratorLoop({
+      session,
+      adapter: this.getAdapter(opts.adapter),
+      emitter: this.emitter,
+      budgetState: this.budgetState,
+      pausedSessions: this.pausedSessions,
+      messageBuffers: this.messageBuffers,
+      actionQueue,
+    });
+    this.orchestratorLoop.start();
     this.sseAbort = listenForUserMessages(this.dashboardUrl, sessionId, (sid, content) => {
       this.sendUserMessage(sid, content);
     });
 
+    this.skippedSteps.clear();
     try {
       await this.runChain(session, chain, taskBody, opts.adapter);
       session.status = "completed";
@@ -283,6 +304,9 @@ export class Orchestrator {
 
     this.activeMonitor?.stop();
     this.activeMonitor = null;
+    this.orchestratorLoop?.stop();
+    this.orchestratorLoop = null;
+    this.actionQueues.delete(sessionId);
     await this.emitter.sessionEnd(sessionId);
     stopListening(this.sseAbort);
     this.sseAbort = null;
@@ -296,6 +320,7 @@ export class Orchestrator {
 
   private async runChain(session: SessionState, chain: Chain, task: string, adapterName?: string): Promise<void> {
     const steps = chain.steps ?? this.normalizeParallelChain(chain);
+    this.originalStepCount = steps.length;
     let previousOutput = "";
     let stepResult: DelegateResult | undefined;
     let parallelResults: DelegateResult[] | undefined;
@@ -307,11 +332,28 @@ export class Orchestrator {
       const step = steps[i];
       if (!step) continue;
 
+      if (this.skippedSteps.has(i)) {
+        await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+          `Step ${i + 1} skipped.`);
+        continue;
+      }
+
       // Pause gate: wait while session is paused
       while (this.pausedSessions.has(session.id)) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
       if (session.status === "error") break;
+
+      // Drain orchestrator loop action queue
+      const actionQueue = this.actionQueues.get(session.id) ?? [];
+      while (actionQueue.length > 0) {
+        const action = actionQueue.shift()!;
+        await this.processLoopAction(session, action, i, steps);
+        if (session.status === "paused") break;
+      }
+
+      // Update loop with current step
+      this.orchestratorLoop?.setCurrentStep(i, steps.length);
 
       // Drain buffered steer messages into context
       const buffered = this.drainMessageBuffer(session.id);
@@ -332,6 +374,11 @@ export class Orchestrator {
       pipeline?.startStage(stageIdx);
       await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
         `Starting step ${i + 1}/${steps.length}: ${stepLabel}.`);
+      this.orchestratorLoop?.recordEvent({
+        session_id: session.id, agent_id: "orch-1",
+        event_type: "step_start", timestamp: new Date().toISOString(),
+        data: { step: i, label: stepLabel },
+      });
 
       if (step.deterministic) {
         const detResult = await this.runDeterministicStep(session, step, i);
@@ -407,6 +454,65 @@ export class Orchestrator {
         this.markTillDone(session, i);
       }
       await this.emitter.tillDone(session.id, session.name, session.tillDone);
+
+      this.orchestratorLoop?.trigger("agent_done", { step: i, grade: stepGrade });
+      this.orchestratorLoop?.recordEvent({
+        session_id: session.id, agent_id: "orch-1",
+        event_type: "step_complete", timestamp: new Date().toISOString(),
+        data: { step: i, grade: stepGrade },
+      });
+    }
+  }
+
+  private async processLoopAction(
+    session: SessionState,
+    action: OrchestratorAction,
+    currentStepIndex: number,
+    steps: ChainStep[],
+  ): Promise<void> {
+    switch (action.type) {
+      case "PAUSE":
+        this.pausedSessions.add(session.id);
+        session.status = "paused";
+        await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+          `Session paused by orchestrator: ${action.reason}`);
+        break;
+      case "SKIP_STEP":
+        if (action.stepIndex > currentStepIndex && action.stepIndex < steps.length) {
+          this.skippedSteps.add(action.stepIndex);
+          const pipeline = this.pipelines.get(session.id);
+          pipeline?.failStage(action.stepIndex, `Skipped: ${action.reason}`);
+          await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+            `Skipping step ${action.stepIndex + 1}: ${action.reason}`);
+        }
+        break;
+      case "REASSIGN":
+        if (action.stepIndex > currentStepIndex && action.stepIndex < steps.length) {
+          steps[action.stepIndex] = { ...steps[action.stepIndex]!, team: action.newTeam };
+          await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+            `Reassigning step ${action.stepIndex + 1} to ${action.newTeam}: ${action.reason}`);
+        }
+        break;
+      case "SPAWN_TEAM": {
+        const spawnedCount = steps.length - this.originalStepCount;
+        if (spawnedCount >= 3) {
+          await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+            `Cannot spawn more teams (limit: 3 additional). Reason: ${action.reason}`);
+          break;
+        }
+        steps.push({ team: action.team });
+        await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+          `Spawning additional team ${action.team}: ${action.reason}`);
+        break;
+      }
+      case "ESCALATE_TO_USER":
+        await this.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+          `**Orchestrator needs your input:** ${action.message}`);
+        this.pausedSessions.add(session.id);
+        session.status = "paused";
+        break;
+      case "CONTINUE":
+        break;
     }
   }
 
@@ -486,6 +592,11 @@ export class Orchestrator {
         if (streamEvt.type === "tool_call") {
           trackToolCall(this.agentActivity, agentId, streamEvt.tool ?? "");
           this.emitter.toolCall(session.id, agentId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
+          this.orchestratorLoop?.recordEvent({
+            session_id: session.id, agent_id: agentId,
+            event_type: "tool_call", timestamp: new Date().toISOString(),
+            data: { tool: streamEvt.tool ?? "", status: streamEvt.status ?? "running" },
+          });
         } else if (streamEvt.type === "cost") {
           this.emitter.costUpdate(session.id, agentId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
         } else if (streamEvt.type === "assistant_text" && streamEvt.content) {
@@ -496,6 +607,7 @@ export class Orchestrator {
             const excerpt = extractFindingExcerpt(streamEvt.content, severity);
             this.emitter.severityAlert(session.id, agentId, severity, excerpt);
             this.emitter.autoPause(session.id, `severity:${severity}`);
+            this.orchestratorLoop?.trigger("severity_alert", { severity, excerpt });
           }
         }
       },
@@ -670,7 +782,7 @@ export class Orchestrator {
     });
   }
 
-  private async runDeterministicStep(session: SessionState, step: ChainStep, stepIndex: number): Promise<string | null> {
+  private async runDeterministicStep(session: SessionState, step: ChainStep, _stepIndex: number): Promise<string | null> {
     const det = step.deterministic!;
     const label = det.label ?? det.command.slice(0, 40);
     const maxRetries = det.max_retries ?? 3;

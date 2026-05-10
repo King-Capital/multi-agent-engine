@@ -1,4 +1,35 @@
 export type AgentRole = "orchestrator" | "lead" | "sr" | "worker" | "scout";
+
+// --- Orchestrator Loop Types (#174) ---
+
+export type OrchestratorAction =
+  | { type: "CONTINUE" }
+  | { type: "PAUSE"; reason: string }
+  | { type: "REASSIGN"; stepIndex: number; newTeam: string; reason: string }
+  | { type: "SKIP_STEP"; stepIndex: number; reason: string }
+  | { type: "SPAWN_TEAM"; team: string; task: string; reason: string }
+  | { type: "ESCALATE_TO_USER"; message: string };
+
+export type OrchestratorTrigger =
+  | "periodic"
+  | "user_message"
+  | "agent_done"
+  | "stall_detected"
+  | "severity_alert"
+  | "budget_warning";
+
+export interface SessionStateEvent {
+  phase: string;
+  active_leads: string[];
+  progress: number;
+  current_step: number;
+  total_steps: number;
+  assessment: string;
+  session_status: "active" | "paused" | "completed" | "error";
+  budget_percent: number;
+  actions: string[];
+  last_updated: string;
+}
 export type AgentStatus = "idle" | "running" | "done" | "error" | "blocked";
 export type GradeLevel = "PERFECT" | "VERIFIED" | "PARTIAL" | "FEEDBACK" | "FAILED" | "UNGRADED";
 
