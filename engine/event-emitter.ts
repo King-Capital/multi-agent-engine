@@ -12,6 +12,9 @@ export class EventEmitter {
   private pgAgentIds: Map<string, number> = new Map();
   private droppedEvents = 0;
   private dashboardDown = false;
+  private dashboardDownAt = 0;
+  private static readonly DASHBOARD_RETRY_MS = 30_000;
+  private static readonly MAX_BUFFER_SIZE = 1000;
 
   constructor(dashboardUrl?: string, apiToken?: string) {
     this.dashboardUrl = dashboardUrl ?? "http://localhost:8400";
@@ -28,7 +31,10 @@ export class EventEmitter {
   }
 
   private async fetchWithRetry(url: string, init: RequestInit): Promise<Response | null> {
-    if (this.dashboardDown) return null;
+    if (this.dashboardDown) {
+      if (Date.now() - this.dashboardDownAt < EventEmitter.DASHBOARD_RETRY_MS) return null;
+      this.dashboardDown = false;
+    }
     for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
       try {
         const res = await fetch(url, init);
@@ -40,6 +46,7 @@ export class EventEmitter {
         const code = (err as { code?: string })?.code ?? "";
         if (code === "ConnectionRefused") {
           this.dashboardDown = true;
+          this.dashboardDownAt = Date.now();
           return null;
         }
         if (attempt < RETRY_DELAYS.length) {
@@ -58,6 +65,10 @@ export class EventEmitter {
     // Assign monotonic sequence number for ordering
     (event as SessionEvent & { seq: number }).seq = ++this.seq;
 
+    if (this.buffer.length >= EventEmitter.MAX_BUFFER_SIZE) {
+      this.buffer.shift();
+      this.droppedEvents++;
+    }
     this.buffer.push(event);
     if (!this.flushing) {
       this.flushing = true;

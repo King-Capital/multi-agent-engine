@@ -33,9 +33,8 @@ export async function logPerformance(record: PerfRecord): Promise<void> {
   const dir = dirname(filePath);
   await Bun.write(join(dir, ".keep"), ""); // ensure directory exists
   const line = JSON.stringify(record) + "\n";
-  const file = Bun.file(filePath);
-  const existing = await file.exists() ? await file.text() : "";
-  await Bun.write(filePath, existing + line);
+  const { appendFileSync } = await import("fs");
+  appendFileSync(filePath, line);
 }
 
 export async function loadPerformance(): Promise<PerfRecord[]> {

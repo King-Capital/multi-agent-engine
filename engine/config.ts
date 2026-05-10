@@ -168,7 +168,7 @@ export function loadModelRouting(): ModelRoutingConfig {
 export function writeModelRouting(config: ModelRoutingConfig): void {
   const path = join(BASE_DIR, "configs/model-routing.yaml");
   writeFileSync(path, stringifyYaml(config));
-  cache.delete("configs/model-routing.yaml");
+  cache.delete(join(BASE_DIR, "configs/model-routing.yaml"));
 }
 
 export function resolveModel(alias: string): string {

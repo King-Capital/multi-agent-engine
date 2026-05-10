@@ -8,14 +8,18 @@ import {
   loadPrompt,
 } from "./config";
 import { EventEmitter } from "./event-emitter";
-import { sanitizeAgentInput, validateAgentOutput } from "./security";
-import { isGitRepo, createWorktree, mergeWorktree, cleanupWorktree } from "./worktree";
+import { sanitizeAgentInput } from "./security";
+
+function wrapStepOutput(output: string): string {
+  return `<previous_agent_output>\n${sanitizeAgentInput(output)}\n</previous_agent_output>`;
+}
+import { createWorktree, mergeWorktree, cleanupWorktree } from "./worktree";
 import { delegateWithHealing } from "./self-healing";
 import { PipelineTracker } from "./pipeline-state";
 import { SandboxPool } from "./sandbox-pool";
 
 // Extracted modules
-import { parseAssignment, parseReviews, summarizeOutput, worstGrade } from "./output-parsing";
+import { summarizeOutput, worstGrade } from "./output-parsing";
 import { trackActivity, trackToolCall } from "./monitoring";
 import { scanSeverity, shouldAutoPause, extractFindingExcerpt } from "./severity-scanner";
 import type { AgentActivity } from "./monitoring";
@@ -23,7 +27,7 @@ import { ActiveMonitor } from "./active-monitor";
 import { loadBudgets, checkBudget } from "./budget";
 import type { BudgetState } from "./budget";
 import { sendUserMessage, listenForUserMessages, stopListening } from "./messaging";
-import { retryWorker, spawnSenior, leadReviewWorkers } from "./worker-lifecycle";
+import { leadReviewWorkers } from "./worker-lifecycle";
 import { runTeamStep, runParallelStep } from "./team-execution";
 import { logPerformance } from "./perf-log";
 
@@ -35,7 +39,6 @@ import type {
   ChainStep,
   SessionState,
   TillDoneItem,
-  GradeLevel,
 } from "./types";
 
 export class Orchestrator {
@@ -324,13 +327,13 @@ export class Orchestrator {
         }
       } else if (step.parallel) {
         parallelResults = await runParallelStep(teamDeps, session, step, task, previousOutput, adapterName);
-        previousOutput = parallelResults.map((r) => `[${r.agentName}]: ${r.output}`).join("\n\n");
+        previousOutput = wrapStepOutput(parallelResults.map((r) => `[${r.agentName}]: ${r.output}`).join("\n\n"));
       } else if (step.team) {
         stepResult = await runTeamStep(teamDeps, session, step, task, previousOutput, adapterName);
-        previousOutput = stepResult.output;
+        previousOutput = wrapStepOutput(stepResult.output);
       } else if (step.agent) {
         stepResult = await this.runAgent(session, step.agent, task, previousOutput, "orch-1", adapterName);
-        previousOutput = stepResult.output;
+        previousOutput = wrapStepOutput(stepResult.output);
       }
 
       // Retry on FEEDBACK/FAILED — always, not just when on_feedback is configured
