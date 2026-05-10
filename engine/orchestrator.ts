@@ -285,6 +285,7 @@ export class Orchestrator {
       trackToolCall: (agentId: string, tool: string) => trackToolCall(this.agentActivity, agentId, tool),
       checkBudget: (session: SessionState, agentId: string, agentCost: number, agentTokens: number) => checkBudget(this.budgetState, session, agentId, agentCost, agentTokens, this.emitter),
       getAdapter: (name?: string) => this.getAdapter(name),
+      orchestratorLoop: this.orchestratorLoop,
     };
   }
 

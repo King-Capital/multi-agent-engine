@@ -21,6 +21,7 @@ import type {
   GradeLevel,
 } from "./types";
 import { buildStreamHandler, buildSendMessage } from "./stream-handler";
+import type { OrchestratorLoop } from "./orchestrator-loop";
 
 export interface TeamExecutionDeps {
   emitter: EventEmitter;
@@ -29,6 +30,7 @@ export interface TeamExecutionDeps {
   trackToolCall: (agentId: string, tool: string) => void;
   checkBudget: (session: SessionState, agentId: string, agentCost: number, agentTokens: number) => void;
   getAdapter: (name?: string) => PlatformAdapter;
+  orchestratorLoop?: OrchestratorLoop | null;
 }
 
 /**
@@ -98,7 +100,7 @@ export async function runTeamStep(
     teamColor: teamConfig["team-color"],
     onStreamEvent: buildStreamHandler({
       emitter, sessionId: session.id, agentId: leadId,
-      trackToolCall, messageSenders,
+      trackToolCall, messageSenders, orchestratorLoop: deps.orchestratorLoop,
     }),
     sendMessage: buildSendMessage(messageSenders, session.id, leadId),
   };
@@ -190,7 +192,7 @@ export async function runTeamStep(
       teamColor: member.color ?? teamConfig["team-color"],
       onStreamEvent: buildStreamHandler({
         emitter, sessionId: session.id, agentId: workerId,
-        trackToolCall, messageSenders,
+        trackToolCall, messageSenders, orchestratorLoop: deps.orchestratorLoop,
       }),
       sendMessage: buildSendMessage(messageSenders, session.id, workerId),
     };
@@ -521,7 +523,7 @@ export async function runParallelStep(
     teamColor: "#a855f7",
     onStreamEvent: buildStreamHandler({
       emitter, sessionId: session.id, agentId: synthId,
-      trackToolCall: trackTool, messageSenders,
+      trackToolCall: trackTool, messageSenders, orchestratorLoop: deps.orchestratorLoop,
     }),
     sendMessage: buildSendMessage(messageSenders, session.id, synthId),
   };
