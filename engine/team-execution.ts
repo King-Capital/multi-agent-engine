@@ -8,6 +8,7 @@ import {
 import { delegateWithHealing } from "./self-healing";
 import { isGitRepo, createWorktree, mergeWorktree, cleanupWorktree } from "./worktree";
 import { parseAssignment, summarizeOutput } from "./output-parsing";
+import { collectIncrementally } from "./incremental-synthesis";
 import { retryWorker, spawnSenior, leadReviewWorkers } from "./worker-lifecycle";
 import type { EventEmitter } from "./event-emitter";
 import type { SandboxPool } from "./sandbox-pool";
@@ -249,7 +250,27 @@ export async function runTeamStep(
     }
   });
 
-  const settled = await Promise.allSettled(workerPromises);
+  const settled = await collectIncrementally(workerPromises, {
+    onResult: async (result, index, total) => {
+      await emitter.message(
+        session.id,
+        "orch-1",
+        "Orchestrator",
+        "user",
+        `Worker ${index + 1}/${total} complete: ${result.agentName} (${result.grade ?? "UNGRADED"})`,
+      );
+    },
+    onPartialReady: async (completed, remaining) => {
+      await emitter.message(
+        session.id,
+        "orch-1",
+        "Orchestrator",
+        "user",
+        `Partial synthesis available: ${completed.length} workers done, ${remaining} remaining`,
+      );
+    },
+    partialThreshold: 0.5,
+  });
 
   // Worktree cleanup always runs, even if workers threw
   for (const wtId of workerWtIds) {

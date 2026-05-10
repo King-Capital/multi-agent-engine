@@ -1,4 +1,5 @@
 import type { SessionEvent } from "./types";
+import type { BudgetProjection } from "./budget";
 
 const RETRY_DELAYS = [100, 500, 2000];
 
@@ -225,6 +226,54 @@ export class EventEmitter {
       event_type: "self_heal",
       timestamp: new Date().toISOString(),
       data: { failed_worker: failedWorker, heal_action: action },
+    });
+  }
+
+  stallDetected(sessionId: string, agentId: string, agentName: string, idleSeconds: number) {
+    return this.emit({
+      session_id: sessionId,
+      agent_id: agentId,
+      event_type: "stall_detected",
+      timestamp: new Date().toISOString(),
+      data: { agent_name: agentName, idle_seconds: idleSeconds },
+    });
+  }
+
+  nudgeSent(sessionId: string, agentId: string, agentName: string, nudgeType: string, nudgeCount: number, message: string) {
+    return this.emit({
+      session_id: sessionId,
+      agent_id: agentId,
+      event_type: "nudge_sent",
+      timestamp: new Date().toISOString(),
+      data: { agent_name: agentName, nudge_type: nudgeType, nudge_count: nudgeCount, nudge_message: message },
+    });
+  }
+
+  budgetWarning(sessionId: string, projection: BudgetProjection) {
+    return this.emit({
+      session_id: sessionId,
+      agent_id: "orchestrator",
+      event_type: "budget_warning",
+      timestamp: new Date().toISOString(),
+      data: {
+        current_cost: projection.currentCost,
+        projected_cost: projection.projectedCost,
+        remaining_budget: projection.remainingBudget,
+        percent_used: projection.percentUsed,
+        burn_rate: projection.burnRatePerMinute,
+        will_exceed: projection.willExceed,
+        budget_action: projection.action,
+      },
+    });
+  }
+
+  autoPause(sessionId: string, reason: string) {
+    return this.emit({
+      session_id: sessionId,
+      agent_id: "orchestrator",
+      event_type: "auto_pause",
+      timestamp: new Date().toISOString(),
+      data: { reason },
     });
   }
 

@@ -16,8 +16,9 @@ import { SandboxPool } from "./sandbox-pool";
 
 // Extracted modules
 import { parseAssignment, parseReviews, summarizeOutput, worstGrade } from "./output-parsing";
-import { trackActivity, trackToolCall, startMonitor, stopMonitor } from "./monitoring";
+import { trackActivity, trackToolCall } from "./monitoring";
 import type { AgentActivity } from "./monitoring";
+import { ActiveMonitor } from "./active-monitor";
 import { loadBudgets, checkBudget } from "./budget";
 import type { BudgetState } from "./budget";
 import { sendUserMessage, listenForUserMessages, stopListening } from "./messaging";
@@ -43,7 +44,7 @@ export class Orchestrator {
   private dashboardUrl: string;
   private sessions: Map<string, SessionState> = new Map();
   private agentActivity: Map<string, AgentActivity> = new Map();
-  private monitorInterval: ReturnType<typeof setInterval> | null = null;
+  private activeMonitor: ActiveMonitor | null = null;
   private messageSenders: Map<string, (msg: string) => void> = new Map();
   private pipelines: Map<string, PipelineTracker> = new Map();
   private sandboxPool: SandboxPool | null = null;
@@ -234,7 +235,20 @@ export class Orchestrator {
 
     this.budgetState = loadBudgets();
     await this.emitter.tillDone(sessionId, sessionName, session.tillDone);
-    this.monitorInterval = startMonitor(this.agentActivity, sessionId);
+    this.activeMonitor = new ActiveMonitor({
+      agentActivity: this.agentActivity,
+      session,
+      budgetState: this.budgetState,
+      emitter: this.emitter,
+      messageSenders: this.messageSenders,
+      onAutoPause: (reason) => {
+        this.pausedSessions.add(sessionId);
+        session.status = "paused";
+        console.warn(`[orchestrator] Session auto-paused: ${reason}`);
+      },
+      getAdapter: () => this.getAdapter(),
+    });
+    this.activeMonitor.start();
     this.sseAbort = listenForUserMessages(this.dashboardUrl, sessionId, (sid, content) => {
       this.sendUserMessage(sid, content);
     });
@@ -250,8 +264,8 @@ export class Orchestrator {
       await this.emitter.pgUpdateSession(sessionId, { status: "failed" });
     }
 
-    stopMonitor(this.monitorInterval, this.agentActivity);
-    this.monitorInterval = null;
+    this.activeMonitor?.stop();
+    this.activeMonitor = null;
     await this.emitter.sessionEnd(sessionId);
     stopListening(this.sseAbort);
     this.sseAbort = null;

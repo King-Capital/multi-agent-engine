@@ -268,6 +268,77 @@ function ErrorEntry({ ev }: { ev: LiveEvent }) {
 	);
 }
 
+// ── Monitor events (stall, nudge, budget, auto-pause) ────────────────────────
+
+function StallEntry({ ev }: { ev: LiveEvent }) {
+	const d = ev.data ?? {};
+	return (
+		<div className="mb-2 ml-4 rounded-md bg-white/[0.03] border border-white/5 border-l-2 border-l-yellow-500/50 p-2">
+			<div className="flex items-center gap-1.5 text-xs">
+				<span className="text-yellow-400">⏳</span>
+				<span className="text-yellow-400 font-bold">Stall Detected</span>
+				<span className="text-zinc-500">{String(d.agent_name ?? "")}</span>
+			</div>
+			<p className="text-xs text-yellow-300/70 mt-0.5">
+				Idle for {String(d.idle_seconds ?? "?")}s
+			</p>
+		</div>
+	);
+}
+
+function NudgeEntry({ ev }: { ev: LiveEvent }) {
+	const d = ev.data ?? {};
+	const typeLabel = d.nudge_type === "web_search" ? "Web Search" : d.nudge_type === "llm_escalated" ? "LLM Nudge" : "Nudge";
+	const nudgeMsg = typeof d.nudge_message === "string" ? d.nudge_message : "";
+	return (
+		<div className="mb-2 ml-4 rounded-md bg-white/[0.03] border border-white/5 border-l-2 border-l-blue-500/50 p-2">
+			<div className="flex items-center gap-1.5 text-xs">
+				<span className="text-blue-400">💬</span>
+				<span className="text-blue-400 font-bold">{typeLabel} #{String(d.nudge_count)}</span>
+				<span className="text-zinc-500">→ {String(d.agent_name ?? "")}</span>
+			</div>
+			{nudgeMsg && (
+				<p className="text-xs text-zinc-400 mt-0.5 truncate max-w-md" title={nudgeMsg}>
+					{nudgeMsg.slice(0, 120)}
+				</p>
+			)}
+		</div>
+	);
+}
+
+function BudgetWarningEntry({ ev }: { ev: LiveEvent }) {
+	const d = ev.data ?? {};
+	const pct = typeof d.percent_used === "number" ? d.percent_used.toFixed(0) : "?";
+	const cost = typeof d.current_cost === "number" ? d.current_cost.toFixed(2) : "?";
+	const proj = typeof d.projected_cost === "number" ? d.projected_cost.toFixed(2) : "?";
+	return (
+		<div className="mb-2 ml-4 rounded-md bg-orange-950/30 border border-orange-900/40 border-l-2 border-l-orange-500/50 p-2">
+			<div className="flex items-center gap-1.5 text-xs">
+				<span className="text-orange-400">⚡</span>
+				<span className="text-orange-400 font-bold">Budget Warning</span>
+			</div>
+			<p className="text-xs text-orange-300/70 mt-0.5">
+				{pct}% used (${cost} current, ${proj} projected)
+			</p>
+		</div>
+	);
+}
+
+function AutoPauseEntry({ ev }: { ev: LiveEvent }) {
+	const d = ev.data ?? {};
+	return (
+		<div className="mb-2 ml-4 rounded-md bg-red-950/30 border border-red-900/40 border-l-2 border-l-red-500/50 p-2">
+			<div className="flex items-center gap-1.5 text-xs">
+				<span className="text-red-400">⏸</span>
+				<span className="text-red-400 font-bold">Session Auto-Paused</span>
+			</div>
+			<p className="text-xs text-red-300/70 mt-0.5">
+				Reason: {String(d.reason ?? "unknown")}
+			</p>
+		</div>
+	);
+}
+
 // ── Agent spawn / done (brief inline) ─────────────────────────────────────────
 
 function AgentSpawnLine({ ev }: { ev: LiveEvent }) {
@@ -573,6 +644,14 @@ function AgentSectionBlock({ section }: { section: AgentSection }) {
 							return <AgentSpawnLine key={`sp-${i}`} ev={ev} />;
 						case "agent_done":
 							return <AgentDoneLine key={`ad-${i}`} ev={ev} />;
+						case "stall_detected":
+							return <StallEntry key={`stall-${i}`} ev={ev} />;
+						case "nudge_sent":
+							return <NudgeEntry key={`nudge-${i}`} ev={ev} />;
+						case "budget_warning":
+							return <BudgetWarningEntry key={`bw-${i}`} ev={ev} />;
+						case "auto_pause":
+							return <AutoPauseEntry key={`ap-${i}`} ev={ev} />;
 						default:
 							return null;
 					}
