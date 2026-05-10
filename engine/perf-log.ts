@@ -42,10 +42,16 @@ export async function loadPerformance(): Promise<PerfRecord[]> {
   const file = Bun.file(filePath);
   if (!(await file.exists())) return [];
   const text = await file.text();
-  return text
-    .split("\n")
-    .filter((line) => line.trim().length > 0)
-    .map((line) => JSON.parse(line) as PerfRecord);
+  const records: PerfRecord[] = [];
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      records.push(JSON.parse(line) as PerfRecord);
+    } catch {
+      // skip corrupted lines
+    }
+  }
+  return records;
 }
 
 export function buildScorecard(records?: PerfRecord[]): ModelScore[] {

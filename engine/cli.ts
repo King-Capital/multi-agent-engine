@@ -12,39 +12,32 @@ const args = process.argv.slice(2);
 
 if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
   console.log(`
-Multi-Agent Orchestration Engine
+Multi-Agent Orchestration Engine v${(() => { try { return readFile(join(import.meta.dir, "..", "VERSION"), "utf-8").trim(); } catch { return "?"; } })()}
 
-Usage:
-  agent run <prompt-name> [args...]     Run a reusable prompt workflow
-  agent chain <chain-name> <task>       Run a named chain directly
-  agent task <task-description>         Run plan-build-review on a task
-  agent session list                    List all sessions
-  agent session close <id> [--status done|error]  Close a session
-  agent new-agent <name> <role> <team>  Scaffold a new agent
-  agent version                         Show MAE version and system info
-  agent info                            Show detailed system overview
-  agent adapters                        List available adapters
-  agent discover <url>                  Discover a remote A2A agent
+Commands:
+  run         Run a prompt workflow          mae run --help
+  chain       Run a named chain              mae chain --help
+  task        Quick task (plan-build-review)  mae task --help
+  session     List/manage sessions           mae session --help
+  config  ◆   Configure models & budgets     mae config --help
+  discover    Discover A2A agents            mae discover <url>
+  new-agent   Scaffold a new agent           mae new-agent <name> <role> <team>
+  info        System overview                mae info
+  version     Version info                   mae version
+  adapters    List adapters                  mae adapters
 
-Options:
-  --adapter <name>     Use specific adapter (pi, a2a, echo)
-  --dashboard <url>    Dashboard URL (default: http://localhost:8400)
-  --a2a-url <url>      Remote A2A agent URL (sets default A2A endpoint)
-  --a2a-token <token>  Bearer token for A2A agent auth
-  --dry-run            Use echo adapter for testing
+  ◆ = interactive TUI available (arrow-key navigation)
 
-Examples:
-  agent run plan-build-review "Add input validation to auth"
-  agent run review "git diff HEAD~1"
-  agent run parallel-build "Implement caching layer"
-  agent chain build-verify "Fix the login bug"
-  agent task "Add rate limiting to API endpoints"
-  agent task "review auth" --adapter a2a --a2a-url http://localhost:41271
-  agent discover http://localhost:41271
-  agent session list
-  agent session close 2dbc90f5 --status error
-  agent new-agent billing-specialist worker Engineering
+Run 'mae <command> --help' for details on any command.
+Run 'mae tui' for the interactive config interface.
   `);
+  process.exit(0);
+}
+
+const subHelp = args[1] === "--help" || args[1] === "-h";
+
+function showSubHelp(text: string): never {
+  console.log(text);
   process.exit(0);
 }
 
@@ -109,9 +102,27 @@ for (const sig of ["SIGTERM", "SIGINT"] as const) {
 
 switch (command) {
   case "run": {
+    if (subHelp) showSubHelp(`
+mae run — Run a prompt workflow
+
+Usage: mae run <prompt-name> [args...]
+
+Prompts:  ${(() => { try { return require("fs").readdirSync(join(import.meta.dir, "..", "prompts")).filter((f: string) => f.endsWith(".md") && f !== "BASE.md").map((f: string) => f.replace(".md", "")).join(", "); } catch { return "plan-build-review, review, scout, swarm-review, ..."; }})()}
+
+Options:
+  --adapter <name>     Use specific adapter (pi, a2a, echo)
+  --dry-run            Use echo adapter for testing
+  --cwd <path>         Working directory for agents
+
+Examples:
+  mae run plan-build-review "Add input validation to auth"
+  mae run review "git diff HEAD~1"
+  mae run swarm-review "Review engine/ for bugs"
+  mae run scout "engine/"
+`);
     const promptName = args[1];
     if (!promptName) {
-      console.error("Usage: agent run <prompt-name> [args...]");
+      console.error("Usage: mae run <prompt-name> [args...]\nRun 'mae run --help' for available prompts.");
       process.exit(1);
     }
     const promptArgs = stripFlags(args.slice(2));
@@ -127,10 +138,33 @@ switch (command) {
   }
 
   case "chain": {
+    if (subHelp) {
+      const chainsFile = loadChains();
+      const chainList = Object.entries(chainsFile.chains).map(([name, c]) =>
+        `  ${name.padEnd(22)} ${(c.steps?.length ?? 0)} steps  ${c.description}`).join("\n");
+      showSubHelp(`
+mae chain — Run a named chain
+
+Usage: mae chain <chain-name> <task>
+
+Chains:
+${chainList}
+
+Options:
+  --adapter <name>     Use specific adapter
+  --dry-run            Use echo adapter for testing
+  --cwd <path>         Working directory for agents
+
+Examples:
+  mae chain build-verify "Fix the login bug"
+  mae chain review-only "Review auth module"
+  mae chain plan-build-review "Add caching layer"
+`);
+    }
     const chainName = args[1];
     const task = stripFlags(args.slice(2)).join(" ");
     if (!chainName || !task) {
-      console.error("Usage: agent chain <chain-name> <task>");
+      console.error("Usage: mae chain <chain-name> <task>\nRun 'mae chain --help' for available chains.");
       process.exit(1);
     }
     const session = await orch.run({
@@ -144,9 +178,26 @@ switch (command) {
   }
 
   case "task": {
+    if (subHelp) showSubHelp(`
+mae task — Quick task using plan-build-review chain
+
+Usage: mae task <task-description>
+
+Runs the default plan-build-review chain: plan → build → typecheck → validate.
+
+Options:
+  --adapter <name>     Use specific adapter
+  --dry-run            Use echo adapter for testing
+  --cwd <path>         Working directory for agents
+
+Examples:
+  mae task "Add rate limiting to API endpoints"
+  mae task "Fix the auth bug in login.ts"
+  mae task "Add unit tests for budget module" --dry-run
+`);
     const task = stripFlags(args.slice(1)).join(" ");
     if (!task) {
-      console.error("Usage: agent task <task-description>");
+      console.error("Usage: mae task <task-description>\nRun 'mae task --help' for details.");
       process.exit(1);
     }
     const session = await orch.run({
@@ -186,6 +237,20 @@ switch (command) {
   }
 
   case "session": {
+    if (subHelp) showSubHelp(`
+mae session — Manage sessions
+
+Usage:
+  mae session list                          List all sessions
+  mae session close <id> [--status done]    Close/complete a session
+
+Status options: done, completed, error
+
+Examples:
+  mae session list
+  mae session close 2dbc90f5
+  mae session close 2dbc90f5 --status error
+`);
     const subCmd = args[1];
     const dashUrl = dashboardUrl;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -343,6 +408,20 @@ Chains:    ${chainCount} configured
   }
 
   case "config": {
+    if (subHelp) showSubHelp(`
+mae config — Configure models, budgets, and aliases
+
+Usage:
+  mae config                 Interactive config TUI
+  mae config show            Show current config summary
+  mae config export          Export full config as JSON
+  mae config import <file>   Import/merge JSON config
+  mae config discover        Probe all configured models via LiteLLM
+
+Interactive TUI menus:
+  1. Show config    2. Budgets    3. Model tiers
+  4. Aliases        5. Role defaults    6. Discover models
+`);
     const sub = args[1];
     if (args.includes("--export")) {
       configExport();
@@ -359,9 +438,13 @@ Chains:    ${chainCount} configured
     break;
   }
 
+  case "tui":
+    await configInteractive();
+    break;
+
   default:
     console.error(`Unknown command: ${command}`);
-    console.error(`Valid commands: run, chain, task, discover, session, new-agent, version, info, adapters, config`);
+    console.error(`Valid commands: run, chain, task, discover, session, new-agent, version, info, adapters, config, tui`);
     process.exit(1);
 }
 
