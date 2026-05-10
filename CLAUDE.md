@@ -36,7 +36,7 @@ multi-agent-engine/
     types.ts         # All TypeScript types
     security.ts      # Security checks (advisory only, not enforced by adapters)
     event-emitter.ts # SSE event system
-    adapters/        # Platform adapters (claude-code, codex, pi, echo)
+    adapters/        # Platform adapters (pi, a2a, echo)
   prompts/           # Reusable prompt workflows (plan-build-review, scout, etc.)
   justfile           # Task runner commands
 ```
