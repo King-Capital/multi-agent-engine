@@ -3,10 +3,15 @@ import { Orchestrator } from "./orchestrator";
 import { EchoAdapter } from "./adapters/echo";
 import { PiAdapter } from "./adapters/pi";
 import { A2AAdapter } from "./adapters/a2a";
-import { loadChains, loadModelRouting } from "./config";
+import { loadChains, loadModelRouting, BASE_DIR } from "./config";
 import { configShow, configExport, configImport, configDiscover, configInteractive } from "./config-cli";
-import { readFileSync as readFile } from "fs";
+import { teamWizard } from "./team-wizard";
+import { expertiseLearn } from "./expertise-builder";
+import { expertiseValidate } from "./expertise-validator";
+import { expertSession } from "./expert-session";
+import { readFileSync as readFile, writeFileSync, existsSync, readdirSync } from "fs";
 import { join, resolve } from "path";
+import { getFlag, stripFlags, slugify } from "./cli-utils";
 
 const args = process.argv.slice(2);
 
@@ -15,21 +20,24 @@ if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
 Multi-Agent Orchestration Engine v${(() => { try { return readFile(join(import.meta.dir, "..", "VERSION"), "utf-8").trim(); } catch { return "?"; } })()}
 
 Commands:
-  run         Run a prompt workflow          mae run --help
-  chain       Run a named chain              mae chain --help
-  task        Quick task (plan-build-review)  mae task --help
-  session     List/manage sessions           mae session --help
-  config  ◆   Configure models & budgets     mae config --help
-  discover    Discover A2A agents            mae discover <url>
-  new-agent   Scaffold a new agent           mae new-agent <name> <role> <team>
-  info        System overview                mae info
-  version     Version info                   mae version
-  adapters    List adapters                  mae adapters
+  run           Run a prompt workflow          mae run --help
+  chain         Run a named chain              mae chain --help
+  task          Quick task (plan-build-review)  mae task --help
+  session       List/manage sessions           mae session --help
+  config    ◆   Configure models & budgets     mae config --help
+  new-team  ◆   Create a new agent team        mae new-team --help
+  new-agent     Scaffold a single agent        mae new-agent <name> [role] [team] [model]
+  learn         Build expertise from sources   mae learn --help
+  expert    ◆   Interactive expert session      mae expert --help
+  validate-agent  Test expertise quality        mae validate-agent --help
+  discover      Discover A2A agents            mae discover <url>
+  info          System overview                mae info
+  version       Version info                   mae version
+  adapters      List adapters                  mae adapters
 
   ◆ = interactive TUI available (arrow-key navigation)
 
 Run 'mae <command> --help' for details on any command.
-Run 'mae tui' for the interactive config interface.
   `);
   process.exit(0);
 }
@@ -107,7 +115,7 @@ mae run — Run a prompt workflow
 
 Usage: mae run <prompt-name> [args...]
 
-Prompts:  ${(() => { try { return require("fs").readdirSync(join(import.meta.dir, "..", "prompts")).filter((f: string) => f.endsWith(".md") && f !== "BASE.md").map((f: string) => f.replace(".md", "")).join(", "); } catch { return "plan-build-review, review, scout, swarm-review, ..."; }})()}
+Prompts:  ${(() => { try { return readdirSync(join(import.meta.dir, "..", "prompts")).filter((f: string) => f.endsWith(".md") && f !== "BASE.md").map((f: string) => f.replace(".md", "")).join(", "); } catch { return "plan-build-review, review, scout, swarm-review, ..."; }})()}
 
 Options:
   --adapter <name>     Use specific adapter (pi, a2a, echo)
@@ -212,7 +220,7 @@ Examples:
   case "discover": {
     const url = args[1];
     if (!url) {
-      console.error("Usage: agent discover <url>");
+      console.error("Usage: mae discover <url>");
       process.exit(1);
     }
     const card = await a2aAdapter.discover(url, a2aToken);
@@ -270,7 +278,7 @@ Examples:
       console.log(`\n${sessions.length} sessions total`);
     } else if (subCmd === "close") {
       const sessionId = args[2];
-      if (!sessionId) { console.error("Usage: agent session close <id> [--status done|error]"); process.exit(1); }
+      if (!sessionId) { console.error("Usage: mae session close <id> [--status done|error]"); process.exit(1); }
       const rawStatus = getFlag(args, "--status") ?? "completed";
       const status = rawStatus === "done" ? "completed" : rawStatus;
       if (status !== "completed" && status !== "error") {
@@ -284,7 +292,7 @@ Examples:
       if (!resp.ok) { console.error(`Failed: ${resp.status} ${await resp.text()}`); process.exit(1); }
       console.log(`Session ${sessionId} → ${status}`);
     } else {
-      console.error("Usage: agent session <list|close>");
+      console.error("Usage: mae session <list|close>");
       process.exit(1);
     }
     break;
@@ -295,8 +303,70 @@ Examples:
     break;
   }
 
+  case "new-team": {
+    if (subHelp) showSubHelp(`
+mae new-team — Create a new agent team
+
+Usage:
+  mae new-team                    Interactive wizard
+  mae new-team --template <name>  Create from template
+
+Templates: trading, devops, frontend, research
+
+The wizard walks through team name, color, members, roles, and
+optionally generates a starter chain. All persona and expertise
+files are scaffolded automatically.
+`);
+    await teamWizard(args.slice(1));
+    break;
+  }
+
+  case "learn": {
+    if (subHelp) showSubHelp(`
+mae learn — Build agent expertise from reference sources
+
+Usage:
+  mae learn --from <path>       --agent <name>   Learn from codebase
+  mae learn --from <url>        --agent <name>   Learn from URL/document
+  mae learn --from-agent <src>  --agent <name>   Copy structure from existing agent
+
+Scans the source, extracts patterns and conventions, and generates
+structured expertise in agents/expertise/<name>.md.
+`);
+    await expertiseLearn(args.slice(1));
+    break;
+  }
+
+  case "validate-agent": {
+    if (subHelp) showSubHelp(`
+mae validate-agent — Test agent expertise quality
+
+Usage: mae validate-agent <name>
+
+Runs the agent on a test prompt, grades specificity/depth/actionability,
+and suggests improvements to the expertise file.
+`);
+    await expertiseValidate(args.slice(1));
+    break;
+  }
+
+  case "expert": {
+    if (subHelp) showSubHelp(`
+mae expert — Interactive expert session on a codebase
+
+Usage:
+  mae expert <path>                Drop into expert session
+  mae expert <path> --agent <name> Use existing agent's expertise
+
+Auto-learns the codebase if no expertise exists, then starts an
+interactive REPL where you can ask questions and get implementations
+from an agent that deeply understands the code.
+`);
+    await expertSession(args.slice(1));
+    break;
+  }
+
   case "version": {
-    const BASE_DIR = process.env.MAE_ROOT ?? join(import.meta.dir, "..");
     const versionFile = join(BASE_DIR, "VERSION");
     let maeVersion = "unknown";
     try { maeVersion = readFile(versionFile, "utf-8").trim(); } catch {}
@@ -316,8 +386,7 @@ Chains:    ${chainCount} configured
   }
 
   case "info": {
-    const BASE_DIR_INFO = process.env.MAE_ROOT ?? join(import.meta.dir, "..");
-    const versionFileInfo = join(BASE_DIR_INFO, "VERSION");
+    const versionFileInfo = join(BASE_DIR, "VERSION");
     let maeVer = "unknown";
     try { maeVer = readFile(versionFileInfo, "utf-8").trim(); } catch {}
 
@@ -444,7 +513,7 @@ Interactive TUI menus:
 
   default:
     console.error(`Unknown command: ${command}`);
-    console.error(`Valid commands: run, chain, task, discover, session, new-agent, version, info, adapters, config, tui`);
+    console.error(`Valid commands: run, chain, task, session, config, new-team, new-agent, learn, expert, validate-agent, discover, info, version, adapters, tui`);
     process.exit(1);
 }
 
@@ -455,12 +524,14 @@ async function scaffoldAgent(args: string[]) {
   const model = args[3] ?? (role === "worker" ? "main" : "quality");
 
   if (!name) {
-    console.error("Usage: agent new-agent <name> [role] [team] [model]");
+    console.error("Usage: mae new-agent <name> [role] [team] [model]");
     process.exit(1);
   }
 
-  const slug = name.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/^-+|-+$/g, "");
-  if (!slug) {
+  let slug: string;
+  try {
+    slug = slugify(name);
+  } catch {
     console.error("Invalid agent name");
     process.exit(1);
   }
@@ -520,8 +591,6 @@ You are ${name} — a ${role} agent.
 3. Update your mental model after every session.
 `;
 
-  const { join } = await import("path");
-  const { writeFileSync, existsSync } = await import("fs");
   const baseDir = join(import.meta.dir, "..");
 
   const personaPath = join(baseDir, `agents/personas/${slug}.md`);
@@ -539,29 +608,4 @@ You are ${name} — a ${role} agent.
   console.log(`Created: agents/expertise/${slug}.md`);
   console.log(`\nNext: Add this agent to agents/teams/teams.yaml under the ${team} team.`);
   console.log(`Tip: Edit the persona file to customize the Purpose and Rules sections.`);
-}
-
-function getFlag(args: string[], flag: string): string | undefined {
-  const idx = args.indexOf(flag);
-  if (idx >= 0 && idx + 1 < args.length) return args[idx + 1];
-  return undefined;
-}
-
-function stripFlags(args: string[]): string[] {
-  const result: string[] = [];
-  let i = 0;
-  while (i < args.length) {
-    const arg = args[i]!;
-    if (arg.startsWith("--")) {
-      if (arg.includes("=")) {
-        i++;
-      } else {
-        i += 2;
-      }
-    } else {
-      result.push(arg);
-      i++;
-    }
-  }
-  return result;
 }

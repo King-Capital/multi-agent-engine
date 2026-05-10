@@ -4,6 +4,9 @@ import type {
   PlatformAdapter,
   OrchestratorAction,
   OrchestratorTrigger,
+  PersonaConfig,
+  ThinkingLevel,
+  Chain,
 } from "./types";
 import type { EventEmitter } from "./event-emitter";
 import type { BudgetState } from "./budget";
@@ -72,14 +75,35 @@ export class OrchestratorLoop {
   private _currentStepIndex: number;
   private _totalSteps: number;
 
+  // Cached per-session values (never change during a session)
+  private orchPersona: PersonaConfig | null = null;
+  private orchModel: string = "quality";
+  private orchThinking: ThinkingLevel = "medium";
+  private orchSystemPrompt: string = ORCHESTRATOR_REASONING_PROMPT;
+  private cachedChain: Chain | null = null;
+
   constructor(opts: OrchestratorLoopOpts) {
     this.opts = opts;
     this._currentStepIndex = opts.currentStepIndex ?? 0;
     try {
-      const chain = getChain(opts.session.chain);
-      this._totalSteps = chain.steps.length;
+      this.cachedChain = getChain(opts.session.chain);
+      this._totalSteps = this.cachedChain.steps?.length ?? 0;
     } catch {
       this._totalSteps = 0;
+    }
+
+    try {
+      const teams = loadTeams();
+      this.orchPersona = loadPersona(teams.orchestrator.path);
+      const resolved = resolveModelForRole("orchestrator");
+      this.orchModel = resolved.model;
+      this.orchThinking = resolved.thinking;
+      this.orchSystemPrompt = `${buildSystemPrompt(this.orchPersona, "orchestrator")}\n\n${ORCHESTRATOR_REASONING_PROMPT}`;
+    } catch {
+      this.orchPersona = null;
+      this.orchModel = "quality";
+      this.orchThinking = "medium";
+      this.orchSystemPrompt = ORCHESTRATOR_REASONING_PROMPT;
     }
   }
 
@@ -149,19 +173,21 @@ export class OrchestratorLoop {
 
     try {
       const contextWindow = this.buildContextWindow(trigger, context);
-      const teams = loadTeams();
-      const persona = loadPersona(teams.orchestrator.path);
-      const { model, thinking } = resolveModelForRole("orchestrator");
-      const systemPrompt = buildSystemPrompt(persona, "orchestrator");
+
+      // Use cached persona/model/prompt (loaded once in constructor)
+      if (!this.orchPersona) {
+        console.error("[orchestrator-loop] No orchestrator persona loaded, skipping cycle");
+        return;
+      }
 
       const REASONING_TIMEOUT_MS = 90_000;
       const result = await Promise.race([
         this.opts.adapter.delegate({
-          persona,
-          systemPrompt: `${systemPrompt}\n\n${ORCHESTRATOR_REASONING_PROMPT}`,
+          persona: this.orchPersona,
+          systemPrompt: this.orchSystemPrompt,
           userPrompt: contextWindow,
-          model,
-          thinking,
+          model: this.orchModel,
+          thinking: this.orchThinking,
           tools: [],
           domain: { read: [], write: [], update: [] },
           workingDir: this.opts.session.workingDir,
@@ -314,27 +340,24 @@ export class OrchestratorLoop {
     if (session.status === "paused") return "paused";
     if (session.status === "completed") return "completed";
 
-    try {
-      const chain = getChain(session.chain);
-      const step = chain.steps[this._currentStepIndex];
-      if (!step) return "executing";
+    if (!this.cachedChain) return "executing";
 
-      const teamName = (step.team ?? "").toLowerCase();
-      if (teamName.includes("plan")) return "planning";
-      if (teamName.includes("engineer") || teamName.includes("build")) return "building";
-      if (
-        teamName.includes("review") ||
-        teamName.includes("valid") ||
-        teamName.includes("test") ||
-        teamName.includes("red") ||
-        teamName.includes("blue")
-      )
-        return "reviewing";
+    const step = this.cachedChain.steps[this._currentStepIndex];
+    if (!step) return "executing";
 
-      return "executing";
-    } catch {
-      return "executing";
-    }
+    const teamName = (step.team ?? "").toLowerCase();
+    if (teamName.includes("plan")) return "planning";
+    if (teamName.includes("engineer") || teamName.includes("build")) return "building";
+    if (
+      teamName.includes("review") ||
+      teamName.includes("valid") ||
+      teamName.includes("test") ||
+      teamName.includes("red") ||
+      teamName.includes("blue")
+    )
+      return "reviewing";
+
+    return "executing";
   }
 
   private getActiveLeads(): string[] {

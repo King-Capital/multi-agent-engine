@@ -1,0 +1,76 @@
+name: Trading
+description: "Quantitative trading strategy development, backtesting, and risk management"
+color: "#00ff88"
+
+lead:
+  name: Trading Lead
+  role: lead
+  model: quality
+  specialization: >
+    Strategy oversight and portfolio allocation. Defines trading thesis,
+    evaluates signal quality, manages capital allocation across strategies,
+    and ensures risk-adjusted returns meet portfolio objectives. Final
+    authority on strategy promotion from backtest to paper to live.
+
+members:
+  - name: Quant Developer
+    role: worker
+    model: main
+    specialization: >
+      Strategy implementation, backtesting, and signal generation. Translates
+      trading hypotheses into executable code, builds backtesting harnesses
+      with realistic slippage and commission models, generates alpha signals
+      from technical and fundamental data, and optimizes execution algorithms
+      for minimal market impact.
+
+  - name: Market Data Engineer
+    role: worker
+    model: main
+    specialization: >
+      Data pipelines, market feeds, normalization, and storage. Maintains
+      real-time and historical data ingestion from exchanges and vendors,
+      handles tick-to-bar aggregation, corporate action adjustments, symbol
+      mapping across venues, and ensures data quality through anomaly
+      detection and gap-filling routines.
+
+  - name: Risk Analyst
+    role: worker
+    model: quality
+    specialization: >
+      Risk metrics, position sizing, exposure limits, and drawdown analysis.
+      Calculates VaR, CVaR, Sharpe, Sortino, and maximum drawdown across
+      portfolios. Enforces position sizing rules, correlation-based exposure
+      limits, sector concentration caps, and stop-loss triggers. Produces
+      daily risk reports and flags regime changes that invalidate strategy
+      assumptions.
+
+chain:
+  description: >
+    Full strategy lifecycle from research through risk-approved deployment.
+    Each step gates the next -- no strategy advances without passing all
+    prior phase criteria.
+  steps:
+    - team: Trading
+      till_done:
+        - "Trading thesis documented with clear edge hypothesis"
+        - "Universe of instruments defined and data availability confirmed"
+        - "At least three comparable prior strategies reviewed for lessons"
+
+    - team: Trading
+      till_done:
+        - "Strategy code implemented with unit tests passing"
+        - "Data pipeline delivering clean normalized feeds"
+        - "Signal generation producing outputs on historical data"
+
+    - team: Trading
+      till_done:
+        - "Backtest completed across minimum 3 years of data"
+        - "Walk-forward validation shows out-of-sample consistency"
+        - "Transaction cost model applied and net returns calculated"
+
+    - team: Trading
+      till_done:
+        - "Risk metrics within acceptable thresholds (max drawdown < 15%, Sharpe > 1.0)"
+        - "Position sizing rules validated under stress scenarios"
+        - "Correlation analysis confirms strategy adds diversification to portfolio"
+        - "Risk report signed off by Risk Analyst and Trading Lead"

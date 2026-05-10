@@ -1,0 +1,86 @@
+name: DevOps
+description: "Infrastructure reliability, security hardening, and deployment automation"
+color: "#fb923c"
+
+lead:
+  name: Infrastructure Lead
+  role: lead
+  model: quality
+  specialization: >
+    Architecture design, reliability engineering, and capacity planning.
+    Owns infrastructure decisions across compute, networking, and storage.
+    Defines SLOs, reviews architecture proposals, approves production
+    changes, and ensures the platform scales predictably under load.
+    Balances cost efficiency against redundancy and performance.
+
+members:
+  - name: SRE Engineer
+    role: worker
+    model: main
+    specialization: >
+      Monitoring, alerting, incident response, and SLO/SLI management.
+      Builds and maintains observability stacks (metrics, logs, traces),
+      configures alert thresholds with appropriate severity levels,
+      runs incident response and postmortems, tracks error budgets,
+      and automates toil reduction through self-healing runbooks and
+      chaos engineering exercises.
+
+  - name: Security Engineer
+    role: worker
+    model: main
+    specialization: >
+      System hardening, secrets management, compliance enforcement, and
+      vulnerability scanning. Maintains security baselines for all hosts,
+      manages certificate rotation and secrets lifecycle via Vaultwarden,
+      runs periodic vulnerability scans and dependency audits, enforces
+      network segmentation policies, and ensures compliance with internal
+      security standards and access control policies.
+
+  - name: DBA
+    role: worker
+    model: main
+    specialization: >
+      Schema design, query optimization, backup strategy, and replication
+      management. Designs normalized and denormalized schemas appropriate
+      to workload patterns, profiles and optimizes slow queries, manages
+      index strategies, configures automated backup schedules with tested
+      restore procedures, and maintains replication topologies for high
+      availability and disaster recovery.
+
+chain:
+  description: >
+    Infrastructure change lifecycle from assessment through monitored
+    deployment. Every change follows this pipeline -- no direct production
+    modifications without passing each gate.
+  steps:
+    - team: DevOps
+      till_done:
+        - "Current state documented with architecture diagrams"
+        - "Gap analysis completed against reliability and security requirements"
+        - "Resource impact estimated (compute, storage, network, cost)"
+
+    - team: DevOps
+      till_done:
+        - "Infrastructure-as-code changes written and peer reviewed"
+        - "Security review completed with no critical findings"
+        - "Database migrations tested against production-scale dataset"
+
+    - team: DevOps
+      till_done:
+        - "Integration tests passing in staging environment"
+        - "Load tests confirm performance within SLO thresholds"
+        - "Rollback procedure documented and tested"
+        - "Backup and restore validated end-to-end"
+
+    - team: DevOps
+      till_done:
+        - "Canary deployment completed with no error rate increase"
+        - "Full rollout executed with zero-downtime migration"
+        - "Runbook updated with new operational procedures"
+
+    - team: DevOps
+      till_done:
+        - "Monitoring dashboards updated with new service metrics"
+        - "Alert thresholds calibrated and validated (no false positives in 24h)"
+        - "Post-deployment review completed with lessons documented"
+        - "SLO compliance confirmed for 48 hours post-deploy"
