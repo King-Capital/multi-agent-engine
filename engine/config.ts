@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, statSync, writeFileSync } from "fs";
+import { readFileSync, existsSync, statSync, writeFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type {
@@ -13,7 +13,7 @@ import type {
   ModelRoutingConfig,
 } from "./types";
 
-const BASE_DIR = process.env.MAE_ROOT ?? join(import.meta.dir, "..");
+export const BASE_DIR = process.env.MAE_ROOT ?? join(import.meta.dir, "..");
 
 const cache = new Map<string, { data: unknown; mtime: number }>();
 
@@ -113,7 +113,13 @@ export function loadPreamble(role: AgentRole, personaName?: string): string {
 export function buildSystemPrompt(persona: PersonaConfig, role?: AgentRole): string {
   const preamble = role ? loadPreamble(role, persona.name) : "";
   const skills = persona.skills.map((s) => loadSkill(resolveSkillPath(s))).join("\n\n---\n\n");
-  const expertise = loadExpertise(persona.expertise);
+  let expertise = loadExpertise(persona.expertise);
+  if (persona.max_expertise_lines && expertise) {
+    const lines = expertise.split("\n");
+    if (lines.length > persona.max_expertise_lines) {
+      expertise = lines.slice(0, persona.max_expertise_lines).join("\n");
+    }
+  }
 
   return [
     preamble,
@@ -164,6 +170,32 @@ export function resolveToolGroup(groupOrTools: string | string[]): string[] {
   const registry = loadToolRegistry();
   const group = registry.groups[groupOrTools];
   return group?.tools ?? [groupOrTools];
+}
+
+export function loadTemplate(name: string): import("./types").TeamTemplate {
+  if (!/^[a-z0-9-]+$/.test(name)) throw new Error(`Invalid template name "${name}": only lowercase letters, numbers, and hyphens allowed`);
+  return cachedRead<import("./types").TeamTemplate>(`agents/templates/${name}.yaml`);
+}
+
+export function listTemplates(): string[] {
+  const dir = join(BASE_DIR, "agents/templates");
+  try {
+    return readdirSync(dir)
+      .filter((f: string) => f.endsWith(".yaml") || f.endsWith(".yml"))
+      .map((f: string) => f.replace(/\.ya?ml$/, ""));
+  } catch { return []; }
+}
+
+export function writeTeams(teams: import("./types").TeamsFile): void {
+  const path = join(BASE_DIR, "agents/teams/teams.yaml");
+  writeFileSync(path, stringifyYaml(teams as unknown as Record<string, unknown>));
+  cache.delete(path);
+}
+
+export function writeChains(chains: import("./types").ChainsFile): void {
+  const path = join(BASE_DIR, "agents/teams/chains.yaml");
+  writeFileSync(path, stringifyYaml(chains as unknown as Record<string, unknown>));
+  cache.delete(path);
 }
 
 export function loadModelRouting(): ModelRoutingConfig {

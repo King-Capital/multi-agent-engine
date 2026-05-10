@@ -290,6 +290,8 @@ export async function runTeamStep(
   for (const outcome of settled) {
     if (outcome.status === "fulfilled") {
       const result = outcome.value;
+      // Task 3 fix: checkBudget BEFORE accumulating cost to avoid double-counting
+      // (projectedCost = session.totalCost + agentCost — if we already added agentCost, it double-counts)
       checkBudget(session, result.agentId, result.costUsd, result.tokensUsed);
       session.totalCost += result.costUsd;
       session.totalTokens += result.tokensUsed;

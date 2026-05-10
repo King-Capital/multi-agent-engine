@@ -1,5 +1,32 @@
 export type AgentRole = "orchestrator" | "lead" | "sr" | "worker" | "scout";
 
+// --- Team Template & Expertise Types (#184) ---
+
+export interface TeamTemplate {
+  name: string;
+  description: string;
+  color: string;
+  lead: { name: string; role: string; model: string; specialization?: string };
+  members: { name: string; role: string; model: string; specialization: string }[];
+  chain?: { description: string; steps: ChainStep[] };
+}
+
+export interface ExpertiseSection {
+  domain_rules: string[];
+  terminology: Record<string, string>;
+  patterns: { name: string; description: string }[];
+  anti_patterns: string[];
+  verification_checklist: string[];
+}
+
+/** A design variant with rendered HTML, used by the design gallery feature. */
+export interface DesignVariant {
+  name: string;
+  description: string;
+  html: string;
+  filePath?: string;
+}
+
 // --- Orchestrator Loop Types (#174) ---
 
 export type OrchestratorAction =

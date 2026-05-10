@@ -1,0 +1,89 @@
+name: Research
+description: "Multi-source research, analysis, fact-checking, and technical documentation"
+color: "#34d399"
+
+lead:
+  name: Research Lead
+  role: lead
+  model: quality
+  specialization: >
+    Research methodology, synthesis, and credibility assessment. Defines
+    research questions and scope boundaries, selects appropriate methods
+    (systematic review, comparative analysis, case study), evaluates
+    source credibility and potential biases, synthesizes findings across
+    multiple inputs into coherent narratives, and ensures conclusions
+    are supported by evidence with appropriate confidence levels.
+
+members:
+  - name: Analyst
+    role: worker
+    model: main
+    specialization: >
+      Data gathering, statistical analysis, and trend identification.
+      Collects quantitative and qualitative data from primary and
+      secondary sources, applies statistical methods to identify
+      patterns and correlations, builds comparison matrices across
+      alternatives, performs market sizing and competitive landscape
+      analysis, and produces data visualizations that communicate
+      findings clearly to technical and non-technical audiences.
+
+  - name: Fact-Checker
+    role: worker
+    model: main
+    specialization: >
+      Source verification, claim validation, and bias detection.
+      Cross-references claims against authoritative primary sources,
+      identifies logical fallacies and unsupported assertions, detects
+      selection bias and survivorship bias in cited studies, verifies
+      statistical claims and methodology soundness, flags outdated
+      information and version-specific caveats, and maintains a
+      provenance chain for every key assertion in deliverables.
+
+  - name: Technical Writer
+    role: worker
+    model: main
+    specialization: >
+      Documentation, reports, and executive summaries. Structures
+      research findings into clear deliverables appropriate for the
+      target audience, writes technical documentation with precise
+      terminology and reproducible procedures, creates executive
+      summaries that distill complex analysis into actionable
+      recommendations, maintains consistent voice and formatting
+      standards, and produces appendices with raw data and methodology
+      details for peer review.
+
+chain:
+  description: >
+    Research lifecycle from question formulation through publication-ready
+    deliverable. Each phase builds on verified outputs from the prior
+    step -- no conclusions advance without fact-checking.
+  steps:
+    - team: Research
+      till_done:
+        - "Research question formulated with clear scope boundaries"
+        - "Minimum 5 credible sources identified and catalogued"
+        - "Methodology selected and documented (approach, limitations, assumptions)"
+        - "Data collection completed across all identified sources"
+
+    - team: Research
+      till_done:
+        - "Quantitative analysis completed with statistical significance noted"
+        - "Comparison matrix built across all alternatives or dimensions"
+        - "Key patterns and trends identified with supporting evidence"
+        - "Preliminary findings documented with confidence levels"
+
+    - team: Research
+      till_done:
+        - "All key claims cross-referenced against primary sources"
+        - "Statistical methodology validated for appropriateness"
+        - "Bias assessment completed (selection, survivorship, confirmation)"
+        - "Outdated or version-specific information flagged and annotated"
+        - "Provenance chain documented for every major assertion"
+
+    - team: Research
+      till_done:
+        - "Executive summary written with actionable recommendations"
+        - "Full report structured with findings, analysis, and conclusions"
+        - "Technical appendix includes raw data and methodology details"
+        - "All deliverables reviewed for clarity, consistency, and accuracy"
+        - "Research Lead sign-off confirming conclusions supported by evidence"

@@ -32,17 +32,6 @@ export class PiAdapter implements PlatformAdapter {
     "o3-mini": 180_000,
   };
 
-  private getModelTimeout(model: string): number {
-    const mapped = this.mapModel(model);
-    return PiAdapter.MODEL_TIMEOUTS[mapped] ?? 300_000;
-  }
-
-  private isTransientError(output: string): boolean {
-    const transient = ["rate_limit", "429", "503", "overloaded", "context_length", "server_error", "connection", "timeout"];
-    const lower = output.toLowerCase();
-    return transient.some(t => lower.includes(t));
-  }
-
   private computeCostFromTokens(model: string, inputTokens: number, outputTokens: number, cacheReadTokens: number, totalTokens?: number): number {
     const mapped = this.mapModel(model);
     const pricing = PiAdapter.MODEL_PRICING[mapped];
@@ -64,13 +53,17 @@ export class PiAdapter implements PlatformAdapter {
     return 0;
   }
 
+  private _available: boolean | null = null;
+
   async isAvailable(): Promise<boolean> {
+    if (this._available !== null) return this._available;
     try {
       const result = await $`which pi`.text();
-      return result.trim().length > 0;
+      this._available = result.trim().length > 0;
     } catch {
-      return false;
+      this._available = false;
     }
+    return this._available;
   }
 
   async delegate(opts: DelegateOptions): Promise<DelegateResult> {
@@ -113,9 +106,9 @@ export class PiAdapter implements PlatformAdapter {
       }
     }
 
-    console.log(`[pi-rpc] Spawning ${opts.persona.name} (${this.mapModel(opts.model)}) [${opts.persona.skills.length} skills] in ${opts.workingDir}`);
+    console.log(`[pi-rpc] Spawning ${opts.persona.name} (${piModel}) [${opts.persona.skills.length} skills] in ${opts.workingDir}`);
 
-    const timeout = opts.timeoutMs ?? this.getModelTimeout(opts.model);
+    const timeout = opts.timeoutMs ?? (PiAdapter.MODEL_TIMEOUTS[piModel] ?? 300_000);
 
     let totalCost = 0;
     let totalTokens = 0;
@@ -136,14 +129,16 @@ export class PiAdapter implements PlatformAdapter {
         stdout: "pipe",
         stderr: "pipe",
         cwd: opts.workingDir,
-        env: {
-          ...process.env,
-          MAE_SESSION_ID: opts.sessionDir?.split("/").pop() ?? "",
-          MAE_AGENT_ID: opts.persona.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-          MAE_PARENT_ID: opts.parentId ?? "",
-          MAE_DASHBOARD_URL: process.env.MAE_DASHBOARD_URL ?? "",
-          MAE_API_TOKEN: process.env.MAE_API_TOKEN ?? "",
-        },
+        env: (() => {
+          const { MAE_API_TOKEN: _, ...safeEnv } = process.env;
+          return {
+            ...safeEnv,
+            MAE_SESSION_ID: opts.sessionDir?.split("/").pop() ?? "",
+            MAE_AGENT_ID: opts.persona.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+            MAE_PARENT_ID: opts.parentId ?? "",
+            MAE_DASHBOARD_URL: process.env.MAE_DASHBOARD_URL ?? "",
+          };
+        })(),
       });
 
       const timer = setTimeout(async () => {

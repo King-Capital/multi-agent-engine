@@ -1,0 +1,76 @@
+name: Frontend
+description: "User interface design, implementation, and accessibility compliance"
+color: "#c084fc"
+
+lead:
+  name: Design Lead
+  role: lead
+  model: quality
+  specialization: >
+    UX strategy, design systems, and component architecture. Defines
+    interaction patterns, maintains design token specifications, owns
+    the component library, and ensures visual and behavioral consistency
+    across all surfaces. Reviews wireframes and prototypes for usability,
+    establishes information hierarchy, and arbitrates design tradeoffs
+    between aesthetics, performance, and accessibility.
+
+members:
+  - name: UI Engineer
+    role: worker
+    model: main
+    specialization: >
+      React/Vue/Svelte implementation, responsive design, and state
+      management. Translates designs into production components with
+      pixel-accurate fidelity, implements responsive layouts across
+      breakpoints, manages client-side state with appropriate patterns
+      (local state, context, stores), optimizes bundle size and render
+      performance, and writes component-level tests covering user
+      interactions and edge cases.
+
+  - name: Accessibility Reviewer
+    role: worker
+    model: main
+    specialization: >
+      WCAG 2.1 AA compliance, screen reader testing, keyboard navigation,
+      and ARIA implementation. Audits components against accessibility
+      guidelines, tests with screen readers (VoiceOver, NVDA, JAWS),
+      verifies complete keyboard operability including focus management
+      and tab order, validates color contrast ratios, ensures proper
+      ARIA roles and live regions, and documents remediation steps for
+      any violations found.
+
+chain:
+  description: >
+    Design-to-delivery pipeline ensuring every UI change meets both
+    design quality and accessibility standards before shipping. No
+    component ships without passing accessibility review.
+  steps:
+    - team: Frontend
+      till_done:
+        - "User flow mapped with wireframes for all states (empty, loading, error, populated)"
+        - "Design tokens defined (colors, spacing, typography, elevation)"
+        - "Component API designed with props, events, and slot interfaces documented"
+        - "Responsive breakpoint strategy confirmed for target devices"
+
+    - team: Frontend
+      till_done:
+        - "Components implemented matching design specifications"
+        - "Responsive behavior verified across mobile, tablet, and desktop"
+        - "State management integrated with loading and error boundaries"
+        - "Component tests covering primary interactions and edge cases"
+        - "Bundle size impact measured and within budget"
+
+    - team: Frontend
+      till_done:
+        - "WCAG 2.1 AA audit completed with no critical violations"
+        - "Keyboard navigation tested for all interactive elements"
+        - "Screen reader announcement flow verified and logical"
+        - "Color contrast ratios meet minimum thresholds (4.5:1 normal, 3:1 large)"
+        - "Focus management correct for modals, dropdowns, and dynamic content"
+
+    - team: Frontend
+      till_done:
+        - "Visual regression tests passing against baseline screenshots"
+        - "Animation and transition performance within frame budget (60fps)"
+        - "Cross-browser testing completed (Chrome, Firefox, Safari)"
+        - "Design Lead sign-off on final implementation fidelity"

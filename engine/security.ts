@@ -16,12 +16,11 @@
  */
 
 import { readFileSync } from "fs";
-import { join } from "path";
+import { join, normalize } from "path";
 import { parse as parseYaml } from "yaml";
 import { createHash } from "crypto";
 import type { DomainConfig } from "./types";
-
-const BASE_DIR = join(import.meta.dir, "..");
+import { BASE_DIR } from "./config";
 
 interface BashPattern {
   pattern: string;
@@ -54,18 +53,31 @@ export interface SecurityViolation {
   action: "block" | "warn";
 }
 
-export function checkBashCommand(command: string): SecurityViolation[] {
+// Compiled bash patterns cache (built on first use from rules)
+let _compiledBashPatterns: { re: RegExp; reason: string; action: "block" | "ask" | "warn" }[] | null = null;
+
+function getCompiledBashPatterns(): typeof _compiledBashPatterns & {} {
+  if (_compiledBashPatterns) return _compiledBashPatterns;
   const rules = loadRules();
+  _compiledBashPatterns = rules.bashPatterns.map((p) => ({
+    re: new RegExp(p.pattern, "i"),
+    reason: p.reason,
+    action: p.action,
+  }));
+  return _compiledBashPatterns;
+}
+
+export function checkBashCommand(command: string): SecurityViolation[] {
+  const patterns = getCompiledBashPatterns();
   const violations: SecurityViolation[] = [];
 
-  for (const pattern of rules.bashPatterns) {
-    const re = new RegExp(pattern.pattern, "i");
+  for (const { re, reason, action } of patterns) {
     if (re.test(command)) {
       violations.push({
-        type: pattern.action === "block" ? "bash_blocked" : "bash_warn",
+        type: action === "block" ? "bash_blocked" : "bash_warn",
         command,
-        reason: pattern.reason,
-        action: pattern.action === "warn" ? "warn" : "block",
+        reason,
+        action: action === "warn" ? "warn" : "block",
       });
     }
   }
@@ -200,40 +212,43 @@ export function verifyPersonaIntegrity(path: string): SecurityViolation[] {
   return violations;
 }
 
-export function sanitizeAgentInput(input: string): string {
-  const injectionPatterns = [
-    { pattern: /\bsystem\s*:\s*/gi, label: "system prefix" },
-    { pattern: /\bignore\s+(previous|above|all)\s+instructions/gi, label: "ignore instructions" },
-    { pattern: /\byou\s+are\s+now\b/gi, label: "role override" },
-    { pattern: /\bforget\s+(everything|all|your)\b/gi, label: "memory wipe" },
-    { pattern: /\bact\s+as\s+(if|though)\b/gi, label: "act as" },
-    { pattern: /<\/?system>/gi, label: "system tag" },
-    { pattern: /\[INST\]/gi, label: "inst tag" },
-    { pattern: /<<SYS>>/gi, label: "sys tag" },
-  ];
+// Pre-compiled injection patterns (compiled once at module load)
+const INJECTION_PATTERNS = [
+  /\bsystem\s*:\s*/gi,
+  /\bignore\s+(previous|above|all)\s+instructions/gi,
+  /\byou\s+are\s+now\b/gi,
+  /\bforget\s+(everything|all|your)\b/gi,
+  /\bact\s+as\s+(if|though)\b/gi,
+  /<\/?system>/gi,
+  /\[INST\]/gi,
+  /<<SYS>>/gi,
+];
 
+export function sanitizeAgentInput(input: string): string {
   let sanitized = input;
-  for (const { pattern } of injectionPatterns) {
+  for (const pattern of INJECTION_PATTERNS) {
+    pattern.lastIndex = 0;
     sanitized = sanitized.replace(pattern, "[REDACTED]");
   }
 
   return sanitized;
 }
 
+// Pre-compiled sensitive output patterns (compiled once at module load)
+const SENSITIVE_OUTPUT_PATTERNS = [
+  { pattern: /(?:api[_-]?key|token|secret|password)\s*[:=]\s*["']?[A-Za-z0-9+/=_-]{20,}/gi, reason: "Possible credential in output" },
+  { pattern: /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/g, reason: "Private key in output" },
+  { pattern: /ghp_[A-Za-z0-9_]{36}/g, reason: "GitHub personal access token in output" },
+  { pattern: /sk-[A-Za-z0-9]{48}/g, reason: "OpenAI API key in output" },
+  { pattern: /sk-ant-[A-Za-z0-9-]{95}/g, reason: "Anthropic API key in output" },
+];
+
 export function validateAgentOutput(output: string): SecurityViolation[] {
   const violations: SecurityViolation[] = [];
 
-  const sensitivePatterns = [
-    { pattern: /(?:api[_-]?key|token|secret|password)\s*[:=]\s*["']?[A-Za-z0-9+/=_-]{20,}/gi, reason: "Possible credential in output" },
-    { pattern: /-----BEGIN (?:RSA |EC )?PRIVATE KEY-----/g, reason: "Private key in output" },
-    { pattern: /ghp_[A-Za-z0-9_]{36}/g, reason: "GitHub personal access token in output" },
-    { pattern: /sk-[A-Za-z0-9]{48}/g, reason: "OpenAI API key in output" },
-    { pattern: /sk-ant-[A-Za-z0-9-]{95}/g, reason: "Anthropic API key in output" },
-  ];
-
-  for (const { pattern, reason } of sensitivePatterns) {
-    // Use .match() to avoid lastIndex state bug with /g + .test()
-    if (output.match(pattern)) {
+  for (const { pattern, reason } of SENSITIVE_OUTPUT_PATTERNS) {
+    pattern.lastIndex = 0;
+    if (pattern.test(output)) {
       violations.push({ type: "zero_access", reason, action: "block" });
     }
   }
@@ -246,11 +261,28 @@ export function getDomainTemplate(name: string): DomainConfig | undefined {
   return rules.domainTemplates[name];
 }
 
+export function isInternalUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^\[|\]$/g, "");
+    if (u.protocol === "file:") return true;
+    if (host === "localhost" || host === "0.0.0.0" || host === "[::]") return true;
+    if (host === "127.0.0.1" || host === "::1" || host === "0:0:0:0:0:0:0:1") return true;
+    if (host.startsWith("::ffff:")) return true;
+    if (host.startsWith("10.") || host.startsWith("192.168.")) return true;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+    if (/^169\.254\./.test(host)) return true;
+    if (host.startsWith("fe80:") || host.startsWith("fc00:") || host.startsWith("fd00:")) return true;
+    if (/^0x/i.test(host) || /^0\d/.test(host)) return true;
+    if (host === "metadata.google.internal") return true;
+    return false;
+  } catch { return true; }
+}
+
 function matchGlob(path: string, pattern: string): boolean {
   if (pattern === "**/*") return true;
 
   // Normalize -- block path traversal
-  const { normalize } = require("path") as typeof import("path");
   let normalizedPath = normalize(path).replace(/\\/g, "/");
   if (normalizedPath.startsWith("../") || normalizedPath === "..") return false;
 
