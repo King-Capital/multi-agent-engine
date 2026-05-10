@@ -1,9 +1,7 @@
 #!/usr/bin/env bun
 import { Orchestrator } from "./orchestrator";
 import { EchoAdapter } from "./adapters/echo";
-import { ClaudeCodeAdapter } from "./adapters/claude-code";
 import { PiAdapter } from "./adapters/pi";
-import { CodexAdapter } from "./adapters/codex";
 import { A2AAdapter } from "./adapters/a2a";
 import { loadChains, loadModelRouting } from "./config";
 import { configShow, configExport, configImport, configDiscover, configInteractive } from "./config-cli";
@@ -29,7 +27,7 @@ Usage:
   agent discover <url>                  Discover a remote A2A agent
 
 Options:
-  --adapter <name>     Use specific adapter (echo, claude-code, pi, codex, a2a)
+  --adapter <name>     Use specific adapter (pi, a2a, echo)
   --dashboard <url>    Dashboard URL (default: http://localhost:8400)
   --a2a-url <url>      Remote A2A agent URL (sets default A2A endpoint)
   --a2a-token <token>  Bearer token for A2A agent auth
@@ -76,8 +74,6 @@ if (a2aUrl) {
 const adapters = [
   new EchoAdapter(),
   new PiAdapter(),
-  new ClaudeCodeAdapter(),
-  new CodexAdapter(),
   a2aAdapter,
 ];
 

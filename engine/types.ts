@@ -102,7 +102,7 @@ export interface SessionState {
   chain: string;
   task: string;
   workingDir: string;
-  status: "active" | "completed" | "error";
+  status: "active" | "paused" | "completed" | "error";
   agents: Map<string, AgentState>;
   tillDone: TillDoneItem[];
   events: SessionEvent[];
@@ -186,7 +186,7 @@ export interface ModelRoutingConfig {
   models?: Record<string, { primary: string }>;
   roleDefaults: Record<string, RoleDefault>;
   crossModelPairs?: { builder: string; verifier: string }[];
-  budgets?: { max_per_session_usd: number; warn_at_usd: number; max_per_agent_usd: number; max_total_tokens: number };
+  budgets?: { max_per_session_usd: number; warn_at_usd: number; max_per_agent_usd: number; max_total_tokens: number; budget_action?: "warn" | "pause" };
 }
 
 export interface StreamEvent {

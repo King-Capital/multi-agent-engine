@@ -83,3 +83,4 @@ budgets:
   warn_at_usd: 25
   max_per_agent_usd: 15
   max_total_tokens: 10000000
+  budget_action: pause

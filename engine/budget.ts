@@ -7,6 +7,17 @@ export interface BudgetLimits {
   warn_at_usd: number;
   max_per_agent_usd: number;
   max_total_tokens: number;
+  budget_action?: "warn" | "pause";
+}
+
+export interface BudgetProjection {
+  currentCost: number;
+  projectedCost: number;
+  remainingBudget: number;
+  percentUsed: number;
+  burnRatePerMinute: number;
+  willExceed: boolean;
+  action: "warn" | "pause";
 }
 
 export interface BudgetState {
@@ -28,6 +39,58 @@ export function loadBudgets(): BudgetState {
   } catch {
     return { budgets: null, budgetWarned: false };
   }
+}
+
+/**
+ * Proactive budget projection called from the monitor loop.
+ * Returns projection data and whether the session should be paused.
+ */
+export function projectBudget(
+  budgetState: BudgetState,
+  session: SessionState,
+): BudgetProjection | null {
+  if (!budgetState.budgets) return null;
+
+  const limit = budgetState.budgets.max_per_session_usd;
+  const elapsed = (Date.now() - session.startedAt.getTime()) / 1000;
+  const burnRate = elapsed > 0 ? (session.totalCost / elapsed) * 60 : 0;
+  const percentUsed = (session.totalCost / limit) * 100;
+
+  const estimatedRemainingSec = elapsed > 0 ? elapsed * 0.5 : 300;
+  const projectedCost = session.totalCost + (burnRate / 60) * estimatedRemainingSec;
+
+  const action = budgetState.budgets.budget_action ?? "pause";
+
+  return {
+    currentCost: session.totalCost,
+    projectedCost,
+    remainingBudget: limit - session.totalCost,
+    percentUsed,
+    burnRatePerMinute: burnRate,
+    willExceed: projectedCost >= limit,
+    action,
+  };
+}
+
+/**
+ * Proactive budget check called from the monitor loop.
+ * Emits warnings and signals auto-pause when appropriate.
+ */
+export function checkBudgetProactive(
+  budgetState: BudgetState,
+  session: SessionState,
+  emitter: EventEmitter,
+): { shouldPause: boolean; projection: BudgetProjection | null } {
+  const projection = projectBudget(budgetState, session);
+  if (!projection) return { shouldPause: false, projection: null };
+
+  if (projection.percentUsed >= 80 && !budgetState.budgetWarned) {
+    budgetState.budgetWarned = true;
+    emitter.budgetWarning(session.id, projection);
+  }
+
+  const shouldPause = projection.percentUsed >= 95 && projection.action === "pause";
+  return { shouldPause, projection };
 }
 
 /**
