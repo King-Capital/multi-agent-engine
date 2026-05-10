@@ -19,14 +19,17 @@ Commands:
   chain       Run a named chain              mae chain --help
   task        Quick task (plan-build-review)  mae task --help
   session     List/manage sessions           mae session --help
-  config      Configure models & budgets     mae config --help
+  config  ◆   Configure models & budgets     mae config --help
   discover    Discover A2A agents            mae discover <url>
   new-agent   Scaffold a new agent           mae new-agent <name> <role> <team>
   info        System overview                mae info
   version     Version info                   mae version
   adapters    List adapters                  mae adapters
 
+  ◆ = interactive TUI available (arrow-key navigation)
+
 Run 'mae <command> --help' for details on any command.
+Run 'mae tui' for the interactive config interface.
   `);
   process.exit(0);
 }
@@ -435,9 +438,13 @@ Interactive TUI menus:
     break;
   }
 
+  case "tui":
+    await configInteractive();
+    break;
+
   default:
     console.error(`Unknown command: ${command}`);
-    console.error(`Valid commands: run, chain, task, discover, session, new-agent, version, info, adapters, config`);
+    console.error(`Valid commands: run, chain, task, discover, session, new-agent, version, info, adapters, config, tui`);
     process.exit(1);
 }
 
