@@ -55,7 +55,9 @@ export function listenForUserMessages(
 ): AbortController {
   const abort = new AbortController();
   const url = `${dashboardUrl}/api/sessions/${sessionId}/stream`;
-  const RETRY_DELAY_MS = 3_000;
+  const BASE_RETRY_MS = 3_000;
+  const MAX_RETRY_MS = 60_000;
+  let retryDelay = BASE_RETRY_MS;
 
   const connect = () => {
     if (abort.signal.aborted) return;
@@ -93,13 +95,15 @@ export function listenForUserMessages(
       }
 
       if (!abort.signal.aborted) {
-        console.log(`[orchestrator] SSE stream ended, reconnecting in ${RETRY_DELAY_MS}ms`);
-        setTimeout(connect, RETRY_DELAY_MS);
+        retryDelay = BASE_RETRY_MS;
+        console.log(`[orchestrator] SSE stream ended, reconnecting in ${retryDelay}ms`);
+        setTimeout(connect, retryDelay);
       }
     }).catch((err) => {
       if (abort.signal.aborted) return;
-      console.warn(`[orchestrator] SSE connection failed, retrying in ${RETRY_DELAY_MS}ms:`, err.message ?? err);
-      setTimeout(connect, RETRY_DELAY_MS);
+      console.warn(`[orchestrator] SSE connection failed, retrying in ${retryDelay}ms:`, err.message ?? err);
+      setTimeout(connect, retryDelay);
+      retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
     });
   };
 
