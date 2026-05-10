@@ -139,6 +139,41 @@ teams:
         consult-when: >
           Same review scope using Gemini model family for cross-model validation.
 
+  # --- Design Team ---
+
+  - team-name: Design
+    team-color: "#a78bfa"
+    consult-when: >
+      UI design, visual design, design systems, component aesthetics,
+      design review, creating design variants, style guides, CSS architecture.
+    lead:
+      name: Design Lead
+      path: agents/personas/planner.md
+      model: quality
+      color: "#a78bfa"
+    members:
+      - name: Frontend Designer
+        path: agents/personas/frontend-designer.md
+        model: main
+        color: "#c4b5fd"
+        consult-when: >
+          Creating design variants, reviewing visual quality,
+          building design systems, CSS architecture, component styling.
+      - name: Frontend Engineer
+        path: agents/personas/frontend-engineer.md
+        model: main
+        color: "#8b5cf6"
+        consult-when: >
+          Implementing designs into React components, ensuring
+          accessibility, responsive behavior, and performance.
+      - name: Antagonist
+        path: agents/personas/antagonist.md
+        model: quality
+        color: "#ff6666"
+        consult-when: >
+          Challenge design choices. Check accessibility, consistency,
+          edge cases (empty states, overflow, RTL).
+
   # --- Swarm Teams (Review) ---
 
   - team-name: Red Team
@@ -191,3 +226,245 @@ teams:
         consult-when: >
           Maintainability, naming, structure, duplication, dead code,
           test quality, readability.
+
+  # --- Standard Swarm Teams (5 specialist squads) ---
+
+  - team-name: Correctness Squad
+    team-color: "#22d3ee"
+    consult-when: >
+      Correctness-focused review: logic errors, type safety, edge cases,
+      API contract violations, state management bugs, runtime crashes.
+    lead:
+      name: Correctness Lead
+      path: agents/personas/validator.md
+      model: quality
+      color: "#22d3ee"
+    members:
+      - name: Correctness Reviewer
+        path: agents/personas/correctness-reviewer.md
+        model: quality
+        color: "#06b6d4"
+        consult-when: >
+          Atomic claim verification, type safety, edge case coverage,
+          null/undefined handling, off-by-one errors.
+      - name: Correctness Reviewer (B)
+        path: agents/personas/correctness-reviewer.md
+        model: pro
+        color: "#0891b2"
+        consult-when: >
+          Cross-model correctness verification. Independent check
+          with different model family for higher confidence.
+      - name: Testing Reviewer
+        path: agents/personas/testing-engineer.md
+        model: main
+        color: "#0e7490"
+        consult-when: >
+          Test coverage gaps, tests that pass accidentally,
+          missing assertions, untested edge cases.
+      - name: API Contract Reviewer
+        path: agents/personas/api-designer.md
+        model: main
+        color: "#155e75"
+        consult-when: >
+          API contract violations, return type mismatches,
+          parameter validation gaps, interface compliance.
+      - name: State Machine Reviewer
+        path: agents/personas/backend-engineer.md
+        model: main
+        color: "#134e4a"
+        consult-when: >
+          State transition correctness, unreachable states,
+          race conditions in async flows, stale closure bugs.
+      - name: Build Verifier
+        path: agents/personas/builder.md
+        model: main
+        color: "#115e59"
+        consult-when: >
+          Build output verification, dependency resolution,
+          import chain correctness, dead exports.
+
+  - team-name: Adversarial Squad
+    team-color: "#f43f5e"
+    consult-when: >
+      Adversarial review: break assumptions, find failure modes,
+      identify implicit coupling, stress-test design decisions.
+    lead:
+      name: Adversarial Lead
+      path: agents/personas/validator.md
+      model: quality
+      color: "#f43f5e"
+    members:
+      - name: Adversarial Reviewer
+        path: agents/personas/adversarial-reviewer.md
+        model: quality
+        color: "#e11d48"
+        consult-when: >
+          Devil's advocate review, assumption challenging,
+          attack vector identification, edge case discovery.
+      - name: Adversarial Reviewer (B)
+        path: agents/personas/adversarial-reviewer.md
+        model: pro
+        color: "#be123c"
+        consult-when: >
+          Cross-model adversarial analysis. Independent fault-finding
+          with different model family.
+      - name: Antagonist
+        path: agents/personas/antagonist.md
+        model: quality
+        color: "#9f1239"
+        consult-when: >
+          Challenge every design decision. Find what happens when
+          dependencies fail, inputs are malformed, state is stale.
+      - name: Edge Case Hunter
+        path: agents/personas/testing-engineer.md
+        model: quality
+        color: "#881337"
+        consult-when: >
+          Find inputs that cause unexpected behavior. Race conditions,
+          boundary values, empty states, concurrent access patterns.
+      - name: Assumption Breaker
+        path: agents/personas/scout.md
+        model: main
+        color: "#831843"
+        consult-when: >
+          Map implicit assumptions in the code. Find undocumented
+          preconditions, hidden coupling, config-as-code risks.
+
+  - team-name: Quality Squad
+    team-color: "#a3e635"
+    consult-when: >
+      Quality and maintainability review: SOLID violations, anti-patterns,
+      code duplication, abstraction mismatches, dead code.
+    lead:
+      name: Quality Lead
+      path: agents/personas/validator.md
+      model: quality
+      color: "#a3e635"
+    members:
+      - name: Quality Reviewer
+        path: agents/personas/quality-reviewer.md
+        model: quality
+        color: "#84cc16"
+        consult-when: >
+          Maintainability, naming, structure, duplication,
+          dead code, readability, abstraction level.
+      - name: Quality Reviewer (B)
+        path: agents/personas/quality-reviewer.md
+        model: pro
+        color: "#65a30d"
+        consult-when: >
+          Cross-model quality analysis with different model family.
+      - name: Code Reviewer
+        path: agents/personas/reviewer.md
+        model: main
+        color: "#4d7c0f"
+        consult-when: >
+          General code review, P0-P3 severity grading,
+          atomic claim verification.
+      - name: Architecture Reviewer
+        path: agents/personas/planner.md
+        model: quality
+        color: "#3f6212"
+        consult-when: >
+          Architectural anti-patterns, abstraction mismatches,
+          dependency direction violations, module coupling.
+      - name: Test Quality Reviewer
+        path: agents/personas/testing-engineer.md
+        model: main
+        color: "#365314"
+        consult-when: >
+          Test quality audit: assertion density, test isolation,
+          flaky test patterns, mock correctness.
+
+  - team-name: Security Squad
+    team-color: "#f97316"
+    consult-when: >
+      Security-focused review: OWASP top 10, injection vectors,
+      credential handling, domain escape, SSRF, path traversal.
+    lead:
+      name: Security Lead
+      path: agents/personas/validator.md
+      model: quality
+      color: "#f97316"
+    members:
+      - name: Security Reviewer
+        path: agents/personas/red-team.md
+        model: quality
+        color: "#ea580c"
+        consult-when: >
+          OWASP checks, injection, credential leaks,
+          domain escape, prompt injection, SSRF.
+      - name: Security Reviewer (B)
+        path: agents/personas/red-team.md
+        model: pro
+        color: "#c2410c"
+        consult-when: >
+          Cross-model security analysis for higher confidence.
+      - name: Infrastructure Reviewer
+        path: agents/personas/infra-engineer.md
+        model: main
+        color: "#9a3412"
+        consult-when: >
+          Deploy config security, environment leaks, network exposure,
+          container escape, privilege escalation.
+      - name: DevOps Security Reviewer
+        path: agents/personas/devops-engineer.md
+        model: main
+        color: "#7c2d12"
+        consult-when: >
+          CI/CD pipeline security, GitHub Actions risks,
+          deploy key exposure, secret management gaps.
+      - name: Dependency Auditor
+        path: agents/personas/scout.md
+        model: main
+        color: "#6c2e12"
+        consult-when: >
+          Dependency chain vulnerabilities, transitive risk,
+          version pinning, supply chain attack surface.
+
+  - team-name: Domain Squad
+    team-color: "#c084fc"
+    consult-when: >
+      Domain-specific review: architectural fit, pattern compliance,
+      framework conventions, integration correctness.
+    lead:
+      name: Domain Lead
+      path: agents/personas/planner.md
+      model: quality
+      color: "#c084fc"
+    members:
+      - name: Backend Reviewer
+        path: agents/personas/backend-engineer.md
+        model: main
+        color: "#a855f7"
+        consult-when: >
+          API design, data layer, auth flows, middleware patterns,
+          error handling conventions.
+      - name: Frontend Reviewer
+        path: agents/personas/frontend-engineer.md
+        model: main
+        color: "#9333ea"
+        consult-when: >
+          UI patterns, React conventions, state management,
+          accessibility, component architecture.
+      - name: Data Reviewer
+        path: agents/personas/data-engineer.md
+        model: main
+        color: "#7e22ce"
+        consult-when: >
+          Data pipeline correctness, schema validation,
+          query performance, data integrity.
+      - name: Security-Aware Domain Reviewer
+        path: agents/personas/security-engineer.md
+        model: main
+        color: "#6b21a8"
+        consult-when: >
+          Domain-specific security patterns, auth flows,
+          data access controls, business logic vulnerabilities.
+      - name: Integration Reviewer
+        path: agents/personas/infra-engineer.md
+        model: main
+        color: "#581c87"
+        consult-when: >
+          Cross-module integration points, config consistency,
+          environment parity, deploy pipeline correctness.

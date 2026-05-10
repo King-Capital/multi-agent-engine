@@ -100,7 +100,96 @@ chains:
           - "Best build selected"
           - "All P0/P1 issues resolved"
 
+  # --- Design Chains ---
+
+  design-review:
+    description: "Scout existing UI, design improvements, validate accessibility + visual quality"
+    steps:
+      - agent: Scout
+        till_done:
+          - "Existing UI files mapped"
+          - "Current design system documented (colors, fonts, spacing)"
+          - "Key improvement areas identified"
+      - team: Design
+        till_done:
+          - "Design variants produced as self-contained HTML files"
+          - "Design tokens and rationale documented"
+          - "Accessibility checks passed (contrast, focus, semantics)"
+      - team: Validation
+        till_done:
+          - text: "Design review grade assigned"
+            type: output_match
+            verify: "GRADE:\\s*(PASS|FEEDBACK|FAILED)"
+          - "Visual consistency verified"
+          - "Responsive behavior validated"
+
+  design-build:
+    description: "Design first, then implement in code, then validate"
+    steps:
+      - team: Design
+        till_done:
+          - "Design variants produced"
+          - "Final variant selected with rationale"
+      - team: Engineering
+        till_done:
+          - "Selected design implemented in components"
+          - "Tests pass"
+          - "Build succeeds"
+      - deterministic:
+          command: "bun tsc --noEmit 2>&1 || echo 'No lint configured'"
+          label: "Type check verification"
+          on_failure: loop
+          max_retries: 1
+      - team: Validation
+        till_done:
+          - "Implementation matches design"
+          - "Accessibility verified"
+          - "Code quality reviewed"
+
   # --- Swarm Chains ---
+
+  standard-swarm:
+    description: "5-squad parallel review swarm: orchestrator assigns paths, leads spin out full workforce immediately"
+    steps:
+      - parallel:
+          - team: Correctness Squad
+            system_prompt_append: |
+              SWARM MODE: Brief ALL workers immediately with specific file assignments.
+              Stream progress: after briefing, report "Briefed N workers on [files]" so the dashboard shows activity.
+              As workers report back, summarize each finding to the conversation — keep the user informed in real-time.
+              Synthesize all findings into a graded P0-P3 report. Track which files were covered.
+          - team: Adversarial Squad
+            system_prompt_append: |
+              SWARM MODE: Brief ALL workers immediately — each attacks different files from different angles.
+              Stream progress: report who's working on what as you brief them.
+              As workers find issues, relay findings immediately — don't wait for all to finish.
+              Synthesize into prioritized attack report with P0-P3 severity.
+          - team: Quality Squad
+            system_prompt_append: |
+              SWARM MODE: Brief ALL workers immediately — each reviews a different quality dimension.
+              Stream progress: report assignments and worker status as they complete.
+              Relay findings as they come in so the dashboard shows real-time quality assessment.
+              Synthesize into actionable quality report with P0-P3 severity.
+          - team: Security Squad
+            system_prompt_append: |
+              SWARM MODE: Brief ALL workers immediately — each checks different OWASP categories on specific files.
+              Stream progress: report who's auditing what. Any file with user input, URLs, or file paths must be covered.
+              Relay security findings immediately as workers report — don't batch.
+              Synthesize into security audit with P0-P3 + CWE codes. End with verification checklist.
+          - team: Domain Squad
+            system_prompt_append: |
+              SWARM MODE: Brief ALL workers immediately — backend, frontend, data, integration, infra, security-domain.
+              Stream progress: report assignments and relay findings as workers complete.
+              Cross-reference across workers — if two workers disagree, note the conflict.
+              Synthesize into domain fitness report with P0-P3 severity.
+        till_done:
+          - "Correctness squad: logic errors, type safety, edge cases, API contracts verified"
+          - "Adversarial squad: assumptions broken, failure modes found, implicit coupling identified"
+          - "Quality squad: SOLID violations, anti-patterns, duplication, dead code assessed"
+          - "Security squad: OWASP top 10, injection, SSRF, path traversal, credential handling checked"
+          - "Domain squad: architectural fit, framework conventions, integration correctness reviewed"
+          - "All findings graded P0-P3 with evidence"
+          - "Orchestrator synthesizes across all 5 squads"
 
   swarm-review:
     description: "Full review swarm: red team + blue team in parallel, orchestrator synthesizes"

@@ -8,7 +8,7 @@ export interface AgentActivity {
   warned: boolean;
 }
 
-export const IDLE_WARN_MS = 90_000;
+export const IDLE_WARN_MS = 180_000;
 export const MONITOR_INTERVAL_MS = 15_000;
 
 /**

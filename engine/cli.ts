@@ -12,6 +12,8 @@ import { expertSession } from "./expert-session";
 import { readFileSync as readFile, writeFileSync, existsSync, readdirSync } from "fs";
 import { join, resolve } from "path";
 import { getFlag, stripFlags, slugify } from "./cli-utils";
+import { startDesignGallery } from "./design-gallery";
+import { loadFileReferences, loadUrlReferences, scanProjectDesign } from "./reference-loader";
 
 const args = process.argv.slice(2);
 
@@ -30,6 +32,7 @@ Commands:
   learn         Build expertise from sources   mae learn --help
   expert    ◆   Interactive expert session      mae expert --help
   validate-agent  Test expertise quality        mae validate-agent --help
+  design    ◆   Design session or review        mae design --help
   discover      Discover A2A agents            mae discover <url>
   info          System overview                mae info
   version       Version info                   mae version
@@ -366,6 +369,90 @@ from an agent that deeply understands the code.
     break;
   }
 
+  case "design": {
+    if (subHelp) showSubHelp(`
+mae design — Design session or design review
+
+Usage:
+  mae design <project-path>                  Start interactive design session
+  mae design review <project-path>           Run design-review chain
+  mae design build <project-path>            Run design-build chain (design → implement → validate)
+
+Options:
+  --ref <path>         Add file reference (screenshot, mockup, CSS)
+  --url <url>          Add URL reference (fetch and extract design patterns)
+  --no-scan            Skip automatic project design system scan
+  --port <port>        Design gallery port (default: 8401)
+  --adapter <name>     Use specific adapter
+  --dry-run            Use echo adapter for testing
+  --cwd <path>         Working directory for agents
+
+Examples:
+  mae design ./my-app
+  mae design review ./my-app --ref screenshot.png --url https://example.com
+  mae design build ./dashboard-next --ref brand-guide.pdf
+`);
+    const sub = args[1]?.startsWith("--") ? undefined : args[1];
+    const isReview = sub === "review";
+    const isBuild = sub === "build";
+    const projectPath = resolve(isReview || isBuild ? (args[2] ?? ".") : (sub ?? "."));
+    const galleryPort = parseInt(getFlag(args, "--port") ?? "8401", 10);
+    const skipScan = args.includes("--no-scan");
+
+    const refPaths: string[] = [];
+    const refUrls: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "--ref" && args[i + 1]) refPaths.push(resolve(args[i + 1]!));
+      if (args[i] === "--url" && args[i + 1]) refUrls.push(args[i + 1]!);
+    }
+
+    console.log(`[design] Loading references...`);
+    const refs = [
+      ...(refPaths.length > 0 ? loadFileReferences(refPaths) : []),
+      ...(refUrls.length > 0 ? await loadUrlReferences(refUrls) : []),
+      ...(!skipScan ? await scanProjectDesign(projectPath) : []),
+    ];
+
+    if (refs.length > 0) {
+      console.log(`[design] Loaded ${refs.length} reference(s): ${refs.map(r => r.name).join(", ")}`);
+    }
+
+    const outputDir = join(projectPath, "design-output");
+    const gallery = startDesignGallery(outputDir, galleryPort);
+
+    const referenceContext = refs.length > 0
+      ? `\n\nDesign References:\n${refs.map(r => `--- ${r.source}: ${r.name} ---\n${r.content}`).join("\n\n")}`
+      : "";
+
+    try {
+      if (isReview || isBuild) {
+        const chainName = isBuild ? "design-build" : "design-review";
+        const task = `Review and improve the UI design of the project at ${projectPath}. Output design variants as self-contained HTML files to ${outputDir}/${referenceContext}`;
+        const session = await orch.run({
+          chain: chainName,
+          task,
+          adapter: dryRun ? "echo" : adapterName,
+          workingDir: projectPath,
+        });
+        console.log(`\nSession ${session.id} ${session.status}. Cost: $${session.totalCost.toFixed(3)}`);
+        console.log(`Gallery: ${gallery.url}`);
+      } else {
+        const task = `Design session for the project at ${projectPath}. Analyze the existing UI, create design variants as self-contained HTML files in ${outputDir}. Focus on visual quality, consistency, and accessibility.${referenceContext}`;
+        const session = await orch.run({
+          prompt: "plan-build-review",
+          task,
+          adapter: dryRun ? "echo" : adapterName,
+          workingDir: projectPath,
+        });
+        console.log(`\nSession ${session.id} ${session.status}. Cost: $${session.totalCost.toFixed(3)}`);
+        console.log(`Gallery: ${gallery.url}`);
+      }
+    } finally {
+      gallery.stop();
+    }
+    break;
+  }
+
   case "version": {
     const versionFile = join(BASE_DIR, "VERSION");
     let maeVersion = "unknown";
@@ -513,7 +600,7 @@ Interactive TUI menus:
 
   default:
     console.error(`Unknown command: ${command}`);
-    console.error(`Valid commands: run, chain, task, session, config, new-team, new-agent, learn, expert, validate-agent, discover, info, version, adapters, tui`);
+    console.error(`Valid commands: run, chain, task, design, session, config, new-team, new-agent, learn, expert, validate-agent, discover, info, version, adapters, tui`);
     process.exit(1);
 }
 
