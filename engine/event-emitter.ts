@@ -1,4 +1,4 @@
-import type { SessionEvent } from "./types";
+import type { SessionEvent, SessionStateEvent } from "./types";
 import type { BudgetProjection } from "./budget";
 
 const RETRY_DELAYS = [100, 500, 2000];
@@ -285,6 +285,16 @@ export class EventEmitter {
       event_type: "severity_alert",
       timestamp: new Date().toISOString(),
       data: { severity, excerpt },
+    });
+  }
+
+  sessionState(sessionId: string, state: SessionStateEvent) {
+    return this.emit({
+      session_id: sessionId,
+      agent_id: "orchestrator",
+      event_type: "session_state",
+      timestamp: new Date().toISOString(),
+      data: state as unknown as Record<string, unknown>,
     });
   }
 

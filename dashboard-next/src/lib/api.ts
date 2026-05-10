@@ -175,6 +175,12 @@ const SSE_EVENT_TYPES = [
   "pause",
   "resume",
   "waiting",
+  "session_state",
+  "stall_detected",
+  "nudge_sent",
+  "budget_warning",
+  "severity_alert",
+  "auto_pause",
 ] as const;
 
 /**

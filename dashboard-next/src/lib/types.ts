@@ -116,6 +116,37 @@ export interface EventData {
 
   // error
   error_msg?: string;
+
+  // session_state
+  phase?: string;
+  active_leads?: string[];
+  progress?: number;
+  current_step?: number;
+  total_steps?: number;
+  assessment?: string;
+  session_status?: string;
+  budget_percent?: number;
+  actions?: string[];
+
+  // stall_detected / nudge_sent
+  idle_seconds?: number;
+  nudge_type?: string;
+  nudge_count?: number;
+  nudge_message?: string;
+
+  // severity_alert
+  severity?: string;
+  excerpt?: string;
+
+  // auto_pause / budget_warning
+  reason?: string;
+  current_cost?: number;
+  projected_cost?: number;
+  remaining_budget?: number;
+  percent_used?: number;
+  burn_rate?: number;
+  will_exceed?: boolean;
+  budget_action?: string;
 }
 
 export interface TillDoneItem {
@@ -161,6 +192,12 @@ export type SSEEvent =
   | (LiveEvent & { event_type: "pause" })
   | (LiveEvent & { event_type: "resume" })
   | (LiveEvent & { event_type: "waiting" })
+  | (LiveEvent & { event_type: "session_state" })
+  | (LiveEvent & { event_type: "stall_detected" })
+  | (LiveEvent & { event_type: "nudge_sent" })
+  | (LiveEvent & { event_type: "budget_warning" })
+  | (LiveEvent & { event_type: "severity_alert" })
+  | (LiveEvent & { event_type: "auto_pause" })
   | LiveEvent; // fallback for unknown types
 
 // ─── Stats ───────────────────────────────────────────────────────────────────
