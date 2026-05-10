@@ -20,6 +20,7 @@ import type {
   ChainStep,
   GradeLevel,
 } from "./types";
+import { buildStreamHandler, buildSendMessage } from "./stream-handler";
 
 export interface TeamExecutionDeps {
   emitter: EventEmitter;
@@ -95,17 +96,11 @@ export async function runTeamStep(
     parentId: "orch-1",
     teamName: teamConfig["team-name"],
     teamColor: teamConfig["team-color"],
-    onStreamEvent: (streamEvt) => {
-      if (streamEvt.type === "tool_call") {
-        trackToolCall(leadId, streamEvt.tool ?? "");
-        emitter.toolCall(session.id, leadId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
-      } else if (streamEvt.type === "cost") {
-        emitter.costUpdate(session.id, leadId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
-      }
-    },
-    sendMessage: (fn) => {
-      messageSenders.set(`${session.id}:${leadId}`, fn);
-    },
+    onStreamEvent: buildStreamHandler({
+      emitter, sessionId: session.id, agentId: leadId,
+      trackToolCall, messageSenders,
+    }),
+    sendMessage: buildSendMessage(messageSenders, session.id, leadId),
   };
 
   const leadStartTime = Date.now();
@@ -130,9 +125,9 @@ export async function runTeamStep(
   // Emit lead output summary to conversation stream
   const leadSummary = summarizeOutput(leadResult.output, 2000);
   await emitter.message(session.id, leadId, teamConfig.lead.name, "user", leadSummary);
-  await emitter.agentDone(session.id, leadId, leadResult.grade);
 
   if (leadResult.grade === "FAILED" || !teamConfig.members.length) {
+    await emitter.agentDone(session.id, leadId, leadResult.grade);
     const msg = leadResult.grade === "FAILED"
       ? `${teamConfig["team-name"]} lead could not complete the task.`
       : `${teamConfig["team-name"]} complete (lead only).`;
@@ -193,17 +188,11 @@ export async function runTeamStep(
       parentId: leadId,
       teamName: teamConfig["team-name"],
       teamColor: member.color ?? teamConfig["team-color"],
-      onStreamEvent: (streamEvt) => {
-        if (streamEvt.type === "tool_call") {
-          trackToolCall(workerId, streamEvt.tool ?? "");
-          emitter.toolCall(session.id, workerId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
-        } else if (streamEvt.type === "cost") {
-          emitter.costUpdate(session.id, workerId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
-        }
-      },
-      sendMessage: (fn) => {
-        messageSenders.set(`${session.id}:${workerId}`, fn);
-      },
+      onStreamEvent: buildStreamHandler({
+        emitter, sessionId: session.id, agentId: workerId,
+        trackToolCall, messageSenders,
+      }),
+      sendMessage: buildSendMessage(messageSenders, session.id, workerId),
     };
 
     try {
@@ -530,17 +519,11 @@ export async function runParallelStep(
     parentId: "orch-1",
     teamName: "Synthesis",
     teamColor: "#a855f7",
-    onStreamEvent: (streamEvt) => {
-      if (streamEvt.type === "tool_call") {
-        trackTool(synthId, streamEvt.tool ?? "");
-        emitter.toolCall(session.id, synthId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
-      } else if (streamEvt.type === "cost") {
-        emitter.costUpdate(session.id, synthId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
-      }
-    },
-    sendMessage: (fn) => {
-      messageSenders.set(`${session.id}:${synthId}`, fn);
-    },
+    onStreamEvent: buildStreamHandler({
+      emitter, sessionId: session.id, agentId: synthId,
+      trackToolCall: trackTool, messageSenders,
+    }),
+    sendMessage: buildSendMessage(messageSenders, session.id, synthId),
   };
 
   const synthResult = await adapter.delegate(synthOpts);

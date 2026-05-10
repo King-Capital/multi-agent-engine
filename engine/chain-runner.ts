@@ -18,7 +18,7 @@ import type { BudgetState } from "./budget";
 import { runTeamStep, runParallelStep } from "./team-execution";
 import type { TeamExecutionDeps } from "./team-execution";
 import { logPerformance } from "./perf-log";
-import { scanSeverity, shouldAutoPause, extractFindingExcerpt } from "./severity-scanner";
+import { buildStreamHandler, buildSendMessage } from "./stream-handler";
 import type { AgentActivity } from "./monitoring";
 import type { OrchestratorLoop } from "./orchestrator-loop";
 import type { PipelineTracker } from "./pipeline-state";
@@ -320,32 +320,12 @@ export async function runAgent(
     parentId,
     teamName,
     teamColor,
-    onStreamEvent: (streamEvt) => {
-      if (streamEvt.type === "tool_call") {
-        trackToolCall(agentActivity, agentId, streamEvt.tool ?? "");
-        emitter.toolCall(session.id, agentId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
-        orchestratorLoop?.recordEvent({
-          session_id: session.id, agent_id: agentId,
-          event_type: "tool_call", timestamp: new Date().toISOString(),
-          data: { tool: streamEvt.tool ?? "", status: streamEvt.status ?? "running" },
-        });
-      } else if (streamEvt.type === "cost") {
-        emitter.costUpdate(session.id, agentId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
-      } else if (streamEvt.type === "assistant_text" && streamEvt.content) {
-        const severity = scanSeverity(streamEvt.content);
-        if (severity && shouldAutoPause(severity, session.id)) {
-          pausedSessions.add(session.id);
-          session.status = "paused";
-          const excerpt = extractFindingExcerpt(streamEvt.content, severity);
-          emitter.severityAlert(session.id, agentId, severity, excerpt);
-          emitter.autoPause(session.id, `severity:${severity}`);
-          orchestratorLoop?.trigger("severity_alert", { severity, excerpt });
-        }
-      }
-    },
-    sendMessage: (fn) => {
-      messageSenders.set(`${session.id}:${agentId}`, fn);
-    },
+    onStreamEvent: buildStreamHandler({
+      emitter, sessionId: session.id, agentId,
+      trackToolCall: (id, tool) => trackToolCall(agentActivity, id, tool),
+      messageSenders, orchestratorLoop, pausedSessions, session,
+    }),
+    sendMessage: buildSendMessage(messageSenders, session.id, agentId),
   };
 
   const agentStartTime = Date.now();
