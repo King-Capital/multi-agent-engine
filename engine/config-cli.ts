@@ -18,6 +18,15 @@ function printDivider(char = "─", len = 50) {
   console.log(char.repeat(len));
 }
 
+function getAvailableModels(config: ModelRoutingConfig): string[] {
+  const models = new Set<string>();
+  for (const tier of Object.values(config.tiers ?? {})) {
+    if (tier.default) models.add(tier.default);
+    for (const opt of tier.options ?? []) models.add(opt.model);
+  }
+  return [...models];
+}
+
 // --- Show ---
 
 export async function configShow(): Promise<void> {
@@ -190,7 +199,7 @@ export async function configInteractive(): Promise<void> {
     console.log("  5. Role defaults");
     console.log("  6. Discover models");
     console.log("  7. Export as JSON");
-    console.log("  q. Exit");
+    console.log("  q. Quit");
 
     const choice = await prompt("\n> ");
     switch (choice) {
@@ -220,10 +229,11 @@ async function budgetMenu(): Promise<void> {
 
   console.log("\n  1. Edit values");
   console.log("  2. Reset to defaults");
-  console.log("  q. Back");
+  console.log("  b. Back");
 
   const choice = await prompt("\n> ");
   if (choice === "1") {
+    console.log("  Enter new values (empty to keep current):");
     const session = await prompt(`  Session limit [$${b.max_per_session_usd}]: `);
     const agent = await prompt(`  Agent limit [$${b.max_per_agent_usd}]: `);
     const warn = await prompt(`  Warn at [$${b.warn_at_usd}]: `);
@@ -269,7 +279,7 @@ async function tiersMenu(): Promise<void> {
       console.log(`                  - ${opt.model} (${opt.thinking})`);
     }
   }
-  console.log("  q. Back");
+  console.log("  b. Back");
 
   const choice = await prompt("\n  Edit tier (1-" + tierNames.length + "): ");
   const idx = parseInt(choice) - 1;
@@ -282,22 +292,26 @@ async function tiersMenu(): Promise<void> {
     for (let i = 0; i < models.length; i++) {
       console.log(`    ${i + 1}. ${models[i]}`);
     }
-    const modelChoice = await prompt("  New default (number or model name): ");
-    const modelIdx = parseInt(modelChoice) - 1;
-    if (modelIdx >= 0 && modelIdx < models.length) {
-      tier.default = models[modelIdx]!;
-    } else if (modelChoice) {
-      tier.default = modelChoice;
+    const modelChoice = await prompt("  New default (number, model name, or empty to keep): ");
+    if (modelChoice) {
+      const modelIdx = parseInt(modelChoice) - 1;
+      if (modelIdx >= 0 && modelIdx < models.length) {
+        tier.default = models[modelIdx]!;
+      } else {
+        tier.default = modelChoice;
+      }
     }
 
     const thinkingLevels: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
-    const thinking = await prompt(`  Thinking level [${tier.default_thinking}] (${thinkingLevels.join("/")}): `);
+    const thinking = await prompt(`  Thinking [${tier.default_thinking}] (${thinkingLevels.join("/")} or empty to keep): `);
     if (thinking && thinkingLevels.includes(thinking as ThinkingLevel)) {
       tier.default_thinking = thinking;
     }
 
-    writeModelRouting(config);
-    console.log(`  Tier "${name}" updated.`);
+    if (modelChoice || thinking) {
+      writeModelRouting(config);
+      console.log(`  Tier "${name}" updated.`);
+    }
   }
 }
 
@@ -312,24 +326,32 @@ async function aliasesMenu(): Promise<void> {
 
   console.log("\n  1. Add/edit alias");
   console.log("  2. Remove alias");
-  console.log("  q. Back");
+  console.log("  b. Back");
 
   const choice = await prompt("\n> ");
   if (choice === "1") {
-    const alias = await prompt("  Alias name: ");
-    const model = await prompt("  Model: ");
-    if (alias && model) {
-      if (!config.aliases) config.aliases = {};
-      config.aliases[alias] = model;
-      writeModelRouting(config);
-      console.log(`  Alias "${alias}" → "${model}" saved.`);
-    }
+    const models = getAvailableModels(config);
+    console.log(`\n  Available models: ${models.join(", ")}`);
+    const alias = await prompt("  Alias name (empty to cancel): ");
+    if (!alias) return;
+    const model = await prompt("  Model (empty to cancel): ");
+    if (!model) return;
+    if (!config.aliases) config.aliases = {};
+    config.aliases[alias] = model;
+    writeModelRouting(config);
+    console.log(`  Alias "${alias}" → "${model}" saved.`);
   } else if (choice === "2") {
-    const alias = await prompt("  Alias to remove: ");
-    if (alias && config.aliases?.[alias]) {
+    const existing = Object.keys(config.aliases ?? {});
+    if (existing.length === 0) { console.log("  No aliases to remove."); return; }
+    console.log(`  Existing: ${existing.join(", ")}`);
+    const alias = await prompt("  Alias to remove (empty to cancel): ");
+    if (!alias) return;
+    if (config.aliases?.[alias]) {
       delete config.aliases[alias];
       writeModelRouting(config);
       console.log(`  Alias "${alias}" removed.`);
+    } else {
+      console.log(`  Alias "${alias}" not found.`);
     }
   }
 }
@@ -346,7 +368,7 @@ async function roleDefaultsMenu(): Promise<void> {
     const defaults = config.roleDefaults[role]!;
     console.log(`  ${(i + 1)}. ${role.padEnd(14)} tier: ${defaults.tier.padEnd(8)} thinking: ${defaults.thinking}`);
   }
-  console.log("  q. Back");
+  console.log("  b. Back");
 
   const choice = await prompt("\n  Edit role (1-" + roles.length + "): ");
   const idx = parseInt(choice) - 1;
@@ -354,18 +376,20 @@ async function roleDefaultsMenu(): Promise<void> {
     const role = roles[idx]!;
     const defaults = config.roleDefaults[role]!;
 
-    const tier = await prompt(`  Tier [${defaults.tier}] (${tierNames.join("/")}): `);
+    const tier = await prompt(`  Tier [${defaults.tier}] (${tierNames.join("/")} or empty to keep): `);
     if (tier && tierNames.includes(tier)) {
       defaults.tier = tier;
     }
 
     const thinkingLevels: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
-    const thinking = await prompt(`  Thinking [${defaults.thinking}] (${thinkingLevels.join("/")}): `);
+    const thinking = await prompt(`  Thinking [${defaults.thinking}] (${thinkingLevels.join("/")} or empty to keep): `);
     if (thinking && thinkingLevels.includes(thinking as ThinkingLevel)) {
       defaults.thinking = thinking as ThinkingLevel;
     }
 
-    writeModelRouting(config);
-    console.log(`  Role "${role}" updated.`);
+    if (tier || thinking) {
+      writeModelRouting(config);
+      console.log(`  Role "${role}" updated.`);
+    }
   }
 }
