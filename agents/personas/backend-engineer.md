@@ -20,8 +20,8 @@ tools:
   - glob
 domain:
   read: ["**/*"]
-  write: ["**/*"]
-  update: ["**/*", "expertise/backend-engineer.md"]
+  write: ["engine/**", "src/**", "lib/**", "**/*.ts", "**/*.js"]
+  update: ["**/*", "agents/expertise/backend-engineer.md"]
   delete: []
 ---
 

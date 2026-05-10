@@ -20,8 +20,8 @@ tools:
   - glob
 domain:
   read: ["**/*"]
-  write: ["**/*"]
-  update: ["**/*", "expertise/testing-engineer.md"]
+  write: ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "test/**", "tests/**", "__tests__/**"]
+  update: ["**/*", "agents/expertise/testing-engineer.md"]
   delete: []
 ---
 

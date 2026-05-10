@@ -20,8 +20,8 @@ tools:
   - glob
 domain:
   read: ["**/*"]
-  write: ["**/*"]
-  update: ["**/*", "expertise/data-engineer.md"]
+  write: ["engine/**", "src/**", "migrations/**", "**/*.sql"]
+  update: ["**/*", "agents/expertise/data-engineer.md"]
   delete: []
 ---
 
