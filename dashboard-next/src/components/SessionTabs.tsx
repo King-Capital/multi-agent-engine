@@ -62,7 +62,7 @@ function agentDisplay(ev: LiveEvent): {
 	const color = agentColor(d.agent_role as string | undefined, d.team_color as string | undefined);
 	const role = (d.agent_role as string) ?? "";
 	const rawModel = (d.model as string) ?? "";
-	const model = rawModel || (role === "orchestrator" ? "coordinator" : "");
+	const model = rawModel;
 	return { name, color, role, model };
 }
 
@@ -667,14 +667,22 @@ function StreamTab({
 		});
 		const merged = [...hist, ...liveEvents];
 
-		// Dedup: user messages can appear twice (dashboard stores + engine echoes back)
+		// Dedup: events can appear twice (dashboard stores + engine echoes back)
 		const seen = new Set<string>();
 		return merged.filter((ev) => {
-			if (ev.event_type !== "message") return true;
-			const content = ev.data?.content ?? "";
-			const key = `${ev.agent_id}:${content.slice(0, 120)}`;
-			if (seen.has(key)) return false;
-			seen.add(key);
+			if (ev.event_type === "message") {
+				const content = ev.data?.content ?? "";
+				const key = `msg:${ev.agent_id}:${content.slice(0, 120)}`;
+				if (seen.has(key)) return false;
+				seen.add(key);
+				return true;
+			}
+			if (ev.event_type === "agent_spawn") {
+				const key = `spawn:${ev.agent_id}`;
+				if (seen.has(key)) return false;
+				seen.add(key);
+				return true;
+			}
 			return true;
 		});
 	}, [historyEvents, liveEvents]);

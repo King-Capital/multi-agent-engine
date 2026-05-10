@@ -8,7 +8,7 @@ import { A2AAdapter } from "./adapters/a2a";
 import { loadChains, loadModelRouting } from "./config";
 import { configShow, configExport, configImport, configDiscover, configInteractive } from "./config-cli";
 import { readFileSync as readFile } from "fs";
-import { join } from "path";
+import { join, resolve } from "path";
 
 const args = process.argv.slice(2);
 
@@ -54,7 +54,7 @@ const command = args[0];
 const isLocal = args.includes("--local") || process.env.MAE_LOCAL === "1";
 const dashboardUrl = isLocal ? "http://localhost:8400" : (getFlag(args, "--dashboard") ?? process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
 const adapterName = getFlag(args, "--adapter");
-const workingDir = getFlag(args, "--cwd") ?? process.cwd();
+const workingDir = resolve(getFlag(args, "--cwd") ?? process.cwd());
 const dryRun = args.includes("--dry-run");
 
 // A2A configuration
