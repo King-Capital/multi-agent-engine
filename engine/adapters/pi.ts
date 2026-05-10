@@ -238,14 +238,13 @@ export class PiAdapter implements PlatformAdapter {
                     if (usage) {
                       totalCost = messages.reduce((sum: number, m: { usage?: { cost?: { total?: number } } }) =>
                         sum + (m.usage?.cost?.total ?? 0), 0);
-                    // If no cost reported, compute from token counts
-                    if (totalCost === 0 && totalTokens > 0) {
-                      const inputTokens = messages.reduce((sum: number, m: { usage?: { inputTokens?: number; input_tokens?: number } }) =>
-                        sum + (m.usage?.inputTokens ?? m.usage?.input_tokens ?? 0), 0);
-                      const outputTokens = messages.reduce((sum: number, m: { usage?: { outputTokens?: number; output_tokens?: number } }) =>
-                        sum + (m.usage?.outputTokens ?? m.usage?.output_tokens ?? 0), 0);
-                      totalCost = this.computeCostFromTokens(opts.model, inputTokens, outputTokens, cacheReadTokens);
-                    }
+                      if (totalCost === 0 && totalTokens > 0) {
+                        const inputTokens = messages.reduce((sum: number, m: { usage?: { inputTokens?: number; input_tokens?: number } }) =>
+                          sum + (m.usage?.inputTokens ?? m.usage?.input_tokens ?? 0), 0);
+                        const outputTokens = messages.reduce((sum: number, m: { usage?: { outputTokens?: number; output_tokens?: number } }) =>
+                          sum + (m.usage?.outputTokens ?? m.usage?.output_tokens ?? 0), 0);
+                        totalCost = this.computeCostFromTokens(opts.model, inputTokens, outputTokens, cacheReadTokens);
+                      }
                     }
                   }
                   opts.onStreamEvent?.({ type: "cost", costUsd: totalCost, tokensUsed: totalTokens, cacheReadTokens });
@@ -427,7 +426,7 @@ export class PiAdapter implements PlatformAdapter {
             const inputTokens = (usage.inputTokens as number) ?? (usage.input_tokens as number) ?? 0;
             const outputTokens = (usage.outputTokens as number) ?? (usage.output_tokens as number) ?? 0;
             finalCost = this.computeCostFromTokens(
-              (msg as Record<string, unknown>).model as string ?? "opus-nocache",
+              (msg as Record<string, unknown>).model as string || "opus-nocache",
               inputTokens, outputTokens, cache, tokens
             );
           }

@@ -67,6 +67,19 @@ export class Orchestrator {
     console.log(`[orchestrator] Sandbox pool enabled (${this.sandboxPool.status().total} sandboxes)`);
   }
 
+  async shutdown(): Promise<void> {
+    console.log("[orchestrator] Shutting down...");
+    for (const [id, session] of this.sessions) {
+      if (session.status === "active" || session.status === "paused") {
+        session.status = "error";
+        this.activeMonitor?.stop();
+        stopListening(this.sseAbort);
+        await this.emitter.sessionEnd(id);
+      }
+    }
+    this.sessions.clear();
+  }
+
   registerAdapter(adapter: PlatformAdapter): void {
     this.adapters.set(adapter.name, adapter);
     if (!this.defaultAdapter) {
@@ -597,7 +610,7 @@ export class Orchestrator {
 
       if (item.type === "output_match" && item.verify) {
         try {
-          const match = new RegExp(item.verify).exec(output);
+          const match = new RegExp(item.verify).exec(output.slice(0, 10_000));
           if (match) {
             item.evidence = `Matched: ${match[0]}`;
             item.completed = true;
