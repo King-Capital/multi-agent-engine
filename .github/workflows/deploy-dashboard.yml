@@ -37,7 +37,7 @@ jobs:
         run: go build -o mae-dashboard .
 
       - name: Stop dashboard
-        run: systemctl stop mae-dashboard
+        run: sudo systemctl stop mae-dashboard
 
       - name: Deploy SPA
         run: |
@@ -61,7 +61,7 @@ jobs:
           done
 
       - name: Start dashboard
-        run: systemctl start mae-dashboard
+        run: sudo systemctl start mae-dashboard
           for i in 1 2 3 4 5; do
             if curl -sf http://localhost:8400/api/health > /dev/null 2>&1; then
               echo "Dashboard restarted successfully"
