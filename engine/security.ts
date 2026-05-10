@@ -250,7 +250,9 @@ function matchGlob(path: string, pattern: string): boolean {
   if (pattern === "**/*") return true;
 
   // Normalize -- block path traversal
-  const normalizedPath = path.replace(/\.\.\//g, "");
+  const { normalize } = require("path") as typeof import("path");
+  let normalizedPath = normalize(path).replace(/\\/g, "/");
+  if (normalizedPath.startsWith("../") || normalizedPath === "..") return false;
 
   const regexStr = pattern
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")

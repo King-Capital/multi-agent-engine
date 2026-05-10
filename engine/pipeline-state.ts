@@ -70,6 +70,10 @@ export class PipelineTracker {
   }
 
   static resume(sessionId: string): PipelineTracker | null {
+    if (!/^[0-9a-f-]{36}$/i.test(sessionId)) {
+      console.error(`[pipeline] Invalid session ID format: ${sessionId}`);
+      return null;
+    }
     const path = join(STATE_DIR, `${sessionId}.json`);
     if (!existsSync(path)) return null;
     try {

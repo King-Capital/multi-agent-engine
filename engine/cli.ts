@@ -95,6 +95,18 @@ if (dryRun) {
   }
 }
 
+// Graceful shutdown handler
+let shuttingDown = false;
+for (const sig of ["SIGTERM", "SIGINT"] as const) {
+  process.on(sig, () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`\n[cli] Received ${sig}, shutting down gracefully...`);
+    orch.shutdown().then(() => process.exit(0)).catch(() => process.exit(1));
+    setTimeout(() => { console.error("[cli] Shutdown timed out, forcing exit"); process.exit(1); }, 10_000);
+  });
+}
+
 switch (command) {
   case "run": {
     const promptName = args[1];

@@ -60,11 +60,12 @@ export async function delegateWithHealing(ctx: SelfHealContext): Promise<Delegat
   const { adapter, opts, sessionId, agentRole, onEvent } = ctx;
   const maxAttempts = 4;
 
-  opts.timeoutMs = opts.timeoutMs ?? TIMEOUT_FOR_ROLE[agentRole] ?? 300_000;
+  const timeoutMs = opts.timeoutMs ?? TIMEOUT_FOR_ROLE[agentRole] ?? 300_000;
+  const healOpts = { ...opts, timeoutMs };
 
   // Attempt 1: Normal run
-  console.log(`[self-heal] Attempt 1: ${opts.persona.name} (${opts.model})`);
-  let result = await adapter.delegate(opts);
+  console.log(`[self-heal] Attempt 1: ${healOpts.persona.name} (${healOpts.model})`);
+  let result = await adapter.delegate(healOpts);
   logOutput(opts.sessionDir, opts.persona.name, 1, result);
 
   if (!isFailed(result)) return result;

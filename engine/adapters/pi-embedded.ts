@@ -126,8 +126,10 @@ export class PiEmbeddedAdapter implements PlatformAdapter {
 
     console.log(`[pi-embedded] Creating session for ${opts.persona.name} with ${model.provider}/${model.id}`);
 
+    let session: Awaited<ReturnType<typeof pi.createAgentSession>>["session"] | null = null;
+    let unsubscribeFn: (() => void) | null = null;
     try {
-      const { session } = await pi.createAgentSession({
+      const created = await pi.createAgentSession({
         cwd: opts.workingDir,
         model,
         thinkingLevel: opts.thinking,
@@ -135,12 +137,13 @@ export class PiEmbeddedAdapter implements PlatformAdapter {
         modelRegistry,
         tools: opts.tools.filter((t: string) => t !== "delegate"),
       });
+      session = created.session;
 
       let totalCost = 0;
       let totalTokens = 0;
 
       // Subscribe to events for streaming to dashboard
-      const unsubscribe = session.subscribe((event: any) => {
+      unsubscribeFn = session.subscribe((event: any) => {
         switch (event.type) {
           case "tool_use_begin":
             opts.onStreamEvent?.({
@@ -174,26 +177,42 @@ export class PiEmbeddedAdapter implements PlatformAdapter {
       // Register steering callback
       if (opts.sendMessage) {
         opts.sendMessage((msg: string) => {
-          session.steer(msg);
+          session!.steer(msg);
         });
       }
 
       // Send prompt and wait for completion
-      await session.prompt(opts.userPrompt);
+      await session!.prompt(opts.userPrompt);
 
-      // Wait for agent to finish processing tool calls
-      while (session.isStreaming) {
+      // Wait for agent to finish processing tool calls (with timeout)
+      const streamDeadline = Date.now() + (opts.timeoutMs ?? 300_000);
+      while (session!.isStreaming && Date.now() < streamDeadline) {
         await new Promise(r => setTimeout(r, 100));
+      }
+      if (session!.isStreaming) {
+        console.error(`[pi-embedded] ${opts.persona.name} stream timed out, force-disposing`);
+        const partialText = session!.getLastAssistantText?.() ?? "";
+        unsubscribeFn?.();
+        session!.dispose();
+        return {
+          agentId,
+          agentName: opts.persona.name,
+          output: partialText || `ERROR: Stream timed out after ${opts.timeoutMs ?? 300_000}ms`,
+          grade: partialText ? this.extractGrade(partialText) : "FAILED",
+          findings: partialText ? this.extractFindings(partialText) : ["timeout"],
+          costUsd: totalCost,
+          tokensUsed: totalTokens,
+        };
       }
 
       // Extract results
-      const finalText = session.getLastAssistantText() ?? "";
-      const stats = session.getSessionStats();
+      const finalText = session!.getLastAssistantText() ?? "";
+      const stats = session!.getSessionStats();
       totalCost = stats.cost;
       totalTokens = stats.tokens.total;
 
-      unsubscribe();
-      session.dispose();
+      unsubscribeFn?.();
+      session!.dispose();
 
       return {
         agentId,
@@ -206,6 +225,8 @@ export class PiEmbeddedAdapter implements PlatformAdapter {
       };
     } catch (err) {
       console.error(`[pi-embedded] Session error for ${opts.persona.name}:`, err);
+      try { unsubscribeFn?.(); } catch {}
+      try { session?.dispose(); } catch {}
       return {
         agentId,
         agentName: opts.persona.name,
