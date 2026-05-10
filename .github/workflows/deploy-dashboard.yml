@@ -6,6 +6,7 @@ on:
     paths:
       - 'dashboard/**'
       - 'dashboard-next/**'
+      - '.github/workflows/deploy-dashboard.yml'
 
 permissions:
   contents: read
