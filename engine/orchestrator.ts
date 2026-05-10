@@ -96,12 +96,14 @@ export class Orchestrator {
         this.pausedSessions.add(sessionId);
         await this.emitter.message(sessionId, "orch-1", "Orchestrator", "user",
           "Session paused. Running agents will finish current work. Send !resume to continue.");
+        await this.emitter.emit({ session_id: sessionId, agent_id: "orch-1", event_type: "pause", timestamp: new Date().toISOString(), data: {} });
         console.log(`[orchestrator] Session ${sessionId} paused by user`);
         break;
       case "resume":
         this.pausedSessions.delete(sessionId);
         await this.emitter.message(sessionId, "orch-1", "Orchestrator", "user",
           "Session resumed.");
+        await this.emitter.emit({ session_id: sessionId, agent_id: "orch-1", event_type: "resume", timestamp: new Date().toISOString(), data: {} });
         console.log(`[orchestrator] Session ${sessionId} resumed by user`);
         break;
       case "stop": {
@@ -110,6 +112,7 @@ export class Orchestrator {
         this.pausedSessions.delete(sessionId);
         await this.emitter.message(sessionId, "orch-1", "Orchestrator", "user",
           "Session stopped by user.");
+        await this.emitter.emit({ session_id: sessionId, agent_id: "orch-1", event_type: "session_end", timestamp: new Date().toISOString(), data: {} });
         console.log(`[orchestrator] Session ${sessionId} stopped by user`);
         break;
       }
