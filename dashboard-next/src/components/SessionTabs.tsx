@@ -324,6 +324,29 @@ function BudgetWarningEntry({ ev }: { ev: LiveEvent }) {
 	);
 }
 
+function SeverityAlertEntry({ ev }: { ev: LiveEvent }) {
+	const d = ev.data ?? {};
+	const severity = String(d.severity ?? "");
+	const isP0 = severity === "P0";
+	const borderColor = isP0 ? "border-l-red-600/70" : "border-l-orange-500/50";
+	const bgColor = isP0 ? "bg-red-950/40" : "bg-orange-950/30";
+	const textColor = isP0 ? "text-red-400" : "text-orange-400";
+	const excerptColor = isP0 ? "text-red-300/70" : "text-orange-300/70";
+	return (
+		<div className={`mb-2 ml-4 rounded-md ${bgColor} border border-white/5 border-l-2 ${borderColor} p-2`}>
+			<div className="flex items-center gap-1.5 text-xs">
+				<span className={textColor}>🚨</span>
+				<span className={`${textColor} font-bold`}>{severity} Finding</span>
+			</div>
+			{typeof d.excerpt === "string" && d.excerpt && (
+				<p className={`text-xs ${excerptColor} mt-0.5`}>
+					{d.excerpt.slice(0, 200)}
+				</p>
+			)}
+		</div>
+	);
+}
+
 function AutoPauseEntry({ ev }: { ev: LiveEvent }) {
 	const d = ev.data ?? {};
 	return (
@@ -650,6 +673,8 @@ function AgentSectionBlock({ section }: { section: AgentSection }) {
 							return <NudgeEntry key={`nudge-${i}`} ev={ev} />;
 						case "budget_warning":
 							return <BudgetWarningEntry key={`bw-${i}`} ev={ev} />;
+						case "severity_alert":
+							return <SeverityAlertEntry key={`sev-${i}`} ev={ev} />;
 						case "auto_pause":
 							return <AutoPauseEntry key={`ap-${i}`} ev={ev} />;
 						default:

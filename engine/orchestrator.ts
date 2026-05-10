@@ -17,6 +17,7 @@ import { SandboxPool } from "./sandbox-pool";
 // Extracted modules
 import { parseAssignment, parseReviews, summarizeOutput, worstGrade } from "./output-parsing";
 import { trackActivity, trackToolCall } from "./monitoring";
+import { scanSeverity, shouldAutoPause, extractFindingExcerpt } from "./severity-scanner";
 import type { AgentActivity } from "./monitoring";
 import { ActiveMonitor } from "./active-monitor";
 import { loadBudgets, checkBudget } from "./budget";
@@ -472,6 +473,15 @@ export class Orchestrator {
           this.emitter.toolCall(session.id, agentId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
         } else if (streamEvt.type === "cost") {
           this.emitter.costUpdate(session.id, agentId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
+        } else if (streamEvt.type === "assistant_text" && streamEvt.content) {
+          const severity = scanSeverity(streamEvt.content);
+          if (severity && shouldAutoPause(severity)) {
+            this.pausedSessions.add(session.id);
+            session.status = "paused";
+            const excerpt = extractFindingExcerpt(streamEvt.content, severity);
+            this.emitter.severityAlert(session.id, agentId, severity, excerpt);
+            this.emitter.autoPause(session.id, `severity:${severity}`);
+          }
         }
       },
       sendMessage: (fn) => {

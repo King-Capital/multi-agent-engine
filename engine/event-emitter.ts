@@ -267,6 +267,16 @@ export class EventEmitter {
     });
   }
 
+  severityAlert(sessionId: string, agentId: string, severity: string, excerpt: string) {
+    return this.emit({
+      session_id: sessionId,
+      agent_id: agentId,
+      event_type: "severity_alert",
+      timestamp: new Date().toISOString(),
+      data: { severity, excerpt },
+    });
+  }
+
   autoPause(sessionId: string, reason: string) {
     return this.emit({
       session_id: sessionId,
