@@ -23,6 +23,13 @@ teams:
         consult-when: >
           Fast codebase exploration, file discovery, dependency mapping,
           quick triage of large codebases.
+      - name: Antagonist
+        path: agents/personas/antagonist.md
+        model: quality
+        color: "#ff6666"
+        consult-when: >
+          Challenge the plan before handing off to Engineering.
+          Find assumptions, missing edge cases, architectural risks.
 
   - team-name: Engineering
     team-color: "#00d4ff"
@@ -35,27 +42,34 @@ teams:
       model: quality
       color: "#00d4ff"
     members:
-      - name: Builder Alpha
-        path: agents/personas/builder.md
+      - name: Backend Engineer
+        path: agents/personas/backend-engineer.md
         model: main
         color: "#00d4ff"
         consult-when: >
-          Primary builder. Code implementation, file creation, editing,
-          running builds and tests.
-      - name: Builder Beta
-        path: agents/personas/builder.md
-        model: quality
+          APIs, data layer, auth flows, database queries, middleware,
+          server-side logic, error handling.
+      - name: Frontend Engineer
+        path: agents/personas/frontend-engineer.md
+        model: main
         color: "#00b4d8"
         consult-when: >
-          Secondary builder. Parallel implementation, handles independent
-          fixes and changes simultaneously.
-      - name: Builder Gamma
-        path: agents/personas/builder.md
+          UI components, React, CSS, accessibility, state management,
+          client-side routing, form handling.
+      - name: Infrastructure Engineer
+        path: agents/personas/infra-engineer.md
         model: main
         color: "#0090b0"
         consult-when: >
-          Tertiary builder. Additional parallelism for large fix sets,
-          docs, config, and infrastructure changes.
+          CI/CD pipelines, Docker, deployment configs, reverse proxies,
+          environment management, GitHub Actions.
+      - name: Antagonist
+        path: agents/personas/antagonist.md
+        model: quality
+        color: "#ff6666"
+        consult-when: >
+          Challenge approach before building. Stress-test assumptions,
+          find edge cases, identify failure modes. Any lead can use.
 
   - team-name: Engineering B
     team-color: "#00d4ff"
@@ -68,12 +82,19 @@ teams:
       model: pro
       color: "#00d4ff"
     members:
-      - name: Builder (B)
-        path: agents/personas/builder.md
+      - name: Backend Engineer (B)
+        path: agents/personas/backend-engineer.md
         model: pro
         color: "#00b4d8"
         consult-when: >
-          Same task as primary builder but using Gemini model family.
+          Same scope as primary backend engineer but using Gemini model
+          family for cross-model redundancy.
+      - name: Antagonist (B)
+        path: agents/personas/antagonist.md
+        model: pro
+        color: "#ff6666"
+        consult-when: >
+          Challenge approach, stress-test assumptions, find failure modes.
 
   - team-name: Validation
     team-color: "#ff6b9d"
