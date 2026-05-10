@@ -424,13 +424,17 @@ export async function runParallelStep(
   const useWorktrees = teams.length > 1 && await isGitRepo(session.workingDir);
   const teamWtIds: string[] = [];
 
+  const teamSessions: SessionState[] = [];
   const promises = teams.map(async (t, idx) => {
     const teamSession: SessionState = useWorktrees ? {
       ...session,
-      agents: new Map(session.agents),
+      totalCost: 0,
+      totalTokens: 0,
+      agents: new Map(),
       tillDone: session.tillDone.map(item => ({ ...item })),
       events: [...session.events],
     } : session;
+    teamSessions.push(teamSession);
     if (useWorktrees) {
       const wtId = `${session.id.slice(0, 8)}-team-${idx}`;
       teamSession.workingDir = await createWorktree(session.workingDir, wtId);
@@ -458,6 +462,14 @@ export async function runParallelStep(
       await cleanupWorktree(session.workingDir, wtId);
     } catch (e) {
       console.error(`[orchestrator] Team worktree cleanup failed for ${wtId}:`, e);
+    }
+  }
+
+  // Accumulate team costs sequentially to avoid races
+  if (useWorktrees) {
+    for (const ts of teamSessions) {
+      session.totalCost += ts.totalCost;
+      session.totalTokens += ts.totalTokens;
     }
   }
 
