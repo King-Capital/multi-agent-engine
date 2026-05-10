@@ -170,7 +170,11 @@ function StatsPanel() {
 
 // ─── Session detail (tabbed) — uses shared SSE ───────────────────────────────
 
-function Detail({ session }: { session: DBSession }) {
+function Detail({ session, selectedAgentId, onClearAgentFilter }: {
+	session: DBSession;
+	selectedAgentId?: string | null;
+	onClearAgentFilter?: () => void;
+}) {
 	const { data: history, refresh } = usePolling(
 		(signal) => api.sessionEvents(session.id, signal),
 		10_000,
@@ -182,6 +186,8 @@ function Detail({ session }: { session: DBSession }) {
 			session={session}
 			historyEvents={history ?? []}
 			onRefresh={refresh}
+			selectedAgentId={selectedAgentId}
+			onClearAgentFilter={onClearAgentFilter}
 		/>
 	);
 }
@@ -253,7 +259,7 @@ function SessionListPage() {
 						/>
 					</ResizablePanel>
 					<div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-						<Detail session={selected} />
+						<Detail session={selected} selectedAgentId={selectedAgentId} onClearAgentFilter={() => setSelectedAgentId(null)} />
 					</div>
 				</SessionSSEProvider>
 			) : (
@@ -369,7 +375,7 @@ function SessionDetailPage() {
 
 				{/* Right panel: Tabbed session view */}
 				<div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-					<Detail session={activeSession} />
+					<Detail session={activeSession} selectedAgentId={selectedAgentId} onClearAgentFilter={() => setSelectedAgentId(null)} />
 				</div>
 			</div>
 		</SessionSSEProvider>

@@ -1,6 +1,7 @@
 import { createInterface } from "readline";
 import { readFileSync } from "fs";
 import { loadModelRouting, writeModelRouting } from "./config";
+import { loadPerformance, buildScorecard } from "./perf-log";
 import type { ModelRoutingConfig, ThinkingLevel } from "./types";
 
 async function prompt(question: string): Promise<string> {
@@ -19,7 +20,7 @@ function printDivider(char = "─", len = 50) {
 
 // --- Show ---
 
-export function configShow(): void {
+export async function configShow(): Promise<void> {
   const config = loadModelRouting();
 
   console.log("\nMAE Configuration");
@@ -59,6 +60,21 @@ export function configShow(): void {
     }
   }
 
+  // Model Performance Scorecard
+  const records = await loadPerformance();
+  if (records.length > 0) {
+    const scores = buildScorecard(records);
+    if (scores.length > 0) {
+      console.log(`\n  Model Performance (${records.length} runs):`);
+      for (const s of scores) {
+        const modelShort = s.model.split("/").pop() ?? s.model;
+        const label = `${modelShort}/${s.role}:`.padEnd(30);
+        const latencySec = (s.avg_latency_ms / 1000).toFixed(0);
+        console.log(`    ${label} ${s.pass_rate.toFixed(0)}% pass, $${s.avg_cost_usd.toFixed(2)} avg, ${s.avg_findings.toFixed(1)} findings, ${latencySec}s avg`);
+      }
+    }
+  }
+
   console.log();
 }
 
@@ -71,7 +87,7 @@ export function configExport(): void {
 
 // --- Import ---
 
-export function configImport(fileOrStdin?: string): void {
+export async function configImport(fileOrStdin?: string): Promise<void> {
   let json: string;
   if (!fileOrStdin || fileOrStdin === "-") {
     json = readFileSync("/dev/stdin", "utf-8");
@@ -105,7 +121,7 @@ export function configImport(fileOrStdin?: string): void {
 
   writeModelRouting(merged);
   console.log("Config updated successfully.");
-  configShow();
+  await configShow();
 }
 
 // --- Discover ---
@@ -178,7 +194,7 @@ export async function configInteractive(): Promise<void> {
 
     const choice = await prompt("\n> ");
     switch (choice) {
-      case "1": configShow(); break;
+      case "1": await configShow(); break;
       case "2": await budgetMenu(); break;
       case "3": await tiersMenu(); break;
       case "4": await aliasesMenu(); break;

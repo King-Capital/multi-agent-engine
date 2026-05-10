@@ -48,27 +48,26 @@ describe("checkBudget", () => {
     const session = makeSession({ totalCost: 999 });
     const emitter = makeEmitter();
 
-    // Should not throw
-    checkBudget(state, session, "agent-1", 100, emitter);
+    checkBudget(state, session, "agent-1", 100, 0, emitter);
     expect(emitter.messages).toHaveLength(0);
   });
 
-  test("does nothing when costs are within limits", () => {
+  test("does nothing when projected costs are within limits", () => {
     const state: BudgetState = { budgets: makeBudgets(), budgetWarned: false };
     const session = makeSession({ totalCost: 5 });
     const emitter = makeEmitter();
 
-    checkBudget(state, session, "agent-1", 2, emitter);
+    checkBudget(state, session, "agent-1", 2, 1000, emitter);
     expect(state.budgetWarned).toBe(false);
     expect(emitter.messages).toHaveLength(0);
   });
 
-  test("sets budgetWarned and emits message at warn threshold", () => {
+  test("sets budgetWarned and emits message when projected cost hits warn threshold", () => {
     const state: BudgetState = { budgets: makeBudgets({ warn_at_usd: 10 }), budgetWarned: false };
-    const session = makeSession({ totalCost: 12 });
+    const session = makeSession({ totalCost: 8 });
     const emitter = makeEmitter();
 
-    checkBudget(state, session, "agent-1", 2, emitter);
+    checkBudget(state, session, "agent-1", 3, 1000, emitter);
     expect(state.budgetWarned).toBe(true);
     expect(emitter.messages).toHaveLength(1);
     expect(emitter.messages[0]!.content).toContain("Budget warning");
@@ -79,35 +78,32 @@ describe("checkBudget", () => {
     const session = makeSession({ totalCost: 15 });
     const emitter = makeEmitter();
 
-    checkBudget(state, session, "agent-1", 2, emitter);
+    checkBudget(state, session, "agent-1", 2, 1000, emitter);
     expect(emitter.messages).toHaveLength(0);
   });
 
-  test("throws when session cost exceeds max_per_session_usd", () => {
+  test("throws when projected session cost exceeds max_per_session_usd", () => {
     const state: BudgetState = { budgets: makeBudgets({ max_per_session_usd: 50 }), budgetWarned: true };
-    const session = makeSession({ totalCost: 55 });
+    const session = makeSession({ totalCost: 45 });
     const emitter = makeEmitter();
 
-    expect(() => checkBudget(state, session, "agent-1", 5, emitter)).toThrow("Budget exceeded");
+    expect(() => checkBudget(state, session, "agent-1", 6, 1000, emitter)).toThrow("Budget exceeded");
   });
 
-  test("throws when token count exceeds max_total_tokens", () => {
+  test("throws when projected token count exceeds max_total_tokens", () => {
     const state: BudgetState = { budgets: makeBudgets({ max_total_tokens: 1_000_000 }), budgetWarned: true };
-    const session = makeSession({ totalTokens: 1_500_000 });
+    const session = makeSession({ totalTokens: 900_000 });
     const emitter = makeEmitter();
 
-    expect(() => checkBudget(state, session, "agent-1", 1, emitter)).toThrow("Token budget exceeded");
+    expect(() => checkBudget(state, session, "agent-1", 1, 200_000, emitter)).toThrow("Token budget exceeded");
   });
 
-  test("logs warning when agent cost exceeds per-agent limit", () => {
+  test("throws when agent cost exceeds per-agent limit", () => {
     const state: BudgetState = { budgets: makeBudgets({ max_per_agent_usd: 15 }), budgetWarned: true };
     const session = makeSession({ totalCost: 5 });
     const emitter = makeEmitter();
 
-    // Should not throw, just warn (console.warn)
-    checkBudget(state, session, "agent-1", 20, emitter);
-    // No emitter message for per-agent warning (only console.warn)
-    expect(emitter.messages).toHaveLength(0);
+    expect(() => checkBudget(state, session, "agent-1", 20, 1000, emitter)).toThrow("per-agent limit");
   });
 
   test("warn and throw can trigger in the same call", () => {
@@ -115,37 +111,52 @@ describe("checkBudget", () => {
       budgets: makeBudgets({ warn_at_usd: 10, max_per_session_usd: 50 }),
       budgetWarned: false,
     };
-    const session = makeSession({ totalCost: 55 });
+    const session = makeSession({ totalCost: 45 });
     const emitter = makeEmitter();
 
-    expect(() => checkBudget(state, session, "agent-1", 5, emitter)).toThrow("Budget exceeded");
-    // Warning was emitted before the throw
+    expect(() => checkBudget(state, session, "agent-1", 6, 1000, emitter)).toThrow("Budget exceeded");
     expect(state.budgetWarned).toBe(true);
     expect(emitter.messages).toHaveLength(1);
   });
 
   test("handles exact boundary values for warn threshold", () => {
     const state: BudgetState = { budgets: makeBudgets({ warn_at_usd: 10 }), budgetWarned: false };
-    const session = makeSession({ totalCost: 10 });
+    const session = makeSession({ totalCost: 8 });
     const emitter = makeEmitter();
 
-    checkBudget(state, session, "agent-1", 2, emitter);
+    checkBudget(state, session, "agent-1", 2, 1000, emitter);
     expect(state.budgetWarned).toBe(true);
   });
 
   test("handles exact boundary for session limit", () => {
     const state: BudgetState = { budgets: makeBudgets({ max_per_session_usd: 50 }), budgetWarned: true };
-    const session = makeSession({ totalCost: 50 });
+    const session = makeSession({ totalCost: 45 });
     const emitter = makeEmitter();
 
-    expect(() => checkBudget(state, session, "agent-1", 1, emitter)).toThrow("Budget exceeded");
+    expect(() => checkBudget(state, session, "agent-1", 5, 1000, emitter)).toThrow("Budget exceeded");
   });
 
   test("handles exact boundary for token limit", () => {
     const state: BudgetState = { budgets: makeBudgets({ max_total_tokens: 1_000_000 }), budgetWarned: true };
-    const session = makeSession({ totalTokens: 1_000_000 });
+    const session = makeSession({ totalTokens: 900_000 });
     const emitter = makeEmitter();
 
-    expect(() => checkBudget(state, session, "agent-1", 1, emitter)).toThrow("Token budget exceeded");
+    expect(() => checkBudget(state, session, "agent-1", 1, 100_000, emitter)).toThrow("Token budget exceeded");
+  });
+
+  test("does not throw when projected cost is just below session limit", () => {
+    const state: BudgetState = { budgets: makeBudgets({ max_per_session_usd: 50 }), budgetWarned: true };
+    const session = makeSession({ totalCost: 45 });
+    const emitter = makeEmitter();
+
+    checkBudget(state, session, "agent-1", 4, 1000, emitter);
+  });
+
+  test("does not throw when projected tokens are just below limit", () => {
+    const state: BudgetState = { budgets: makeBudgets({ max_total_tokens: 1_000_000 }), budgetWarned: true };
+    const session = makeSession({ totalTokens: 900_000 });
+    const emitter = makeEmitter();
+
+    checkBudget(state, session, "agent-1", 1, 99_999, emitter);
   });
 });

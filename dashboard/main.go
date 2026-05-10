@@ -298,6 +298,10 @@ func main() {
 		spaFS := http.FileServer(http.Dir(spaDir))
 		// Serve SPA assets (hashed filenames)
 		r.Handle("/assets/*", spaFS)
+		// Serve favicon from SPA dist
+		r.Get("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFile(w, r, filepath.Join(spaDir, "favicon.svg"))
+		})
 		// SPA catch-all: any non-API, non-HTMX route falls through to index.html
 		r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 			// Don't serve SPA for API or HTMX routes

@@ -6,6 +6,7 @@ import {
   loadPreamble,
   resolveModelForRole,
 } from "./config";
+import { logPerformance } from "./perf-log";
 import { delegateWithHealing } from "./self-healing";
 import { summarizeOutput } from "./output-parsing";
 import { parseReviews } from "./output-parsing";
@@ -26,7 +27,7 @@ export interface WorkerLifecycleDeps {
   emitter: EventEmitter;
   messageSenders: Map<string, (msg: string) => void>;
   trackToolCall: (agentId: string, tool: string) => void;
-  checkBudget: (session: SessionState, agentId: string, agentCost: number) => void;
+  checkBudget: (session: SessionState, agentId: string, agentCost: number, agentTokens: number) => void;
 }
 
 /**
@@ -93,6 +94,7 @@ export async function retryWorker(
     },
   };
 
+  const retryStartTime = Date.now();
   const result = await delegateWithHealing({
     adapter,
     opts: workerOpts,
@@ -103,10 +105,22 @@ export async function retryWorker(
     },
   });
 
+  await emitter.costUpdate(session.id, workerId, result.costUsd, result.tokensUsed, 0);
+  checkBudget(session, workerId, result.costUsd, result.tokensUsed);
   session.totalCost += result.costUsd;
   session.totalTokens += result.tokensUsed;
-  await emitter.costUpdate(session.id, workerId, result.costUsd, result.tokensUsed, 0);
-  checkBudget(session, workerId, result.costUsd);
+
+  logPerformance({
+    model: retryResolved.model,
+    role: "worker-retry",
+    grade: result.grade ?? "UNGRADED",
+    cost_usd: result.costUsd,
+    latency_ms: Date.now() - retryStartTime,
+    findings_count: result.findings?.length ?? 0,
+    agent_name: member.name,
+    session_id: session.id,
+    timestamp: new Date().toISOString(),
+  });
 
   const workerSummary = summarizeOutput(result.output, 1500);
   await emitter.message(session.id, workerId, member.name, "user", workerSummary);
@@ -229,6 +243,7 @@ export async function spawnSenior(
     },
   };
 
+  const srStartTime = Date.now();
   const result = await delegateWithHealing({
     adapter, opts: srOpts, sessionId: session.id, agentRole: "sr",
     onEvent: async (_type, data) => {
@@ -236,10 +251,22 @@ export async function spawnSenior(
     },
   });
 
+  await emitter.costUpdate(session.id, srId, result.costUsd, result.tokensUsed, 0);
+  checkBudget(session, srId, result.costUsd, result.tokensUsed);
   session.totalCost += result.costUsd;
   session.totalTokens += result.tokensUsed;
-  await emitter.costUpdate(session.id, srId, result.costUsd, result.tokensUsed, 0);
-  checkBudget(session, srId, result.costUsd);
+
+  logPerformance({
+    model: srResolved.model,
+    role: "sr",
+    grade: result.grade ?? "UNGRADED",
+    cost_usd: result.costUsd,
+    latency_ms: Date.now() - srStartTime,
+    findings_count: result.findings?.length ?? 0,
+    agent_name: `Sr. (${domainNames.join("+")})`,
+    session_id: session.id,
+    timestamp: new Date().toISOString(),
+  });
 
   const srSummary = summarizeOutput(result.output, 2000);
   await emitter.message(session.id, srId, `Sr. (${domainNames.join("+")})`, "user", srSummary);

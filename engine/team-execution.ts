@@ -7,10 +7,11 @@ import {
 } from "./config";
 import { delegateWithHealing } from "./self-healing";
 import { isGitRepo, createWorktree, mergeWorktree, cleanupWorktree } from "./worktree";
-import { parseAssignment, summarizeOutput, worstGrade } from "./output-parsing";
+import { parseAssignment, summarizeOutput } from "./output-parsing";
 import { retryWorker, spawnSenior, leadReviewWorkers } from "./worker-lifecycle";
 import type { EventEmitter } from "./event-emitter";
 import type { SandboxPool } from "./sandbox-pool";
+import { logPerformance } from "./perf-log";
 import type {
   PlatformAdapter,
   DelegateOptions,
@@ -18,7 +19,6 @@ import type {
   SessionState,
   ChainStep,
   GradeLevel,
-  WorkerReview,
 } from "./types";
 
 export interface TeamExecutionDeps {
@@ -27,7 +27,7 @@ export interface TeamExecutionDeps {
   sandboxPool: SandboxPool | null;
   trackActivity: (agentId: string, name: string, role: string) => void;
   trackToolCall: (agentId: string, tool: string) => void;
-  checkBudget: (session: SessionState, agentId: string, agentCost: number) => void;
+  checkBudget: (session: SessionState, agentId: string, agentCost: number, agentTokens: number) => void;
   getAdapter: (name?: string) => PlatformAdapter;
 }
 
@@ -109,11 +109,24 @@ export async function runTeamStep(
     },
   };
 
+  const leadStartTime = Date.now();
   const leadResult = await adapter.delegate(leadOpts);
+  await emitter.costUpdate(session.id, leadId, leadResult.costUsd, leadResult.tokensUsed, 0);
+  checkBudget(session, leadId, leadResult.costUsd, leadResult.tokensUsed);
   session.totalCost += leadResult.costUsd;
   session.totalTokens += leadResult.tokensUsed;
-  await emitter.costUpdate(session.id, leadId, leadResult.costUsd, leadResult.tokensUsed, 0);
-  checkBudget(session, leadId, leadResult.costUsd);
+
+  logPerformance({
+    model: leadResolved.model,
+    role: "lead",
+    grade: leadResult.grade ?? "UNGRADED",
+    cost_usd: leadResult.costUsd,
+    latency_ms: Date.now() - leadStartTime,
+    findings_count: leadResult.findings?.length ?? 0,
+    agent_name: teamConfig.lead.name,
+    session_id: session.id,
+    timestamp: new Date().toISOString(),
+  });
 
   // Emit lead output summary to conversation stream
   const leadSummary = summarizeOutput(leadResult.output, 2000);
@@ -200,47 +213,73 @@ export async function runTeamStep(
       },
     };
 
-    const result = await delegateWithHealing({
-      adapter,
-      opts: workerOpts,
-      sessionId: session.id,
-      agentRole: "worker",
-      onEvent: async (_type, data) => {
-        await emitter.selfHeal(session.id, workerId, data.failed_worker as string, data.heal_action as string);
-      },
-    });
+    try {
+      const workerStartTime = Date.now();
+      const result = await delegateWithHealing({
+        adapter,
+        opts: workerOpts,
+        sessionId: session.id,
+        agentRole: "worker",
+        onEvent: async (_type, data) => {
+          await emitter.selfHeal(session.id, workerId, data.failed_worker as string, data.heal_action as string);
+        },
+      });
 
-    session.totalCost += result.costUsd;
-    session.totalTokens += result.tokensUsed;
-    await emitter.costUpdate(session.id, workerId, result.costUsd, result.tokensUsed, 0);
-    checkBudget(session, workerId, result.costUsd);
+      await emitter.costUpdate(session.id, workerId, result.costUsd, result.tokensUsed, 0);
 
-    // Release sandbox if assigned
-    if (sandboxPool) {
-      await sandboxPool.release(workerId);
+      logPerformance({
+        model: workerResolved.model,
+        role: "worker",
+        grade: result.grade ?? "UNGRADED",
+        cost_usd: result.costUsd,
+        latency_ms: Date.now() - workerStartTime,
+        findings_count: result.findings?.length ?? 0,
+        agent_name: member.name,
+        session_id: session.id,
+        timestamp: new Date().toISOString(),
+      });
+
+      const workerSummary = summarizeOutput(result.output, 1500);
+      await emitter.message(session.id, workerId, member.name, "user", workerSummary);
+      await emitter.agentDone(session.id, workerId, result.grade);
+
+      return result;
+    } finally {
+      if (sandboxPool) await sandboxPool.release(workerId);
     }
-
-    // Emit worker output summary to conversation stream
-    const workerSummary = summarizeOutput(result.output, 1500);
-    await emitter.message(session.id, workerId, member.name, "user", workerSummary);
-    await emitter.agentDone(session.id, workerId, result.grade);
-
-    return result;
   });
 
-  const workerResults = await Promise.all(workerPromises);
+  const settled = await Promise.allSettled(workerPromises);
 
-  // Merge & cleanup worktrees
+  // Worktree cleanup always runs, even if workers threw
   for (const wtId of workerWtIds) {
-    const { merged, hadChanges } = await mergeWorktree(session.workingDir, wtId);
-    if (hadChanges) {
-      if (merged) {
-        console.log(`[orchestrator] Merged worktree ${wtId} (had changes)`);
-      } else {
-        console.warn(`[orchestrator] WARN: Failed to merge worktree ${wtId} -- changes may be lost`);
+    try {
+      const { merged, hadChanges } = await mergeWorktree(session.workingDir, wtId);
+      if (hadChanges) {
+        if (merged) {
+          console.log(`[orchestrator] Merged worktree ${wtId} (had changes)`);
+        } else {
+          console.warn(`[orchestrator] WARN: Failed to merge worktree ${wtId} -- changes may be lost`);
+        }
       }
+      await cleanupWorktree(session.workingDir, wtId);
+    } catch (e) {
+      console.error(`[orchestrator] Worktree cleanup failed for ${wtId}:`, e);
     }
-    await cleanupWorktree(session.workingDir, wtId);
+  }
+
+  // Accumulate costs sequentially after all workers complete — no parallel race
+  const workerResults: DelegateResult[] = [];
+  for (const outcome of settled) {
+    if (outcome.status === "fulfilled") {
+      const result = outcome.value;
+      checkBudget(session, result.agentId, result.costUsd, result.tokensUsed);
+      session.totalCost += result.costUsd;
+      session.totalTokens += result.tokensUsed;
+      workerResults.push(result);
+    } else {
+      console.error("[orchestrator] Worker failed:", outcome.reason);
+    }
   }
 
   // Build worker lifecycle deps for review/retry
@@ -307,19 +346,22 @@ export async function runTeamStep(
       }
     }
 
-    // Re-review only retried workers
+    // Re-review only retried workers (not direct-fixed or SR-spawned)
     const retriedResults = workerResults.filter(r =>
       needsWork.some(nw => nw.workerId === r.agentId && nw.grade === "NEEDS_WORK")
     );
     if (retriedResults.length > 0) {
-      reviews = await leadReviewWorkers(
+      const retriedReviews = await leadReviewWorkers(
         lifecycleDeps, session, teamConfig, leadPersona, retriedResults,
         workerAssignments, task, adapter, step, leadId
       );
-      // Update reviews with retried results
-      for (const retried of reviews) {
+      for (const retried of retriedReviews) {
         const origIdx = reviews.findIndex(r => r.workerId === retried.workerId);
-        if (origIdx !== -1) reviews[origIdx] = retried;
+        if (origIdx !== -1) {
+          reviews[origIdx] = retried;
+        } else {
+          reviews.push(retried);
+        }
       }
     }
   }
@@ -381,18 +423,32 @@ export async function runParallelStep(
     return runTeamStep(deps, teamSession, { ...step, team: t.team }, task, previousOutput, adapterName);
   });
 
-  const results = await Promise.all(promises);
+  const settled = await Promise.allSettled(promises);
 
+  // Worktree cleanup always runs, even if a team threw
   for (const wtId of teamWtIds) {
-    const { merged, hadChanges } = await mergeWorktree(session.workingDir, wtId);
-    if (hadChanges) {
-      if (merged) {
-        console.log(`[orchestrator] Merged team worktree ${wtId} (had changes)`);
-      } else {
-        console.warn(`[orchestrator] WARN: Failed to merge team worktree ${wtId} -- changes may be lost`);
+    try {
+      const { merged, hadChanges } = await mergeWorktree(session.workingDir, wtId);
+      if (hadChanges) {
+        if (merged) {
+          console.log(`[orchestrator] Merged team worktree ${wtId} (had changes)`);
+        } else {
+          console.warn(`[orchestrator] WARN: Failed to merge team worktree ${wtId} -- changes may be lost`);
+        }
       }
+      await cleanupWorktree(session.workingDir, wtId);
+    } catch (e) {
+      console.error(`[orchestrator] Team worktree cleanup failed for ${wtId}:`, e);
     }
-    await cleanupWorktree(session.workingDir, wtId);
+  }
+
+  const results: DelegateResult[] = [];
+  for (const outcome of settled) {
+    if (outcome.status === "fulfilled") {
+      results.push(outcome.value);
+    } else {
+      console.error("[orchestrator] Parallel team failed:", outcome.reason);
+    }
   }
 
   // Synthesize parallel results into unified report
@@ -455,10 +511,10 @@ export async function runParallelStep(
   };
 
   const synthResult = await adapter.delegate(synthOpts);
+  await emitter.costUpdate(session.id, synthId, synthResult.costUsd, synthResult.tokensUsed, 0);
+  budgetCheck(session, synthId, synthResult.costUsd, synthResult.tokensUsed);
   session.totalCost += synthResult.costUsd;
   session.totalTokens += synthResult.tokensUsed;
-  await emitter.costUpdate(session.id, synthId, synthResult.costUsd, synthResult.tokensUsed, 0);
-  budgetCheck(session, synthId, synthResult.costUsd);
 
   const synthSummary = summarizeOutput(synthResult.output, 2000);
   await emitter.message(session.id, synthId, "Synthesis", "user", synthSummary);
