@@ -228,9 +228,21 @@ async function budgetMenu(): Promise<void> {
     const agent = await prompt(`  Agent limit [$${b.max_per_agent_usd}]: `);
     const warn = await prompt(`  Warn at [$${b.warn_at_usd}]: `);
 
-    if (session) b.max_per_session_usd = parseFloat(session);
-    if (agent) b.max_per_agent_usd = parseFloat(agent);
-    if (warn) b.warn_at_usd = parseFloat(warn);
+    if (session) {
+      const parsed = parseFloat(session);
+      if (isNaN(parsed)) { console.error("Invalid number: " + session); return; }
+      b.max_per_session_usd = parsed;
+    }
+    if (agent) {
+      const parsed = parseFloat(agent);
+      if (isNaN(parsed)) { console.error("Invalid number: " + agent); return; }
+      b.max_per_agent_usd = parsed;
+    }
+    if (warn) {
+      const parsed = parseFloat(warn);
+      if (isNaN(parsed)) { console.error("Invalid number: " + warn); return; }
+      b.warn_at_usd = parsed;
+    }
 
     config.budgets = b;
     writeModelRouting(config);

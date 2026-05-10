@@ -28,6 +28,7 @@ export function sendUserMessage(
     }
 
     if (bestMatch) {
+      bestMatch.rest = bestMatch.rest.replace(/^[:\s]+/, "");
       console.log(`[orchestrator] Targeted message to ${bestMatch.agentKey}: ${bestMatch.rest.slice(0, 80)}`);
       bestMatch.sender(bestMatch.rest);
       return;

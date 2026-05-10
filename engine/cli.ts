@@ -206,9 +206,10 @@ switch (command) {
     } else if (subCmd === "close") {
       const sessionId = args[2];
       if (!sessionId) { console.error("Usage: agent session close <id> [--status done|error]"); process.exit(1); }
-      const status = getFlag(args, "--status") ?? "completed";
+      const rawStatus = getFlag(args, "--status") ?? "completed";
+      const status = rawStatus === "done" ? "completed" : rawStatus;
       if (status !== "completed" && status !== "error") {
-        console.error("--status must be completed or error"); process.exit(1);
+        console.error("--status must be completed, done, or error"); process.exit(1);
       }
       const resp = await fetch(`${dashUrl}/api/sessions/${sessionId}/status`, {
         method: "PATCH",
@@ -360,6 +361,7 @@ Chains:    ${chainCount} configured
 
   default:
     console.error(`Unknown command: ${command}`);
+    console.error(`Valid commands: run, chain, task, discover, session, new-agent, version, info, adapters, config`);
     process.exit(1);
 }
 

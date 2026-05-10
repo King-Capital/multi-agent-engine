@@ -18,30 +18,38 @@ export async function collectIncrementally<T>(
 
   const threshold = opts.partialThreshold ?? 0.5;
   const completed: T[] = [];
+  let failedCount = 0;
   let partialFired = false;
+
+  const checkPartialReady = async () => {
+    const settledCount = completed.length + failedCount;
+    if (
+      !partialFired &&
+      opts.onPartialReady &&
+      completed.length >= Math.ceil(total * threshold) &&
+      settledCount < total
+    ) {
+      partialFired = true;
+      await opts.onPartialReady(
+        [...completed],
+        total - settledCount,
+      ).catch(() => {});
+    }
+  };
 
   const wrapped = promises.map((p, i) =>
     p.then(
       async (value) => {
         completed.push(value);
         await opts.onResult(value, i, total).catch(() => {});
-
-        if (
-          !partialFired &&
-          opts.onPartialReady &&
-          completed.length >= Math.ceil(total * threshold) &&
-          completed.length < total
-        ) {
-          partialFired = true;
-          await opts.onPartialReady(
-            [...completed],
-            total - completed.length,
-          ).catch(() => {});
-        }
-
+        await checkPartialReady();
         return value;
       },
-    ),
+    ).catch(async (err) => {
+      failedCount++;
+      await checkPartialReady();
+      throw err;
+    }),
   );
 
   return Promise.allSettled(wrapped);

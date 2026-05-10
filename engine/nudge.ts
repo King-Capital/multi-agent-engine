@@ -93,7 +93,12 @@ export async function webSearchNudge(
 ): Promise<string | null> {
   if (!(await checkSurfAvailable())) return null;
   try {
-    const result = await $`mcp2cli surf search ${problemContext.slice(0, 200)}`.text();
+    const result = await Promise.race([
+      $`mcp2cli surf search ${problemContext.slice(0, 200)}`.text(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("webSearchNudge timed out")), 20_000)
+      ),
+    ]);
     const trimmed = result.trim();
     if (!trimmed) return null;
     return `I researched your blocker and found some approaches:\n${trimmed.slice(0, 1500)}`;

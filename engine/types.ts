@@ -1,6 +1,6 @@
 export type AgentRole = "orchestrator" | "lead" | "sr" | "worker" | "scout";
 export type AgentStatus = "idle" | "running" | "done" | "error" | "blocked";
-export type GradeLevel = "PERFECT" | "VERIFIED" | "PARTIAL" | "FEEDBACK" | "FAILED";
+export type GradeLevel = "PERFECT" | "VERIFIED" | "PARTIAL" | "FEEDBACK" | "FAILED" | "UNGRADED";
 
 export interface SkillRef {
   path: string;

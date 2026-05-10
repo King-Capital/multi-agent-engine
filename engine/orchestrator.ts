@@ -415,7 +415,6 @@ export class Orchestrator {
     return {
       emitter: this.emitter,
       messageSenders: this.messageSenders,
-      sandboxPool: this.sandboxPool,
       trackActivity: (agentId: string, name: string, role: string) =>
         trackActivity(this.agentActivity, agentId, name, role),
       trackToolCall: (agentId: string, tool: string) =>
@@ -491,7 +490,7 @@ export class Orchestrator {
           this.emitter.costUpdate(session.id, agentId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
         } else if (streamEvt.type === "assistant_text" && streamEvt.content) {
           const severity = scanSeverity(streamEvt.content);
-          if (severity && shouldAutoPause(severity)) {
+          if (severity && shouldAutoPause(severity, session.id)) {
             this.pausedSessions.add(session.id);
             session.status = "paused";
             const excerpt = extractFindingExcerpt(streamEvt.content, severity);

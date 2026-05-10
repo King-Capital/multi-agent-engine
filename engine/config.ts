@@ -19,7 +19,12 @@ const cache = new Map<string, { data: unknown; mtime: number }>();
 
 function cachedRead<T>(path: string): T {
   const fullPath = join(BASE_DIR, path);
-  const stat = statSync(fullPath);
+  let stat;
+  try {
+    stat = statSync(fullPath);
+  } catch {
+    throw new Error(`Config file not found: ${fullPath}`);
+  }
   const cached = cache.get(fullPath);
   if (cached && cached.mtime === stat.mtimeMs) return cached.data as T;
   const raw = readFileSync(fullPath, "utf-8");

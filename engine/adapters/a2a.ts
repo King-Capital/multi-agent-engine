@@ -271,9 +271,8 @@ export class A2AAdapter implements PlatformAdapter {
         signal: controller.signal,
       });
 
-      clearTimeout(timer);
-
       if (!response.ok) {
+        clearTimeout(timer);
         const body = await response.text();
         return {
           agentId,
@@ -287,6 +286,7 @@ export class A2AAdapter implements PlatformAdapter {
       }
 
       const rpcResponse = (await response.json()) as JsonRpcResponse;
+      clearTimeout(timer);
 
       if (rpcResponse.error) {
         return {
@@ -357,6 +357,8 @@ export class A2AAdapter implements PlatformAdapter {
     const rpcRequest: JsonRpcRequest = {
       jsonrpc: "2.0",
       id: randomUUID(),
+      // NOTE: A2A spec uses "message/sendStream" but many implementations use "message/stream".
+      // Keeping "message/stream" for backwards compatibility with existing agents.
       method: "message/stream",
       params: {
         message,
@@ -382,9 +384,8 @@ export class A2AAdapter implements PlatformAdapter {
         signal: controller.signal,
       });
 
-      clearTimeout(timer);
-
       if (!response.ok) {
+        clearTimeout(timer);
         // Fall back to sync if streaming not supported
         if (response.status === 405 || response.status === 501) {
           console.log(`[a2a] Streaming not supported by ${endpoint.url}, falling back to sync`);
@@ -408,6 +409,7 @@ export class A2AAdapter implements PlatformAdapter {
       if (!contentType.includes("text/event-stream")) {
         // Not SSE -- treat as regular JSON-RPC response
         const rpcResponse = (await response.json()) as JsonRpcResponse;
+        clearTimeout(timer);
         if (rpcResponse.error) {
           return {
             agentId,
@@ -428,8 +430,10 @@ export class A2AAdapter implements PlatformAdapter {
         }
       }
 
-      // Parse SSE stream
-      return this.parseSSEStream(response, opts, agentId);
+      // Parse SSE stream (clearTimeout happens inside after body is fully consumed)
+      const result = await this.parseSSEStream(response, opts, agentId);
+      clearTimeout(timer);
+      return result;
     } catch (err: any) {
       clearTimeout(timer);
       if (err.name === "AbortError") {
@@ -454,7 +458,18 @@ export class A2AAdapter implements PlatformAdapter {
     opts: DelegateOptions,
     agentId: string
   ): Promise<DelegateResult> {
-    const reader = response.body!.getReader();
+    if (!response.body) {
+      return {
+        agentId,
+        agentName: opts.persona.name,
+        output: "ERROR: A2A stream response has no body",
+        grade: "FAILED",
+        findings: ["no_response_body"],
+        costUsd: 0,
+        tokensUsed: 0,
+      };
+    }
+    const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
     let resultText = "";
@@ -475,7 +490,7 @@ export class A2AAdapter implements PlatformAdapter {
         if (line.startsWith("event:")) {
           eventType = line.slice(6).trim();
         } else if (line.startsWith("data:")) {
-          eventData += line.slice(5).trim();
+          eventData += (eventData ? "\n" : "") + line.slice(5).trim();
         } else if (line.trim() === "" && eventData) {
           // End of SSE event -- process it
           try {
