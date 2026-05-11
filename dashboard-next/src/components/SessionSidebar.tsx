@@ -176,7 +176,7 @@ export function SessionSidebar({
 				setCostMap(m);
 			})
 			.catch(() => {});
-	}, []);
+	}, [sessions]);
 
 	// Filter toggle
 	function toggleFilter(f: StatusFilter) {

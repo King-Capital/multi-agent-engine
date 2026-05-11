@@ -22,6 +22,7 @@ import type {
   DelegateResult,
   SessionState,
   ChainStep,
+  ParallelTeamStep,
   TeamConfig,
   PersonaConfig,
   GradeLevel,
@@ -92,6 +93,51 @@ export interface ReviewRetryResult {
   reviews: WorkerReview[];
   workerResults: DelegateResult[];
   workerAssignments: Map<string, string>;
+}
+
+function workerKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function workerIdFor(step: ChainStep, workerName: string): string {
+  return `${step.team}-${workerKey(workerName)}`;
+}
+
+function findTeamMember(teamConfig: TeamConfig, review: WorkerReview) {
+  const byName = workerKey(review.workerName);
+  const byId = workerKey(review.workerId);
+  return teamConfig.members.find((member) => {
+    const memberKey = workerKey(member.name);
+    return memberKey === byName || byId.endsWith(memberKey);
+  });
+}
+
+export function buildFailedWorkerReviews(
+  step: ChainStep,
+  teamConfig: TeamConfig,
+  failedWorkers: { name: string; error: string }[],
+  workerAssignments: Map<string, string>,
+): WorkerReview[] {
+  return failedWorkers.map((failure) => {
+    const member = teamConfig.members.find((m) => m.name === failure.name);
+    const workerName = member?.name ?? failure.name;
+    const workerId = workerIdFor(step, workerName);
+    const assignment = workerAssignments.get(workerId)
+      ?? `Retry the original ${workerName} assignment for ${teamConfig["team-name"]}.`;
+
+    return {
+      workerId,
+      workerName,
+      grade: "NEEDS_WORK",
+      feedback: `Worker failed before producing reviewable output: ${failure.error}`,
+      reworkedPrompt: [
+        assignment,
+        "",
+        `Previous attempt failed before producing reviewable output: ${failure.error}`,
+        "Retry from scratch and return the required findings with evidence.",
+      ].join("\n"),
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -540,6 +586,7 @@ export async function leadReviewAndRetry(
   adapter: PlatformAdapter,
   workerResults: DelegateResult[],
   workerAssignments: Map<string, string>,
+  failedWorkers: { name: string; error: string }[],
   failureNotice: string,
 ): Promise<ReviewRetryResult> {
   const lifecycleDeps: WorkerLifecycleDeps = {
@@ -556,6 +603,15 @@ export async function leadReviewAndRetry(
     lifecycleDeps, session, teamConfig, leadPersona, workerResults,
     workerAssignments, task + failureNotice, adapter, step, leadId
   );
+  const failedReviews = buildFailedWorkerReviews(step, teamConfig, failedWorkers, workerAssignments);
+  for (const failedReview of failedReviews) {
+    const alreadyReviewed = reviews.some((review) =>
+      review.workerId === failedReview.workerId || workerKey(review.workerName) === workerKey(failedReview.workerName)
+    );
+    if (!alreadyReviewed) {
+      reviews.push(failedReview);
+    }
+  }
 
   // Retry loop: NEEDS_WORK workers get reworked prompts and retry
   const maxRetries = step.max_worker_retries ?? 3;
@@ -591,18 +647,27 @@ export async function leadReviewAndRetry(
       }
 
       if (review.reworkedPrompt) {
-        const member = teamConfig.members.find(
-          m => m.name.toLowerCase().replace(/[^a-z0-9]+/g, "-") === review.workerId.replace(`${step.team}-`, "")
-        );
+        const member = findTeamMember(teamConfig, review);
         if (!member) continue;
 
         const retryResult = await retryWorker(
           lifecycleDeps, session, teamConfig, member, review.reworkedPrompt, task,
           adapter, leadId, attempt, step
         );
+        const normalizedRetryResult = {
+          ...retryResult,
+          agentId: review.workerId,
+          agentName: review.workerName,
+        };
 
-        const idx = workerResults.findIndex(r => r.agentId === review.workerId);
-        if (idx !== -1) workerResults[idx] = retryResult;
+        const idx = workerResults.findIndex(r =>
+          r.agentId === review.workerId || workerKey(r.agentName) === workerKey(review.workerName)
+        );
+        if (idx !== -1) {
+          workerResults[idx] = normalizedRetryResult;
+        } else {
+          workerResults.push(normalizedRetryResult);
+        }
         workerAssignments.set(review.workerId, review.reworkedPrompt);
       }
     }
@@ -704,7 +769,7 @@ export async function runTeamStep(
   const reviewed = await leadReviewAndRetry(
     deps, session, step, task,
     prepared.teamConfig, prepared.leadPersona, prepared.leadId, adapter,
-    accumulated.workerResults, execution.workerAssignments, accumulated.failureNotice,
+    accumulated.workerResults, execution.workerAssignments, accumulated.failedWorkers, accumulated.failureNotice,
   );
 
   // 7. Build final result
@@ -720,8 +785,35 @@ export async function runTeamStep(
 }
 
 // ---------------------------------------------------------------------------
-// runParallelStep (unchanged)
+// runParallelStep
 // ---------------------------------------------------------------------------
+
+export function buildParallelTeamStep(step: ChainStep, teamStep: ParallelTeamStep): ChainStep {
+  const parentPrompt = step.system_prompt_append?.trim();
+  const teamPrompt = teamStep.system_prompt_append?.trim();
+  const systemPromptAppend = [parentPrompt, teamPrompt].filter(Boolean).join("\n\n") || undefined;
+
+  return {
+    team: teamStep.team,
+    tools_override: teamStep.tools_override ?? step.tools_override,
+    system_prompt_append: systemPromptAppend,
+    till_done: teamStep.till_done ?? step.till_done,
+    max_worker_retries: teamStep.max_worker_retries ?? step.max_worker_retries,
+    on_feedback: teamStep.on_feedback ?? step.on_feedback,
+  };
+}
+
+export function buildFailedTeamResults(failedTeams: { name: string; error: string }[]): DelegateResult[] {
+  return failedTeams.map((failure) => ({
+    agentId: `${failure.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-lead`,
+    agentName: failure.name,
+    output: `ERROR: Parallel team failed before producing reviewable output.\n${failure.error}`,
+    grade: "FAILED",
+    findings: [`${failure.name}: ${failure.error}`],
+    costUsd: 0,
+    tokensUsed: 0,
+  }));
+}
 
 /**
  * Run multiple teams in parallel, each in their own worktree if applicable.
@@ -757,7 +849,7 @@ export async function runParallelStep(
       teamWtIds.push(wtId);
       log.debug("Created team worktree", { team: t.team, worktree_dir: teamSession.workingDir, session_id: session.id });
     }
-    return runTeamStep(deps, teamSession, { ...step, team: t.team }, task, previousOutput, adapterName);
+    return runTeamStep(deps, teamSession, buildParallelTeamStep(step, t), task, previousOutput, adapterName);
   });
 
   const settled = await Promise.allSettled(promises);
@@ -815,6 +907,7 @@ export async function runParallelStep(
     await deps.emitter.message(session.id, "orch-1", "Orchestrator", "user",
       `⚠️ ${failedTeams.length} parallel team(s) failed: ${failedTeams.map(f => f.name).join(", ")}. Synthesizing ${results.length} of ${teams.length} expected results.`);
   }
+  const failedTeamResults = buildFailedTeamResults(failedTeams);
 
   // Synthesize parallel results into unified report
   const { emitter, getAdapter, trackToolCall: trackTool, checkBudget: budgetCheck, messageSenders } = deps;
@@ -877,6 +970,13 @@ export async function runParallelStep(
   };
 
   const synthResult = await adapter.delegate(synthOpts);
+  if (failedTeamResults.length > 0 && synthResult.grade !== "FAILED") {
+    synthResult.grade = "FEEDBACK";
+    synthResult.findings = [
+      ...(synthResult.findings ?? []),
+      ...failedTeamResults.flatMap((r) => r.findings ?? []),
+    ];
+  }
   await emitter.costUpdate(session.id, synthId, synthResult.costUsd, synthResult.tokensUsed, 0);
   budgetCheck(session, synthId, synthResult.costUsd, synthResult.tokensUsed);
   session.totalCost += synthResult.costUsd;
@@ -886,9 +986,13 @@ export async function runParallelStep(
   await emitter.message(session.id, synthId, "Synthesis", "user", synthSummary);
   await emitter.agentDone(session.id, synthId, synthResult.grade ?? "VERIFIED", synthResult.costUsd);
 
-  return [{
-    ...synthResult,
-    agentName: "Synthesis",
-    agentId: synthId,
-  }];
+  return [
+    ...results,
+    ...failedTeamResults,
+    {
+      ...synthResult,
+      agentName: "Synthesis",
+      agentId: synthId,
+    },
+  ];
 }

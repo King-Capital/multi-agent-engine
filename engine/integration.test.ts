@@ -152,6 +152,7 @@ describe("steering", () => {
     
     // Access the private messageSenders map via any cast
     const orchAny = orch as any;
+    orchAny.emitter = { message: async () => {} };
     orchAny.messageSenders = new Map([
       ["session-1:code-reviewer", (msg: string) => received.push({ agent: "code-reviewer", message: msg })],
       ["session-1:security-reviewer", (msg: string) => received.push({ agent: "security-reviewer", message: msg })],
@@ -170,6 +171,7 @@ describe("steering", () => {
     const received: string[] = [];
     
     const orchAny = orch as any;
+    orchAny.emitter = { message: async () => {} };
     orchAny.messageSenders = new Map([
       ["session-1:lead", (msg: string) => received.push(msg)],
       ["session-1:worker", (msg: string) => received.push(msg)],
@@ -179,6 +181,31 @@ describe("steering", () => {
 
     expect(received.length).toBe(1);
     expect(received[0]).toBe("how's progress?");
+  });
+
+  test("acknowledges frontend steer messages immediately", () => {
+    const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
+    const messages: { content: string; metadata: Record<string, unknown> }[] = [];
+
+    const orchAny = orch as any;
+    orchAny.emitter = {
+      message: async (
+        _sessionId: string,
+        _agentId: string,
+        _name: string,
+        _channel: string,
+        content: string,
+        metadata: Record<string, unknown> = {},
+      ) => {
+        messages.push({ content, metadata });
+      },
+    };
+
+    orch.sendUserMessage("session-1", "focus on the API contract first", "msg-123");
+
+    expect(messages).toEqual([
+      { content: "ACK: received steer message.", metadata: { ack_for: "msg-123" } },
+    ]);
   });
 });
 

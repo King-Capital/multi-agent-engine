@@ -140,9 +140,10 @@ export const api = {
   metricsText: (signal?: AbortSignal) => apiText("/metrics", signal),
 
   // Send a message to a session
-  sendMessage: async (id: string, content: string): Promise<void> => {
+  sendMessage: async (id: string, content: string): Promise<{ message_id: string }> => {
     // The Go handler uses r.FormValue("content"), so send form-encoded
-    const body = new URLSearchParams({ content });
+    const message_id = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const body = new URLSearchParams({ content, message_id });
     const res = await fetch(
       `${API_BASE_URL}/api/sessions/${encodeURIComponent(id)}/message`,
       {
@@ -153,6 +154,7 @@ export const api = {
     );
     if (!res.ok)
       throw new Error(`POST message → ${res.status} ${res.statusText}`);
+    return res.json();
   },
 };
 

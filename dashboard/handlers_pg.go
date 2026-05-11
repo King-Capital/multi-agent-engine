@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"mae.local/dashboard/templates"
 	"net/http"
 	"strconv"
 	"time"
-	"mae.local/dashboard/templates"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -365,10 +365,11 @@ func handleAPISessionHistory(w http.ResponseWriter, r *http.Request) {
 		SELECT
 			s.id, s.name, s.chain, s.status, s.created_at, s.completed_at,
 			CASE
-				WHEN COALESCE(SUM(a.cost_usd), 0) > 0 THEN SUM(a.cost_usd)
-				ELSE COALESCE((SELECT SUM(max_cost) FROM (SELECT MAX((e.payload->>'cost_usd')::numeric) as max_cost FROM events e WHERE e.session_id = s.id AND e.event_type = 'cost_update' AND e.payload->>'cost_usd' IS NOT NULL GROUP BY e.agent_id) sub), 0)
+				WHEN COALESCE((SELECT SUM(max_cost) FROM (SELECT MAX((e.payload->>'cost_usd')::numeric) as max_cost FROM events e WHERE e.session_id = s.id AND e.event_type = 'cost_update' AND e.payload->>'cost_usd' IS NOT NULL GROUP BY e.agent_id) sub), 0) > 0
+					THEN COALESCE((SELECT SUM(max_cost) FROM (SELECT MAX((e.payload->>'cost_usd')::numeric) as max_cost FROM events e WHERE e.session_id = s.id AND e.event_type = 'cost_update' AND e.payload->>'cost_usd' IS NOT NULL GROUP BY e.agent_id) sub), 0)
+				ELSE COALESCE(SUM(a.cost_usd), 0)
 			END as total_cost,
-			COALESCE((SELECT SUM((e.payload->>'tokens')::bigint) FROM events e WHERE e.session_id = s.id AND e.event_type = 'cost_update' AND e.payload->>'tokens' IS NOT NULL), 0) as total_tokens,
+			COALESCE((SELECT SUM(max_tokens) FROM (SELECT MAX((e.payload->>'tokens_used')::bigint) as max_tokens FROM events e WHERE e.session_id = s.id AND e.event_type = 'cost_update' AND e.payload->>'tokens_used' IS NOT NULL GROUP BY e.agent_id) sub), COALESCE(SUM(a.tokens_used), 0), 0) as total_tokens,
 			COUNT(DISTINCT a.id) as agent_count,
 			EXTRACT(EPOCH FROM COALESCE(s.completed_at, NOW()) - s.created_at) as duration_secs
 		FROM sessions s

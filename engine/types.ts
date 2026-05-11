@@ -104,10 +104,25 @@ export interface TeamsFile {
   teams: TeamConfig[];
 }
 
+export type TillDoneVerifyType = "output_match" | "deterministic" | "llm_verified";
+
+export interface ParallelTeamStep {
+  team: string;
+  tools_override?: string[];
+  system_prompt_append?: string;
+  till_done?: (string | { text: string; type: TillDoneVerifyType; verify?: string })[];
+  max_worker_retries?: number;
+  on_feedback?: {
+    retry_team: string;
+    max_attempts: number;
+    escalate_to: string;
+  };
+}
+
 export interface ChainStep {
   team?: string;
   agent?: string;
-  parallel?: { team: string }[];
+  parallel?: ParallelTeamStep[];
   deterministic?: {
     command: string;
     on_failure?: "loop" | "fail" | "continue";
@@ -128,7 +143,7 @@ export interface ChainStep {
 export interface Chain {
   description: string;
   steps: ChainStep[];
-  parallel?: { team: string }[];
+  parallel?: ParallelTeamStep[];
   then?: ChainStep[];
 }
 
@@ -182,8 +197,6 @@ export interface AgentState {
   tokensUsed: number;
   contextTokens: number;
 }
-
-export type TillDoneVerifyType = "output_match" | "deterministic" | "llm_verified";
 
 export interface TillDoneItem {
   description: string;

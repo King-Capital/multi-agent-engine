@@ -102,7 +102,7 @@ export class Orchestrator {
     this.defaultAdapter = name;
   }
 
-  sendUserMessage(sessionId: string, message: string): void {
+  sendUserMessage(sessionId: string, message: string, messageId?: string): void {
     if (message.startsWith("!")) {
       const parts = message.slice(1).split(/\s+/);
       const cmd = parts[0] ?? "";
@@ -110,6 +110,8 @@ export class Orchestrator {
       this.handleSteerCommand(sessionId, cmd, args);
       return;
     }
+    const ackMetadata = messageId ? { ack_for: messageId } : {};
+    void this.emitter.message(sessionId, "orch-1", "Orchestrator", "user", "ACK: received steer message.", ackMetadata);
     if (this.orchestratorLoop) {
       void this.orchestratorLoop.handleUserMessage(message).catch(err =>
         log.error("Loop handleUserMessage failed", { error: err instanceof Error ? err.message : String(err) }));
@@ -252,7 +254,7 @@ export class Orchestrator {
       messageBuffers: this.messageBuffers, actionQueue,
     });
     this.orchestratorLoop.start();
-    this.sseAbort = listenForUserMessages(this.dashboardUrl, sessionId, (sid, content) => this.sendUserMessage(sid, content));
+    this.sseAbort = listenForUserMessages(this.dashboardUrl, sessionId, (sid, content, messageId) => this.sendUserMessage(sid, content, messageId));
 
     this.skippedSteps.clear();
     const chainRunnerDeps = this.buildChainRunnerDeps();
