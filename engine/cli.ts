@@ -999,9 +999,26 @@ Accepted mutations are git-committed for easy rollback.
     break;
   }
 
+  case "update": {
+    console.log("[mae] Rebuilding from source...");
+    const buildProc = Bun.spawn(["bun", "build", "engine/cli.ts", "--target=bun", "--outfile=./agent"], { cwd: BASE_DIR, stdout: "inherit", stderr: "inherit" });
+    await buildProc.exited;
+    if (buildProc.exitCode !== 0) { console.error("[mae] Build failed"); process.exit(1); }
+
+    const installPath = join(process.env.HOME ?? "/tmp", ".local", "bin", "mae");
+    const { copyFileSync, chmodSync } = await import("fs");
+    copyFileSync(join(BASE_DIR, "agent"), installPath);
+    chmodSync(installPath, 0o755);
+    console.log(`[mae] Installed to ${installPath}`);
+
+    const ver = (() => { try { return readFile(join(BASE_DIR, "VERSION"), "utf-8").trim(); } catch { return "?"; } })();
+    console.log(`[mae] Updated to v${ver}`);
+    break;
+  }
+
   default:
     console.error(`Unknown command: ${command}`);
-    console.error(`Valid commands: run, chain, task, design, session, config, new-team, new-agent, learn, expert, validate-agent, discover, traces, score, compare, replay, golden, ralph, info, version, adapters, tui`);
+    console.error(`Valid commands: run, chain, task, design, session, config, new-team, new-agent, learn, expert, validate-agent, discover, traces, score, compare, replay, golden, ralph, update, info, version, adapters, tui`);
     process.exit(1);
 }
 
