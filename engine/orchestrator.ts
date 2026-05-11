@@ -1,8 +1,10 @@
 import { randomUUID } from "crypto";
+import { join } from "path";
 import { getChain, loadPrompt, loadTeams, loadPersona, resolveModelForRole, loadModelRouting } from "./config";
 import { EventEmitter } from "./event-emitter";
 import { createLogger, addSink } from "./logger";
 import { createLangfuseSink } from "./langfuse-sink";
+import { createTraceRecorder, TRACE_DIR } from "./trace-recorder";
 import { sanitizeAgentInput } from "./security";
 
 if (process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY) {
@@ -12,6 +14,9 @@ if (process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY) {
     host: process.env.LANGFUSE_HOST ?? "http://10.71.20.73:3000",
   }));
 }
+
+// JSONL trace recorder -- always active, one file per session
+addSink(createTraceRecorder());
 import { PipelineTracker } from "./pipeline-state";
 import { SandboxPool } from "./sandbox-pool";
 import { trackActivity, trackToolCall, untrackActivity } from "./monitoring";
@@ -229,6 +234,7 @@ export class Orchestrator {
     await this.emitter.agentSpawn(sessionId, "orch-1", "", orchPersona.name, "orchestrator", orchResolved.model, "Orchestration", teams.orchestrator.color ?? "#36f9f6");
     await this.emitter.pgCreateAgent({ sessionId, agentId: "orch-1", role: "orchestrator", persona: orchPersona.name });
     log.info("Session started", { session_id: sessionId, name: sessionName, chain: chainName, dashboard: `${this.dashboardUrl}/session/${sessionId}`, task: opts.task?.slice(0, 200) });
+    log.info("Trace file", { session_id: sessionId, path: join(TRACE_DIR, `${sessionId}.jsonl`) });
 
     this.budgetState = loadBudgets();
     await this.emitter.tillDone(sessionId, sessionName, session.tillDone);

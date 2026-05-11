@@ -14,6 +14,7 @@ import { join, resolve } from "path";
 import { getFlag, stripFlags, slugify } from "./cli-utils";
 import { startDesignGallery } from "./design-gallery";
 import { loadFileReferences, loadUrlReferences, scanProjectDesign } from "./reference-loader";
+import { TRACE_DIR } from "./trace-recorder";
 
 const args = process.argv.slice(2);
 
@@ -33,6 +34,7 @@ Commands:
   expert    ◆   Interactive expert session      mae expert --help
   validate-agent  Test expertise quality        mae validate-agent --help
   design    ◆   Design session or review        mae design --help
+  traces        List/inspect JSONL traces       mae traces --help
   discover      Discover A2A agents            mae discover <url>
   info          System overview                mae info
   version       Version info                   mae version
@@ -598,9 +600,120 @@ Interactive TUI menus:
     await configInteractive();
     break;
 
+  case "traces": {
+    if (subHelp) showSubHelp(`
+mae traces — List and inspect JSONL trace files
+
+Usage:
+  mae traces              List recent traces (last 10)
+  mae traces <id>         Show summary of a specific trace
+
+Traces are stored in: ${TRACE_DIR}
+
+Each session produces a .jsonl file with structured events
+following the trace schema (specs/trace-schema.md).
+`);
+    const traceId = args[1];
+    if (!existsSync(TRACE_DIR)) {
+      console.log(`No trace directory found at ${TRACE_DIR}`);
+      break;
+    }
+
+    if (traceId) {
+      // Show summary of a specific trace
+      let traceFile = join(TRACE_DIR, traceId.endsWith(".jsonl") ? traceId : `${traceId}.jsonl`);
+      if (!existsSync(traceFile)) {
+        // Try partial match
+        const files = readdirSync(TRACE_DIR).filter((f: string) => f.startsWith(traceId) && f.endsWith(".jsonl"));
+        if (files.length === 1) {
+          traceFile = join(TRACE_DIR, files[0]!);
+        } else if (files.length > 1) {
+          console.error(`Ambiguous ID '${traceId}', matches: ${files.map((f: string) => f.replace(".jsonl", "")).join(", ")}`);
+          process.exit(1);
+        } else {
+          console.error(`Trace not found: ${traceId}`);
+          process.exit(1);
+        }
+      }
+
+      const content = readFile(traceFile, "utf-8").trim();
+      if (!content) { console.log("Empty trace file."); break; }
+      const lines = content.split("\n");
+      const events = lines.map((l: string) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+
+      // Count events by type
+      const typeCounts: Record<string, number> = {};
+      let totalCost = 0;
+      let firstTs: string | null = null;
+      let lastTs: string | null = null;
+      let goal = "";
+
+      for (const evt of events) {
+        typeCounts[evt.type] = (typeCounts[evt.type] ?? 0) + 1;
+        if (!firstTs) firstTs = evt.ts;
+        lastTs = evt.ts;
+        if (evt.type === "session.start" && (evt.goal || evt.task_preview)) {
+          goal = evt.goal ?? evt.task_preview?.slice(0, 80) ?? "";
+        }
+        if (evt.total_cost !== undefined) totalCost = evt.total_cost;
+        if (evt.cost !== undefined) totalCost += evt.cost;
+      }
+
+      const durationMs = firstTs && lastTs ? new Date(lastTs).getTime() - new Date(firstTs).getTime() : 0;
+      const durationStr = durationMs > 60000 ? `${(durationMs / 60000).toFixed(1)}m` : `${(durationMs / 1000).toFixed(1)}s`;
+
+      console.log(`\nTrace: ${traceFile.split("/").pop()?.replace(".jsonl", "")}`);
+      if (goal) console.log(`Goal: ${goal}`);
+      console.log(`Events: ${events.length}  |  Duration: ${durationStr}  |  Cost: $${totalCost.toFixed(3)}`);
+      console.log(`\nEvent breakdown:`);
+      for (const [type, count] of Object.entries(typeCounts).sort((a, b) => b[1] - a[1])) {
+        console.log(`  ${type.padEnd(22)} ${count}`);
+      }
+    } else {
+      // List recent traces
+      const { statSync } = await import("fs");
+      const files = readdirSync(TRACE_DIR)
+        .filter((f: string) => f.endsWith(".jsonl"))
+        .map((f: string) => {
+          const stat = statSync(join(TRACE_DIR, f));
+          return { name: f, mtime: stat.mtimeMs };
+        })
+        .sort((a, b) => b.mtime - a.mtime)
+        .slice(0, 10);
+
+      if (files.length === 0) {
+        console.log(`No traces found in ${TRACE_DIR}`);
+        break;
+      }
+
+      console.log(`\nRecent traces (${TRACE_DIR}):\n`);
+      console.log(`${"Session ID".padEnd(40)} ${"Goal".padEnd(40)} Status`);
+      console.log("-".repeat(90));
+
+      for (const file of files) {
+        const content = readFile(join(TRACE_DIR, file.name), "utf-8").trim();
+        if (!content) continue;
+        const firstLine = content.split("\n")[0];
+        const lastLine = content.split("\n").pop();
+        let goal = "";
+        let status = "";
+        try {
+          const first = JSON.parse(firstLine!);
+          goal = (first.goal ?? first.task_preview ?? first.msg ?? "").slice(0, 38);
+          const last = JSON.parse(lastLine!);
+          status = last.status ?? last.type ?? "";
+        } catch { /* ignore parse errors */ }
+
+        const sessionId = file.name.replace(".jsonl", "");
+        console.log(`${sessionId.slice(0, 38).padEnd(40)} ${goal.padEnd(40)} ${status}`);
+      }
+    }
+    break;
+  }
+
   default:
     console.error(`Unknown command: ${command}`);
-    console.error(`Valid commands: run, chain, task, design, session, config, new-team, new-agent, learn, expert, validate-agent, discover, info, version, adapters, tui`);
+    console.error(`Valid commands: run, chain, task, design, session, config, new-team, new-agent, learn, expert, validate-agent, discover, traces, info, version, adapters, tui`);
     process.exit(1);
 }
 

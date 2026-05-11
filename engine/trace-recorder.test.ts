@@ -1,0 +1,238 @@
+import { test, expect, describe, beforeEach, afterEach } from "bun:test";
+import { rmSync, existsSync, readFileSync, readdirSync } from "fs";
+import { join } from "path";
+import { createTraceRecorder } from "./trace-recorder";
+import type { LogEntry } from "./logger";
+
+const TEST_TRACE_DIR = join(import.meta.dir, "..", ".test-traces-" + process.pid);
+
+function makeEntry(overrides: Partial<LogEntry> = {}): LogEntry {
+  return {
+    ts: new Date().toISOString(),
+    level: "INFO",
+    component: "orchestrator",
+    msg: "Test message",
+    ...overrides,
+  };
+}
+
+describe("trace-recorder", () => {
+  beforeEach(() => {
+    if (existsSync(TEST_TRACE_DIR)) rmSync(TEST_TRACE_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_TRACE_DIR)) rmSync(TEST_TRACE_DIR, { recursive: true });
+  });
+
+  test("creates trace directory if it does not exist", () => {
+    expect(existsSync(TEST_TRACE_DIR)).toBe(false);
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+    expect(existsSync(TEST_TRACE_DIR)).toBe(true);
+    recorder.close?.();
+  });
+
+  test("session-scoped events produce a JSONL file named {session_id}.jsonl", () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+    const sessionId = "test-session-abc";
+
+    recorder.write(makeEntry({
+      session_id: sessionId,
+      msg: "Session started",
+      component: "orchestrator",
+    }));
+
+    const expectedFile = join(TEST_TRACE_DIR, `${sessionId}.jsonl`);
+    expect(existsSync(expectedFile)).toBe(true);
+    recorder.close?.();
+  });
+
+  test("non-session events are ignored (no file created)", () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+
+    recorder.write(makeEntry({ msg: "No session here" }));
+    // No session_id => no file
+    const files = readdirSync(TEST_TRACE_DIR);
+    expect(files).toHaveLength(0);
+    recorder.close?.();
+  });
+
+  test("each line in the trace file is valid JSON", () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+    const sessionId = "test-json-validity";
+
+    recorder.write(makeEntry({ session_id: sessionId, msg: "Session started" }));
+    recorder.write(makeEntry({ session_id: sessionId, msg: "Some work" }));
+    recorder.write(makeEntry({ session_id: sessionId, msg: "Session ended" }));
+
+    const content = readFileSync(join(TEST_TRACE_DIR, `${sessionId}.jsonl`), "utf-8");
+    const lines = content.trim().split("\n");
+    expect(lines.length).toBe(3);
+
+    for (const line of lines) {
+      expect(() => JSON.parse(line)).not.toThrow();
+    }
+    recorder.close?.();
+  });
+
+  test("trace events have required fields: ts, type, id, session_id", () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+    const sessionId = "test-required-fields";
+
+    recorder.write(makeEntry({ session_id: sessionId, msg: "Session started" }));
+
+    const content = readFileSync(join(TEST_TRACE_DIR, `${sessionId}.jsonl`), "utf-8");
+    const event = JSON.parse(content.trim());
+
+    expect(event.ts).toBeDefined();
+    expect(typeof event.ts).toBe("string");
+    expect(event.type).toBeDefined();
+    expect(typeof event.type).toBe("string");
+    expect(event.id).toBeDefined();
+    expect(typeof event.id).toBe("string");
+    expect(event.session_id).toBe(sessionId);
+    recorder.close?.();
+  });
+
+  test("multiple sessions produce separate files", () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+
+    recorder.write(makeEntry({ session_id: "session-1", msg: "Session started" }));
+    recorder.write(makeEntry({ session_id: "session-2", msg: "Session started" }));
+
+    expect(existsSync(join(TEST_TRACE_DIR, "session-1.jsonl"))).toBe(true);
+    expect(existsSync(join(TEST_TRACE_DIR, "session-2.jsonl"))).toBe(true);
+
+    const content1 = readFileSync(join(TEST_TRACE_DIR, "session-1.jsonl"), "utf-8").trim();
+    const content2 = readFileSync(join(TEST_TRACE_DIR, "session-2.jsonl"), "utf-8").trim();
+
+    const event1 = JSON.parse(content1);
+    const event2 = JSON.parse(content2);
+
+    expect(event1.session_id).toBe("session-1");
+    expect(event2.session_id).toBe("session-2");
+    recorder.close?.();
+  });
+
+  test("maps orchestrator 'Session started' to session.start type", () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+    const sessionId = "test-session-start";
+
+    recorder.write(makeEntry({
+      session_id: sessionId,
+      component: "orchestrator",
+      msg: "Session started",
+      name: "My Session",
+      chain: "plan-build-review",
+    }));
+
+    const content = readFileSync(join(TEST_TRACE_DIR, `${sessionId}.jsonl`), "utf-8");
+    const event = JSON.parse(content.trim());
+
+    expect(event.type).toBe("session.start");
+    expect(event.goal).toBe("My Session");
+    expect(event.chain).toBe("plan-build-review");
+    recorder.close?.();
+  });
+
+  test("maps orchestrator 'Session ended' to session.end type", () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+    const sessionId = "test-session-end";
+
+    recorder.write(makeEntry({
+      session_id: sessionId,
+      component: "orchestrator",
+      msg: "Session ended",
+      status: "completed",
+      cost_usd: 1.23,
+    }));
+
+    const content = readFileSync(join(TEST_TRACE_DIR, `${sessionId}.jsonl`), "utf-8");
+    const event = JSON.parse(content.trim());
+
+    expect(event.type).toBe("session.end");
+    expect(event.status).toBe("completed");
+    expect(event.total_cost).toBe(1.23);
+    recorder.close?.();
+  });
+
+  test("maps chain-runner step events to chain.step types", () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+    const sessionId = "test-chain-steps";
+
+    recorder.write(makeEntry({
+      session_id: sessionId,
+      component: "chain-runner",
+      msg: "Step 1 starting: build",
+      step: 1,
+      name: "build",
+      team: "engineering",
+    }));
+
+    recorder.write(makeEntry({
+      session_id: sessionId,
+      component: "chain-runner",
+      msg: "Step 1 completed",
+      step: 1,
+      name: "build",
+      status: "completed",
+    }));
+
+    const content = readFileSync(join(TEST_TRACE_DIR, `${sessionId}.jsonl`), "utf-8");
+    const lines = content.trim().split("\n");
+    const startEvent = JSON.parse(lines[0]!);
+    const endEvent = JSON.parse(lines[1]!);
+
+    expect(startEvent.type).toBe("chain.step.start");
+    expect(startEvent.step).toBe(1);
+    expect(endEvent.type).toBe("chain.step.end");
+    recorder.close?.();
+  });
+
+  test("unmapped events default to 'log' type", () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+    const sessionId = "test-generic-log";
+
+    recorder.write(makeEntry({
+      session_id: sessionId,
+      component: "some-module",
+      msg: "Something happened",
+    }));
+
+    const content = readFileSync(join(TEST_TRACE_DIR, `${sessionId}.jsonl`), "utf-8");
+    const event = JSON.parse(content.trim());
+
+    expect(event.type).toBe("log");
+    recorder.close?.();
+  });
+
+  test("close resets internal state", async () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+
+    recorder.write(makeEntry({ session_id: "s1", msg: "test" }));
+    await recorder.close?.();
+
+    // After close, writing a new session should still work
+    recorder.write(makeEntry({ session_id: "s2", msg: "test" }));
+    expect(existsSync(join(TEST_TRACE_DIR, "s2.jsonl"))).toBe(true);
+  });
+
+  test("events interleaved across sessions go to correct files", () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+
+    recorder.write(makeEntry({ session_id: "s-a", msg: "First in A" }));
+    recorder.write(makeEntry({ session_id: "s-b", msg: "First in B" }));
+    recorder.write(makeEntry({ session_id: "s-a", msg: "Second in A" }));
+
+    const contentA = readFileSync(join(TEST_TRACE_DIR, "s-a.jsonl"), "utf-8").trim().split("\n");
+    const contentB = readFileSync(join(TEST_TRACE_DIR, "s-b.jsonl"), "utf-8").trim().split("\n");
+
+    expect(contentA).toHaveLength(2);
+    expect(contentB).toHaveLength(1);
+
+    expect(JSON.parse(contentA[0]!).msg).toBe("First in A");
+    expect(JSON.parse(contentA[1]!).msg).toBe("Second in A");
+    expect(JSON.parse(contentB[0]!).msg).toBe("First in B");
+    recorder.close?.();
+  });
+});
