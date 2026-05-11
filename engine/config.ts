@@ -1,6 +1,7 @@
 import { readFileSync, existsSync, statSync, writeFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { loadEnvFile } from "./env-file";
 import type {
   TeamsFile,
   ChainsFile,
@@ -13,7 +14,41 @@ import type {
   ModelRoutingConfig,
 } from "./types";
 
-export const BASE_DIR = process.env.MAE_ROOT ?? join(import.meta.dir, "..");
+function homeMaeDir(): string | undefined {
+  const home = process.env.HOME;
+  return home ? join(home, ".mae") : undefined;
+}
+
+const HOME_MAE_DIR = homeMaeDir();
+if (HOME_MAE_DIR) {
+  loadEnvFile(join(HOME_MAE_DIR, "config"));
+  loadEnvFile(join(HOME_MAE_DIR, ".env"));
+}
+
+function looksLikeMaeRoot(path: string): boolean {
+  return existsSync(join(path, "agents", "teams", "chains.yaml"))
+    && existsSync(join(path, "configs", "model-routing.yaml"));
+}
+
+function resolveBaseDir(): string {
+  if (process.env.MAE_ROOT) return process.env.MAE_ROOT;
+
+  const candidates = [
+    join(import.meta.dir, ".."),
+    import.meta.dir,
+    HOME_MAE_DIR,
+    process.cwd(),
+  ].filter((path): path is string => Boolean(path));
+
+  for (const candidate of candidates) {
+    if (looksLikeMaeRoot(candidate)) return candidate;
+  }
+
+  return join(import.meta.dir, "..");
+}
+
+export const BASE_DIR = resolveBaseDir();
+loadEnvFile(join(BASE_DIR, ".env"));
 
 const cache = new Map<string, { data: unknown; mtime: number }>();
 
