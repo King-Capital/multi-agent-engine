@@ -287,6 +287,61 @@ Replay extracts the original goal and chain from the old trace, runs them again 
 
 ---
 
+## validate-chain
+
+Preview a configured chain without spawning agents, starting adapters, writing traces, or spending model tokens. This reads `agents/teams/chains.yaml`, `agents/teams/teams.yaml`, persona domains, and model routing to show what would run.
+
+**Usage:**
+
+```bash
+mae validate-chain <chain-name> [goal]
+mae validate-chain "goal text"
+mae validate-chain <chain-name> --json
+```
+
+**Examples:**
+
+```bash
+# Show the configured standard swarm: Arch coordinator plus SME squads
+mae validate-chain standard-swarm
+
+# Suggest a chain from goal text using local config only
+mae validate-chain "Design dashboard UI review"
+
+# Machine-readable report for scripts or CI
+mae validate-chain plan-build-review "Add cost summary to session detail" --json
+```
+
+**Output:**
+
+```
+Chain: standard-swarm (2 steps)
+Description: 5-squad parallel review swarm: orchestrator assigns paths, leads spin out full workforce immediately
+
+Step 1: Architecture Coordination
+  Teams: Architecture Coordination
+  Lead: Arch Coordinator (opus, thinking=high) - domain: expertise/planner.md
+  Till Done:
+    - Arch coordinator produced the SME squad coverage plan [output_match] (SWARM_COORDINATION_READY)
+
+Step 2: Parallel teams
+  Teams: Correctness Squad, Adversarial Squad, Quality Squad, Security Squad, Domain Squad
+  Leads:
+    - Correctness Lead (opus, thinking=high) - domain: **/*
+    - Adversarial Lead (opus, thinking=high) - domain: **/*
+    - Quality Lead (opus, thinking=high) - domain: **/*
+    - Security Lead (opus, thinking=high) - domain: **/*
+    - Domain Lead (opus, thinking=high) - domain: expertise/planner.md
+
+Summary: 2 steps, 0 deterministic checks, 32 agent spawns (6 leads + 26 workers)
+Models: 15 sonnet, 13 opus, 4 gpt-5.5
+Estimated cost: $6.69-$26.77 (config-only estimate)
+```
+
+When the first argument is not a configured chain name, MAE treats the arguments as goal text and picks the closest configured chain with deterministic local keyword matching. Use `mae task` when you want live LLM classification.
+
+---
+
 ## golden
 
 Manage golden traces -- verified-good (or verified-bad) session runs used as baselines for regression testing.

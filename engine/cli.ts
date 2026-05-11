@@ -9,7 +9,7 @@ import { teamWizard } from "./team-wizard";
 import { expertiseLearn } from "./expertise-builder";
 import { expertiseValidate } from "./expertise-validator";
 import { expertSession } from "./expert-session";
-import { readFileSync as readFile, writeFileSync, existsSync, readdirSync } from "fs";
+import { readFileSync as readFile, writeFileSync, existsSync, readdirSync, statSync } from "fs";
 import { join, resolve } from "path";
 import { getFlag, stripFlags, slugify } from "./cli-utils";
 import { classifyGoal } from "./goal-classifier";
@@ -18,41 +18,144 @@ import { loadFileReferences, loadUrlReferences, scanProjectDesign } from "./refe
 import { TRACE_DIR } from "./trace-recorder";
 import { loadTrace, scoreSession, extractFingerprint, compareFingerprints, addGoldenTrace, getGoldenTraces } from "./replay";
 import { runRalphLoop } from "./ralph-loop";
+import { runHealthCheck, formatHealthReport } from "./health";
+import { buildChainValidationReport, formatChainValidationReport, resolveValidateChainInput } from "./chain-validator";
+import * as p from "@clack/prompts";
 
 const args = process.argv.slice(2);
 
 if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
+  const examples = buildMainHelpExamples();
   console.log(`
 Multi-Agent Orchestration Engine v${(() => { try { return readFile(join(import.meta.dir, "..", "VERSION"), "utf-8").trim(); } catch { return "?"; } })()}
 
 Commands:
-  run           Run a prompt workflow          mae run --help
-  chain         Run a named chain              mae chain --help
-  task          Quick task (plan-build-review)  mae task --help
-  session       List/manage sessions           mae session --help
-  config    ◆   Configure models & budgets     mae config --help
-  new-team  ◆   Create a new agent team        mae new-team --help
-  new-agent     Scaffold a single agent        mae new-agent <name> [role] [team] [model]
-  learn         Build expertise from sources   mae learn --help
-  expert    ◆   Interactive expert session      mae expert --help
-  validate-agent  Test expertise quality        mae validate-agent --help
-  design    ◆   Design session or review        mae design --help
-  traces        List/inspect JSONL traces       mae traces --help
-  score         Score a session trace           mae score <session_id>
-  compare       Compare two fingerprints        mae compare <id1> <id2>
-  replay        Re-run a past session's goal    mae replay <session_id>
-  golden        Manage golden traces            mae golden --help
-  ralph         Self-improvement loop           mae ralph --help
-  discover      Discover A2A agents            mae discover <url>
-  info          System overview                mae info
-  version       Version info                   mae version
-  adapters      List adapters                  mae adapters
+  Run work
+    task          Auto-pick a chain and run a task
+                  mae task "Fix the login redirect bug"
+                  ${examples.taskWithChain}
+    chain         Run a named chain directly
+                  ${examples.chainPrimary}
+                  ${examples.chainSecondary}
+    run           Run a prompt workflow
+                  ${examples.promptPrimary}
+                  ${examples.promptSecondary}
 
-  ◆ = interactive TUI available (arrow-key navigation)
+  Operate runs
+    session       List or close dashboard sessions
+                  mae session list
+                  mae session close 2dbc90f5 --status error
+    design    ◆   Run a design review/build flow with a gallery
+                  ${examples.designReview}
+                  ${examples.designBuild}
 
-Run 'mae <command> --help' for details on any command.
+  Inspect and verify
+    traces        List or inspect local JSONL traces
+                  mae traces
+                  mae traces 2dbc90f5
+    score         Score a session trace
+                  mae score 2dbc90f5
+    compare       Compare two session fingerprints
+                  mae compare 2dbc90f5 8fa2c1b3
+    replay        Re-run a past session goal and compare behavior
+                  mae replay 2dbc90f5 --dry-run
+    validate-chain Preview configured chain agents, teams, checks, and cost
+                  ${examples.validateStandard}
+                  ${examples.validateGoal}
+    golden        Manage golden reference traces
+                  mae golden add 2dbc90f5 --verdict pass --notes "good swarm"
+                  mae golden list
+
+  Build the agent system
+    new-team  ◆   Create a new agent team
+                  mae new-team
+                  mae new-team --template frontend
+    new-agent     Scaffold one persona
+                  mae new-agent "API Reviewer" lead Engineering quality
+    learn         Build expertise from sources
+                  mae learn --from ./engine --agent api-reviewer
+    expert    ◆   Interactive expert session
+                  mae expert ./engine --agent api-reviewer
+    validate-agent  Test expertise quality
+                  mae validate-agent api-reviewer
+    ralph         Self-improvement loop
+                  mae ralph --dry-run --iterations 3
+
+  Configure and diagnose
+    config    ◆   Configure models, aliases, roles, and budgets
+                  mae config
+                  mae config show
+    tui       ◆   Full interactive launcher
+                  mae tui
+    health        Probe adapters, traces, dashboard, and Langfuse
+                  mae health
+                  mae health --json
+    info          Full system overview
+                  mae info
+    adapters      List adapter availability
+                  mae adapters
+    discover      Discover an A2A agent card
+                  mae discover http://localhost:9000
+    version       Show local binary and config counts
+                  mae version
+    update        Pull, build, and install the local mae binary
+                  mae update
+
+  ◆ = interactive prompt/TUI flow.
+
+Run 'mae <command> --help' for command-specific options and more examples.
   `);
   process.exit(0);
+}
+
+function configuredChains(): string[] {
+  try {
+    return Object.keys(loadChains().chains);
+  } catch {
+    return [];
+  }
+}
+
+function configuredPrompts(): string[] {
+  try {
+    return readdirSync(join(import.meta.dir, "..", "prompts"))
+      .filter((f: string) => f.endsWith(".md") && f !== "BASE.md")
+      .map((f: string) => f.replace(".md", ""))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+function pickConfigured(preferred: string[], actual: string[], fallback: string): string {
+  return preferred.find(name => actual.includes(name)) ?? actual[0] ?? fallback;
+}
+
+function chainExample(preferred: string[], task: string, fallback: string): string {
+  return `mae chain ${pickConfigured(preferred, configuredChains(), fallback)} "${task}"`;
+}
+
+function promptExample(preferred: string[], task: string, fallback: string): string {
+  return `mae run ${pickConfigured(preferred, configuredPrompts(), fallback)} "${task}"`;
+}
+
+function buildMainHelpExamples() {
+  const chains = configuredChains();
+  const prompts = configuredPrompts();
+  const reviewChain = pickConfigured(["review-only", "standard-swarm", "swarm-review"], chains, "review-only");
+  const hasDesignReview = chains.includes("design-review");
+  const hasDesignBuild = chains.includes("design-build");
+  return {
+    taskWithChain: `mae task "Review engine/orchestrator.ts" --chain ${reviewChain}`,
+    chainPrimary: `mae chain ${pickConfigured(["standard-swarm", "swarm-review", "red-blue"], chains, "standard-swarm")} "Find RC1 holes in the dashboard"`,
+    chainSecondary: `mae chain ${pickConfigured(["plan-build-review", "build-verify", "full-sdlc"], chains, "plan-build-review")} "Add cost summary to session detail"`,
+    promptPrimary: `mae run ${pickConfigured(["review", "swarm-review", "plan-build-review"], prompts, "review")} "git diff HEAD~1"`,
+    promptSecondary: `mae run ${pickConfigured(["swarm-review", "review", "scout"], prompts, "swarm-review")} "Review engine/ for bugs"`,
+    designReview: hasDesignReview ? "mae design review ./dashboard-next --ref screenshot.png" : "mae design ./dashboard-next --ref screenshot.png",
+    designBuild: hasDesignBuild ? "mae design build ./dashboard-next --port 8401" : "mae design ./dashboard-next --port 8401",
+    validateStandard: `mae validate-chain ${pickConfigured(["standard-swarm", "swarm-review", "review-only"], chains, "standard-swarm")}`,
+    validateGoal: `mae validate-chain "Design dashboard UI review"`,
+  };
 }
 
 const subHelp = args[1] === "--help" || args[1] === "-h";
@@ -63,6 +166,16 @@ function showSubHelp(text: string): never {
 }
 
 const command = args[0];
+if (command === "tui" && subHelp) showSubHelp(`
+mae tui — Full interactive launcher
+
+Usage:
+  mae tui
+
+Use arrow-key menus to run work, operate sessions, inspect traces,
+build agent assets, and configure or diagnose the engine.
+`);
+
 const isLocal = args.includes("--local") || process.env.MAE_LOCAL === "1";
 const dashboardUrl = isLocal ? "http://localhost:8400" : (getFlag(args, "--dashboard") ?? process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
 const adapterName = getFlag(args, "--adapter");
@@ -74,39 +187,64 @@ const a2aUrl = getFlag(args, "--a2a-url") ?? process.env.MAE_A2A_URL;
 const a2aToken = getFlag(args, "--a2a-token") ?? process.env.MAE_A2A_TOKEN;
 
 const apiToken = getFlag(args, "--api-token") ?? process.env.MAE_API_TOKEN;
-const orch = new Orchestrator(dashboardUrl, apiToken);
 
-// Set up A2A adapter with endpoint if configured
-const a2aAdapter = new A2AAdapter();
-if (a2aUrl) {
-  a2aAdapter.setDefaultEndpoint({
-    url: a2aUrl,
-    token: a2aToken,
-  });
+type CliRuntime = {
+  orch: Orchestrator;
+  adapters: Array<EchoAdapter | PiAdapter | A2AAdapter>;
+  a2aAdapter: A2AAdapter;
+};
+
+let runtime: CliRuntime | null = null;
+
+function createA2AAdapter(): A2AAdapter {
+  const a2aAdapter = new A2AAdapter();
+  if (a2aUrl) {
+    a2aAdapter.setDefaultEndpoint({
+      url: a2aUrl,
+      token: a2aToken,
+    });
+  }
+  return a2aAdapter;
 }
 
-const adapters = [
-  new EchoAdapter(),
-  new PiAdapter(),
-  a2aAdapter,
-];
-
-for (const adapter of adapters) {
-  orch.registerAdapter(adapter);
+function createAdapters(): { adapters: Array<EchoAdapter | PiAdapter | A2AAdapter>; a2aAdapter: A2AAdapter } {
+  const a2aAdapter = createA2AAdapter();
+  return {
+    a2aAdapter,
+    adapters: [
+      new EchoAdapter(),
+      new PiAdapter(),
+      a2aAdapter,
+    ],
+  };
 }
 
-if (dryRun) {
-  orch.setDefaultAdapter("echo");
-} else if (adapterName) {
-  orch.setDefaultAdapter(adapterName);
-} else {
+async function ensureRuntime(opts: { announceAdapter?: boolean } = {}): Promise<CliRuntime> {
+  if (runtime) return runtime;
+
+  const orch = new Orchestrator(dashboardUrl, apiToken);
+  const { adapters, a2aAdapter } = createAdapters();
+
   for (const adapter of adapters) {
-    if (adapter.name !== "echo" && adapter.name !== "a2a" && await adapter.isAvailable()) {
-      orch.setDefaultAdapter(adapter.name);
-      console.log(`[cli] Using adapter: ${adapter.name}`);
-      break;
+    orch.registerAdapter(adapter);
+  }
+
+  if (dryRun) {
+    orch.setDefaultAdapter("echo");
+  } else if (adapterName) {
+    orch.setDefaultAdapter(adapterName);
+  } else {
+    for (const adapter of adapters) {
+      if (adapter.name !== "echo" && adapter.name !== "a2a" && await adapter.isAvailable()) {
+        orch.setDefaultAdapter(adapter.name);
+        if (opts.announceAdapter) console.log(`[cli] Using adapter: ${adapter.name}`);
+        break;
+      }
     }
   }
+
+  runtime = { orch, adapters, a2aAdapter };
+  return runtime;
 }
 
 // Graceful shutdown handler
@@ -116,40 +254,44 @@ for (const sig of ["SIGTERM", "SIGINT"] as const) {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`\n[cli] Received ${sig}, shutting down gracefully...`);
-    orch.shutdown().then(() => process.exit(0)).catch(() => process.exit(1));
+    (runtime?.orch.shutdown() ?? Promise.resolve()).then(() => process.exit(0)).catch(() => process.exit(1));
     setTimeout(() => { console.error("[cli] Shutdown timed out, forcing exit"); process.exit(1); }, 10_000);
   });
 }
 
 switch (command) {
-  case "run": {
-    if (subHelp) showSubHelp(`
-mae run — Run a prompt workflow
+	  case "run": {
+	    if (subHelp) {
+	      const promptList = configuredPrompts();
+	      showSubHelp(`
+	mae run — Run a prompt workflow
 
-Usage: mae run <prompt-name> [args...]
+	Usage: mae run <prompt-name> [args...]
 
-Prompts:  ${(() => { try { return readdirSync(join(import.meta.dir, "..", "prompts")).filter((f: string) => f.endsWith(".md") && f !== "BASE.md").map((f: string) => f.replace(".md", "")).join(", "); } catch { return "plan-build-review, review, scout, swarm-review, ..."; }})()}
+	Prompts:  ${promptList.length > 0 ? promptList.join(", ") : "plan-build-review, review, scout, swarm-review, ..."}
 
-Options:
-  --adapter <name>     Use specific adapter (pi, a2a, echo)
+	Options:
+	  --adapter <name>     Use specific adapter (pi, a2a, echo)
   --dry-run            Use echo adapter for testing
   --cwd <path>         Working directory for agents
 
-Examples:
-  mae run plan-build-review "Add input validation to auth"
-  mae run review "git diff HEAD~1"
-  mae run swarm-review "Review engine/ for bugs"
-  mae run scout "engine/"
-`);
+	Examples:
+	  ${promptExample(["plan-build-review", "build", "review"], "Add input validation to auth", "plan-build-review")}
+	  ${promptExample(["review", "swarm-review", "plan-build-review"], "git diff HEAD~1", "review")}
+	  ${promptExample(["swarm-review", "review", "standard-swarm"], "Review engine/ for bugs", "swarm-review")}
+	  ${promptExample(["scout", "plan-build-review", "review"], "engine/", "scout")}
+	`);
+	    }
     const promptName = args[1];
-    if (!promptName) {
-      console.error("Usage: mae run <prompt-name> [args...]\nRun 'mae run --help' for available prompts.");
-      process.exit(1);
-    }
-    const promptArgs = stripFlags(args.slice(2));
-    const session = await orch.run({
-      prompt: promptName,
-      task: promptArgs.join(" "),
+	    if (!promptName) {
+	      console.error("Usage: mae run <prompt-name> [args...]\nRun 'mae run --help' for available prompts.");
+	      process.exit(1);
+	    }
+	    const promptArgs = stripFlags(args.slice(2));
+	    const { orch } = await ensureRuntime({ announceAdapter: true });
+	    const session = await orch.run({
+	      prompt: promptName,
+	      task: promptArgs.join(" "),
       args: promptArgs,
       adapter: dryRun ? "echo" : adapterName,
       workingDir,
@@ -176,21 +318,22 @@ Options:
   --dry-run            Use echo adapter for testing
   --cwd <path>         Working directory for agents
 
-Examples:
-  mae chain build-verify "Fix the login bug"
-  mae chain review-only "Review auth module"
-  mae chain plan-build-review "Add caching layer"
-`);
+	Examples:
+	  ${chainExample(["build-verify", "plan-build-review", "full-sdlc"], "Fix the login bug", "build-verify")}
+	  ${chainExample(["review-only", "standard-swarm", "swarm-review"], "Review auth module", "review-only")}
+	  ${chainExample(["plan-build-review", "build-verify", "full-sdlc"], "Add caching layer", "plan-build-review")}
+	`);
     }
     const chainName = args[1];
     const task = stripFlags(args.slice(2)).join(" ");
-    if (!chainName || !task) {
-      console.error("Usage: mae chain <chain-name> <task>\nRun 'mae chain --help' for available chains.");
-      process.exit(1);
-    }
-    const session = await orch.run({
-      chain: chainName,
-      task,
+	    if (!chainName || !task) {
+	      console.error("Usage: mae chain <chain-name> <task>\nRun 'mae chain --help' for available chains.");
+	      process.exit(1);
+	    }
+	    const { orch } = await ensureRuntime({ announceAdapter: true });
+	    const session = await orch.run({
+	      chain: chainName,
+	      task,
       adapter: dryRun ? "echo" : adapterName,
       workingDir,
     });
@@ -213,11 +356,11 @@ Options:
   --cwd <path>         Working directory for agents
 
 Examples:
-  mae task "Add rate limiting to API endpoints"
-  mae task "Fix the auth bug in login.ts"
-  mae task "Review auth module for security" --chain review-only
-  mae task "Add unit tests for budget module" --dry-run
-`);
+	  mae task "Add rate limiting to API endpoints"
+	  mae task "Fix the auth bug in login.ts"
+	  mae task "Review auth module for security" --chain ${pickConfigured(["review-only", "standard-swarm", "swarm-review"], configuredChains(), "review-only")}
+	  mae task "Add unit tests for budget module" --dry-run
+	`);
     const explicitChain = getFlag(args, "--chain");
     const task = stripFlags(args.slice(1)).join(" ");
     if (!task) {
@@ -235,12 +378,13 @@ Examples:
         console.log(`[cli] Suggested chain: ${result.chain} (confidence: ${result.confidence.toFixed(2)}) — ${result.reasoning}`);
         console.log(`[cli] Low confidence — using default: plan-build-review. Override with --chain <name>`);
         chainName = "plan-build-review";
-      }
-    }
+	      }
+	    }
 
-    const session = await orch.run({
-      chain: chainName,
-      task,
+	    const { orch } = await ensureRuntime({ announceAdapter: true });
+	    const session = await orch.run({
+	      chain: chainName,
+	      task,
       adapter: dryRun ? "echo" : adapterName,
       workingDir,
     });
@@ -250,11 +394,12 @@ Examples:
 
   case "discover": {
     const url = args[1];
-    if (!url) {
-      console.error("Usage: mae discover <url>");
-      process.exit(1);
-    }
-    const card = await a2aAdapter.discover(url, a2aToken);
+	    if (!url) {
+	      console.error("Usage: mae discover <url>");
+	      process.exit(1);
+	    }
+	    const a2aAdapter = createA2AAdapter();
+	    const card = await a2aAdapter.discover(url, a2aToken);
     if (card) {
       console.log(`\nDiscovered A2A agent:`);
       console.log(`  Name: ${card.name}`);
@@ -397,12 +542,20 @@ from an agent that deeply understands the code.
     break;
   }
 
-  case "design": {
-    if (subHelp) showSubHelp(`
-mae design — Design session or design review
+	  case "design": {
+	    if (subHelp) {
+	      const chains = configuredChains();
+	      const reviewExample = chains.includes("design-review")
+	        ? "mae design review ./my-app --ref screenshot.png --url https://example.com"
+	        : "mae design ./my-app --ref screenshot.png --url https://example.com";
+	      const buildExample = chains.includes("design-build")
+	        ? "mae design build ./dashboard-next --ref brand-guide.pdf"
+	        : "mae design ./dashboard-next --ref brand-guide.pdf";
+	      showSubHelp(`
+	mae design — Design session or design review
 
-Usage:
-  mae design <project-path>                  Start interactive design session
+	Usage:
+	  mae design <project-path>                  Start interactive design session
   mae design review <project-path>           Run design-review chain
   mae design build <project-path>            Run design-build chain (design → implement → validate)
 
@@ -415,11 +568,12 @@ Options:
   --dry-run            Use echo adapter for testing
   --cwd <path>         Working directory for agents
 
-Examples:
-  mae design ./my-app
-  mae design review ./my-app --ref screenshot.png --url https://example.com
-  mae design build ./dashboard-next --ref brand-guide.pdf
-`);
+	Examples:
+	  mae design ./my-app
+	  ${reviewExample}
+	  ${buildExample}
+	`);
+	    }
     const sub = args[1]?.startsWith("--") ? undefined : args[1];
     const isReview = sub === "review";
     const isBuild = sub === "build";
@@ -452,23 +606,25 @@ Examples:
       ? `\n\nDesign References:\n${refs.map(r => `--- ${r.source}: ${r.name} ---\n${r.content}`).join("\n\n")}`
       : "";
 
-    try {
-      if (isReview || isBuild) {
-        const chainName = isBuild ? "design-build" : "design-review";
-        const task = `Review and improve the UI design of the project at ${projectPath}. Output design variants as self-contained HTML files to ${outputDir}/${referenceContext}`;
-        const session = await orch.run({
-          chain: chainName,
-          task,
+	    try {
+	      if (isReview || isBuild) {
+	        const chainName = isBuild ? "design-build" : "design-review";
+	        const task = `Review and improve the UI design of the project at ${projectPath}. Output design variants as self-contained HTML files to ${outputDir}/${referenceContext}`;
+	        const { orch } = await ensureRuntime({ announceAdapter: true });
+	        const session = await orch.run({
+	          chain: chainName,
+	          task,
           adapter: dryRun ? "echo" : adapterName,
           workingDir: projectPath,
         });
         console.log(`\nSession ${session.id} ${session.status}. Cost: $${session.totalCost.toFixed(3)}`);
-        console.log(`Gallery: ${gallery.url}`);
-      } else {
-        const task = `Design session for the project at ${projectPath}. Analyze the existing UI, create design variants as self-contained HTML files in ${outputDir}. Focus on visual quality, consistency, and accessibility.${referenceContext}`;
-        const session = await orch.run({
-          prompt: "plan-build-review",
-          task,
+	        console.log(`Gallery: ${gallery.url}`);
+	      } else {
+	        const task = `Design session for the project at ${projectPath}. Analyze the existing UI, create design variants as self-contained HTML files in ${outputDir}. Focus on visual quality, consistency, and accessibility.${referenceContext}`;
+	        const { orch } = await ensureRuntime({ announceAdapter: true });
+	        const session = await orch.run({
+	          prompt: "plan-build-review",
+	          task,
           adapter: dryRun ? "echo" : adapterName,
           workingDir: projectPath,
         });
@@ -486,9 +642,10 @@ Examples:
     let maeVersion = "unknown";
     try { maeVersion = readFile(versionFile, "utf-8").trim(); } catch {}
 
-    const bunVersion = typeof Bun !== "undefined" ? Bun.version : "unknown";
-    const chainsFile = loadChains();
-    const chainCount = Object.keys(chainsFile.chains).length;
+	    const bunVersion = typeof Bun !== "undefined" ? Bun.version : "unknown";
+	    const chainsFile = loadChains();
+	    const chainCount = Object.keys(chainsFile.chains).length;
+	    const { adapters } = createAdapters();
 
     console.log(`
 MAE v${maeVersion}
@@ -524,13 +681,14 @@ Chains:    ${chainCount} configured
     }
     console.log(`  Total: ${Object.keys(chainsData.chains).length} chains`);
 
-    // --- Adapters ---
-    console.log(`\n${"─".repeat(50)}`);
-    console.log("  ADAPTERS");
-    console.log(`${"─".repeat(50)}`);
-    for (const adapter of adapters) {
-      const available = await adapter.isAvailable();
-      console.log(`  ${available ? "✓" : "✗"} ${adapter.name.padEnd(20)} ${available ? "available" : "not available"}`);
+	    // --- Adapters ---
+	    console.log(`\n${"─".repeat(50)}`);
+	    console.log("  ADAPTERS");
+	    console.log(`${"─".repeat(50)}`);
+	    const { adapters } = createAdapters();
+	    for (const adapter of adapters) {
+	      const available = await adapter.isAvailable();
+	      console.log(`  ${available ? "✓" : "✗"} ${adapter.name.padEnd(20)} ${available ? "available" : "not available"}`);
     }
 
     // --- Model Routing ---
@@ -582,11 +740,12 @@ Chains:    ${chainCount} configured
     break;
   }
 
-  case "adapters": {
-    console.log("\nAvailable adapters:");
-    for (const adapter of adapters) {
-      const available = await adapter.isAvailable();
-      console.log(`  ${available ? "✓" : "✗"} ${adapter.name}${available ? "" : " (not installed/configured)"}`);
+	  case "adapters": {
+	    console.log("\nAvailable adapters:");
+	    const { adapters } = createAdapters();
+	    for (const adapter of adapters) {
+	      const available = await adapter.isAvailable();
+	      console.log(`  ${available ? "✓" : "✗"} ${adapter.name}${available ? "" : " (not installed/configured)"}`);
     }
     break;
   }
@@ -623,8 +782,55 @@ Interactive TUI menus:
   }
 
   case "tui":
-    await configInteractive();
+    if (subHelp) showSubHelp(`
+mae tui — Full interactive launcher
+
+Usage:
+  mae tui
+
+Use arrow-key menus to run work, operate sessions, inspect traces,
+build agent assets, and configure or diagnose the engine.
+`);
+    await runFullTui();
     break;
+
+  case "validate-chain": {
+    if (subHelp) {
+      const chainsFile = loadChains();
+      const chainList = Object.entries(chainsFile.chains).map(([name, c]) =>
+        `  ${name.padEnd(22)} ${(c.steps?.length ?? (c.parallel?.length ? 1 : 0) + (c.then?.length ?? 0))} steps  ${c.description}`).join("\n");
+      showSubHelp(`
+mae validate-chain — Preview configured chain execution without spawning agents
+
+Usage:
+  mae validate-chain <chain-name> [goal]
+  mae validate-chain "goal text"
+  mae validate-chain <chain-name> --json
+
+Chains:
+${chainList}
+
+Examples:
+  ${chainExample(["standard-swarm", "swarm-review", "review-only"], "Find RC1 holes in the dashboard", "standard-swarm").replace("mae chain", "mae validate-chain").replace(/ ".*"$/, "")}
+  mae validate-chain "Design dashboard UI review"
+  ${chainExample(["plan-build-review", "build-verify", "full-sdlc"], "Add cost summary to session detail", "plan-build-review").replace("mae chain", "mae validate-chain")}
+
+This reads YAML/persona config only. It does not start adapters, burn model tokens, or write traces.
+`);
+    }
+    try {
+      const positional = args.slice(1).filter((arg) => arg !== "--json");
+      const input = resolveValidateChainInput(positional);
+      const report = buildChainValidationReport(input.chainName, input.goal);
+      report.suggestedChain = input.suggestedChain;
+      if (args.includes("--json")) console.log(JSON.stringify(report, null, 2));
+      else console.log(formatChainValidationReport(report));
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+    break;
+  }
 
   case "traces": {
     if (subHelp) showSubHelp(`
@@ -855,13 +1061,14 @@ Options:
       }
 
       console.log(`\nReplaying session ${replayId}`);
-      console.log(`Goal: ${oldTrace.goal}`);
-      console.log(`Chain: ${oldTrace.chain || "plan-build-review"}`);
-      console.log(`Running...\n`);
+	      console.log(`Goal: ${oldTrace.goal}`);
+	      console.log(`Chain: ${oldTrace.chain || "plan-build-review"}`);
+	      console.log(`Running...\n`);
 
-      const newSession = await orch.run({
-        chain: oldTrace.chain || undefined,
-        task: oldTrace.goal,
+	      const { orch } = await ensureRuntime({ announceAdapter: true });
+	      const newSession = await orch.run({
+	        chain: oldTrace.chain || undefined,
+	        task: oldTrace.goal,
         adapter: dryRun ? "echo" : adapterName,
         workingDir,
         sessionName: `replay:${replayId.slice(0, 8)}`,
@@ -1026,10 +1233,549 @@ Accepted mutations are git-committed for easy rollback.
     break;
   }
 
+  case "health": {
+    if (subHelp) showSubHelp(`
+mae health — Engine health check
+
+Usage:
+  mae health           Human-readable health report
+  mae health --json    Machine-readable JSON output
+
+Probes: adapters, traces, dashboard, langfuse
+`);
+	    const versionFile = join(BASE_DIR, "VERSION");
+	    let ver = "unknown";
+	    try { ver = readFile(versionFile, "utf-8").trim(); } catch {}
+	    const { adapters } = createAdapters();
+	    const report = await runHealthCheck(adapters, dashboardUrl, ver);
+    if (args.includes("--json")) {
+      console.log(JSON.stringify(report, null, 2));
+    } else {
+      process.stdout.write(formatHealthReport(report));
+    }
+    process.exit(report.status === "unhealthy" ? 1 : 0);
+  }
+
   default:
     console.error(`Unknown command: ${command}`);
-    console.error(`Valid commands: run, chain, task, design, session, config, new-team, new-agent, learn, expert, validate-agent, discover, traces, score, compare, replay, golden, ralph, update, info, version, adapters, tui`);
+    console.error("Valid commands by group:");
+    console.error("  Run:        task, chain, run");
+    console.error("  Operate:    session, design");
+    console.error("  Inspect:    traces, score, compare, replay, validate-chain, golden");
+    console.error("  Build:      new-team, new-agent, learn, expert, validate-agent, ralph");
+    console.error("  Configure:  config, tui, health, info, adapters, discover, version, update");
+    console.error("Run 'mae --help' for examples.");
     process.exit(1);
+}
+
+type TuiSession = {
+  id: string;
+  name?: string;
+  status: string;
+  started_at?: string;
+  created_at?: string;
+  total_cost?: number;
+  agents?: Record<string, unknown>;
+};
+
+async function runFullTui(): Promise<void> {
+  p.intro("MAE TUI");
+  try {
+    while (true) {
+      const section = await p.select({
+        message: "What do you want to do?",
+        options: [
+          { value: "run", label: "Run work", hint: "task, chain, prompt workflow" },
+          { value: "operate", label: "Operate runs", hint: "list, steer, pause, resume, stop, close" },
+          { value: "inspect", label: "Inspect and verify", hint: "traces, score, compare, validate chain" },
+          { value: "build", label: "Build the agent system", hint: "teams, personas, expertise, Ralph" },
+          { value: "config", label: "Configure and diagnose", hint: "config, health, adapters" },
+          { value: "quit", label: "Quit" },
+        ],
+      });
+      if (p.isCancel(section) || section === "quit") break;
+
+      switch (section) {
+        case "run": await tuiRunWork(); break;
+        case "operate": await tuiOperateRuns(); break;
+        case "inspect": await tuiInspect(); break;
+        case "build": await tuiBuildSystem(); break;
+        case "config": await tuiConfigure(); break;
+      }
+    }
+  } finally {
+    p.outro("Done.");
+  }
+}
+
+function tuiHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiToken) headers["Authorization"] = `Bearer ${apiToken}`;
+  return headers;
+}
+
+function asString(value: string | symbol, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+async function tuiText(message: string, opts?: { placeholder?: string; defaultValue?: string; required?: boolean }): Promise<string | null> {
+  const value = await p.text({
+    message,
+    placeholder: opts?.placeholder,
+    defaultValue: opts?.defaultValue,
+    validate: opts?.required ? v => {
+      if (!String(v ?? "").trim()) return "Required";
+    } : undefined,
+  });
+  if (p.isCancel(value)) return null;
+  return String(value).trim();
+}
+
+async function tuiConfirm(message: string, initialValue = true): Promise<boolean> {
+  const ok = await p.confirm({ message, initialValue });
+  return !p.isCancel(ok) && Boolean(ok);
+}
+
+async function tuiPickAdapter(): Promise<string | undefined | null> {
+  const adapter = await p.select({
+    message: "Adapter",
+    options: [
+      { value: "", label: "Default", hint: dryRun ? "current CLI dry-run echo" : "current CLI/default adapter" },
+      { value: "echo", label: "echo", hint: "local dry run" },
+      { value: "pi", label: "pi", hint: "Pi/Codex adapter" },
+      { value: "a2a", label: "a2a", hint: "remote A2A adapter" },
+    ],
+  });
+  if (p.isCancel(adapter)) return null;
+  return asString(adapter) || undefined;
+}
+
+async function tuiPickWorkingDir(): Promise<string | null> {
+  const cwd = await tuiText("Working directory", { defaultValue: workingDir, required: true });
+  return cwd ? resolve(cwd) : null;
+}
+
+async function tuiRunWork(): Promise<void> {
+  const mode = await p.select({
+    message: "Run work",
+    options: [
+      { value: "task", label: "Auto-classified task", hint: "mae task \"...\"" },
+      { value: "chain", label: "Named chain", hint: "mae chain standard-swarm \"...\"" },
+      { value: "prompt", label: "Prompt workflow", hint: "mae run review \"...\"" },
+    ],
+  });
+  if (p.isCancel(mode)) return;
+
+  const adapter = await tuiPickAdapter();
+  if (adapter === null) return;
+  const cwd = await tuiPickWorkingDir();
+  if (!cwd) return;
+
+  if (mode === "task") {
+    const task = await tuiText("Task", { placeholder: "Fix the login redirect bug", required: true });
+    if (!task) return;
+    const result = await classifyGoal(task);
+    const chainName = result.confidence >= 0.8 ? result.chain : "plan-build-review";
+    const prefix = result.confidence >= 0.8 ? "Auto-selected" : "Low confidence, using";
+    p.log.info(`${prefix} ${chainName} (${result.confidence.toFixed(2)}): ${result.reasoning}`);
+    await tuiRunSession({ chain: chainName, task, adapter, workingDir: cwd });
+    return;
+  }
+
+  if (mode === "chain") {
+    const chainsFile = loadChains();
+    const chain = await p.select({
+      message: "Chain",
+      options: Object.entries(chainsFile.chains).map(([name, c]) => ({
+        value: name,
+        label: name,
+        hint: `${c.steps?.length ?? 0} steps - ${c.description ?? ""}`,
+      })),
+    });
+    if (p.isCancel(chain)) return;
+    const task = await tuiText("Task", { placeholder: "Find RC1 holes in the dashboard", required: true });
+    if (!task) return;
+    await tuiRunSession({ chain: asString(chain), task, adapter, workingDir: cwd });
+    return;
+  }
+
+  const promptNames = (() => {
+    try {
+      return readdirSync(join(import.meta.dir, "..", "prompts"))
+        .filter((f: string) => f.endsWith(".md") && f !== "BASE.md")
+        .map((f: string) => f.replace(".md", ""))
+        .sort();
+    } catch {
+      return ["plan-build-review", "review", "scout", "swarm-review"];
+    }
+  })();
+  const prompt = await p.select({
+    message: "Prompt workflow",
+    options: promptNames.map(name => ({ value: name, label: name })),
+  });
+  if (p.isCancel(prompt)) return;
+  const task = await tuiText("Prompt args/task", { placeholder: "Review engine/ for bugs", required: true });
+  if (!task) return;
+  await tuiRunSession({ prompt: asString(prompt), task, args: task.split(/\s+/), adapter, workingDir: cwd });
+}
+
+async function tuiRunSession(opts: { chain?: string; prompt?: string; task: string; args?: string[]; adapter?: string; workingDir: string }): Promise<void> {
+	  const s = p.spinner();
+	  s.start("Running session");
+	  try {
+	    const { orch } = await ensureRuntime();
+	    const session = await orch.run({
+	      chain: opts.chain,
+	      prompt: opts.prompt,
+      task: opts.task,
+      args: opts.args,
+      adapter: opts.adapter ?? (dryRun ? "echo" : adapterName),
+      workingDir: opts.workingDir,
+    });
+    s.stop("Session finished");
+    p.note(`ID: ${session.id}\nStatus: ${session.status}\nCost: $${session.totalCost.toFixed(3)}`, "Session result");
+  } catch (err) {
+    s.stop("Session failed");
+    p.log.error(err instanceof Error ? err.message : String(err));
+  }
+}
+
+async function fetchDashboardSessions(): Promise<TuiSession[]> {
+  const resp = await fetch(`${dashboardUrl}/api/sessions`, { headers: tuiHeaders() });
+  if (!resp.ok) throw new Error(`Dashboard error: ${resp.status} ${await resp.text().catch(() => "")}`);
+  const sessions = await resp.json() as TuiSession[];
+  return sessions.sort((a, b) => (b.started_at ?? b.created_at ?? "").localeCompare(a.started_at ?? a.created_at ?? ""));
+}
+
+function formatTuiSession(s: TuiSession): string {
+  const cost = typeof s.total_cost === "number" ? `$${s.total_cost.toFixed(3)}` : "$0.000";
+  const agents = Object.keys(s.agents ?? {}).length;
+  return `${s.id.slice(0, 12).padEnd(12)}  ${s.status.padEnd(10)}  ${String(agents).padStart(2)} agents  ${cost.padStart(8)}  ${(s.name ?? "").slice(0, 70)}`;
+}
+
+async function pickDashboardSession(message = "Session"): Promise<TuiSession | null> {
+  let sessions: TuiSession[];
+  try {
+    sessions = await fetchDashboardSessions();
+  } catch (err) {
+    p.log.error(err instanceof Error ? err.message : String(err));
+    return null;
+  }
+  if (sessions.length === 0) {
+    p.log.warn("No dashboard sessions found.");
+    return null;
+  }
+  const selected = await p.select({
+    message,
+    options: sessions.slice(0, 50).map(s => ({
+      value: s.id,
+      label: `${s.id.slice(0, 12)} ${s.status} ${(s.name ?? "").slice(0, 48)}`,
+      hint: typeof s.total_cost === "number" ? `$${s.total_cost.toFixed(3)}` : undefined,
+    })),
+  });
+  if (p.isCancel(selected)) return null;
+  return sessions.find(s => s.id === selected) ?? null;
+}
+
+async function tuiOperateRuns(): Promise<void> {
+  const action = await p.select({
+    message: "Operate runs",
+    options: [
+      { value: "list", label: "List sessions" },
+      { value: "steer", label: "Send steer message" },
+      { value: "pause", label: "Pause session" },
+      { value: "resume", label: "Resume session" },
+      { value: "stop", label: "Stop session" },
+      { value: "close", label: "Close session status" },
+    ],
+  });
+  if (p.isCancel(action)) return;
+
+  if (action === "list") {
+    try {
+      const sessions = await fetchDashboardSessions();
+      p.note(sessions.slice(0, 20).map(formatTuiSession).join("\n") || "No sessions.", `Sessions (${sessions.length})`);
+    } catch (err) {
+      p.log.error(err instanceof Error ? err.message : String(err));
+    }
+    return;
+  }
+
+  const session = await pickDashboardSession();
+  if (!session) return;
+
+  if (action === "close") {
+    const status = await p.select({
+      message: "Close as",
+      options: [
+        { value: "completed", label: "completed" },
+        { value: "error", label: "error" },
+      ],
+    });
+    if (p.isCancel(status)) return;
+    const ok = await tuiConfirm(`Set ${session.id.slice(0, 12)} to ${status}?`);
+    if (!ok) return;
+    const resp = await fetch(`${dashboardUrl}/api/sessions/${session.id}/status`, {
+      method: "PATCH",
+      headers: tuiHeaders(),
+      body: JSON.stringify({ status }),
+    });
+    if (!resp.ok) p.log.error(`Failed: ${resp.status} ${await resp.text().catch(() => "")}`);
+    else p.log.success(`Session ${session.id.slice(0, 12)} -> ${status}`);
+    return;
+  }
+
+  const content = action === "steer"
+    ? await tuiText("Steer message", { placeholder: "Focus on the orchestrator ACK path first", required: true })
+    : `!${action}`;
+  if (!content) return;
+  const body = new URLSearchParams({
+    content,
+    message_id: `tui-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+  });
+  const resp = await fetch(`${dashboardUrl}/api/sessions/${session.id}/message`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}) },
+    body,
+  });
+  if (!resp.ok) p.log.error(`Failed: ${resp.status} ${await resp.text().catch(() => "")}`);
+  else {
+    const data = await resp.json().catch(() => ({})) as { message_id?: string };
+    p.log.success(`Sent to ${session.id.slice(0, 12)}${data.message_id ? ` (${data.message_id})` : ""}`);
+  }
+}
+
+function recentTraceFiles(limit = 20): string[] {
+  if (!existsSync(TRACE_DIR)) return [];
+  return readdirSync(TRACE_DIR)
+    .filter((f: string) => f.endsWith(".jsonl"))
+    .map((f: string) => ({ name: f.replace(".jsonl", ""), mtime: statSync(join(TRACE_DIR, f)).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime)
+    .slice(0, limit)
+    .map(f => f.name);
+}
+
+async function pickTraceId(message = "Trace"): Promise<string | null> {
+  const files = recentTraceFiles();
+  if (files.length === 0) return await tuiText(`${message} ID`, { required: true });
+  const trace = await p.select({
+    message,
+    options: [
+      ...files.map(id => ({ value: id, label: id })),
+      { value: "__manual", label: "Enter another ID" },
+    ],
+  });
+  if (p.isCancel(trace)) return null;
+  if (trace === "__manual") return await tuiText(`${message} ID`, { required: true });
+  return asString(trace);
+}
+
+function summarizeTrace(traceId: string): string {
+  const trace = loadTrace(traceId);
+  const typeCounts: Record<string, number> = {};
+  let totalCost = 0;
+  for (const evt of trace.events) {
+    typeCounts[evt.type] = (typeCounts[evt.type] ?? 0) + 1;
+    if ((evt as any).total_cost !== undefined) totalCost = (evt as any).total_cost;
+    if ((evt as any).cost !== undefined) totalCost += (evt as any).cost;
+  }
+  const breakdown = Object.entries(typeCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12)
+    .map(([type, count]) => `  ${type.padEnd(24)} ${count}`)
+    .join("\n");
+  return `Goal: ${trace.goal ?? "(no goal)"}\nEvents: ${trace.events.length}\nCost: $${totalCost.toFixed(3)}\n\n${breakdown}`;
+}
+
+async function tuiInspect(): Promise<void> {
+  const action = await p.select({
+    message: "Inspect and verify",
+    options: [
+      { value: "list", label: "List recent traces" },
+      { value: "trace", label: "Inspect a trace" },
+      { value: "score", label: "Score a trace" },
+      { value: "compare", label: "Compare two traces" },
+      { value: "validate-chain", label: "Validate a configured chain" },
+      { value: "golden", label: "List golden traces" },
+    ],
+  });
+  if (p.isCancel(action)) return;
+
+  try {
+    if (action === "list") {
+      const files = recentTraceFiles(15);
+      p.note(files.join("\n") || `No traces found in ${TRACE_DIR}`, `Recent traces (${TRACE_DIR})`);
+    } else if (action === "trace") {
+      const id = await pickTraceId();
+      if (id) p.note(summarizeTrace(id), `Trace ${id}`);
+    } else if (action === "score") {
+      const id = await pickTraceId();
+      if (!id) return;
+      const result = scoreSession(loadTrace(id));
+      const checks = result.checks.map(c => `${c.pass ? "PASS" : "FAIL"}  ${c.name}${c.details ? ` - ${c.details}` : ""}`).join("\n");
+      p.note(`Overall: ${result.overall.toUpperCase()}\n\n${checks}`, `Score ${id}`);
+    } else if (action === "compare") {
+      const id1 = await pickTraceId("First trace");
+      const id2 = await pickTraceId("Second trace");
+      if (!id1 || !id2) return;
+      const result = compareFingerprints(extractFingerprint(loadTrace(id1)), extractFingerprint(loadTrace(id2)));
+      p.note(`Similarity: ${(result.similarity * 100).toFixed(1)}%\n\n${result.diffs.join("\n") || "No differences found."}`, "Trace comparison");
+    } else if (action === "validate-chain") {
+      await tuiValidateChain();
+    } else {
+      const entries = getGoldenTraces();
+      p.note(entries.map(e => `${e.sessionId.slice(0, 12)}  ${e.verdict}  ${e.goal ?? ""}`).join("\n") || "No golden traces registered.", "Golden traces");
+    }
+  } catch (err) {
+    p.log.error(err instanceof Error ? err.message : String(err));
+  }
+}
+
+async function tuiValidateChain(): Promise<void> {
+  const mode = await p.select({
+    message: "Validate chain",
+    options: [
+      { value: "chain", label: "Pick configured chain" },
+      { value: "goal", label: "Suggest from goal text" },
+    ],
+  });
+  if (p.isCancel(mode)) return;
+
+  try {
+    if (mode === "chain") {
+      const chainsFile = loadChains();
+      const selected = await p.select({
+        message: "Chain",
+        options: Object.entries(chainsFile.chains).map(([name, c]) => ({
+          value: name,
+          label: name,
+          hint: c.description,
+        })),
+      });
+      if (p.isCancel(selected)) return;
+      const goal = await tuiText("Optional goal/context", { placeholder: "Find RC1 holes in the dashboard" });
+      const report = buildChainValidationReport(asString(selected), goal || undefined);
+      p.note(formatChainValidationReport(report), `Chain ${asString(selected)}`);
+      return;
+    }
+
+    const goal = await tuiText("Goal text", { placeholder: "Design dashboard UI review", required: true });
+    if (!goal) return;
+    const input = resolveValidateChainInput([goal]);
+    const report = buildChainValidationReport(input.chainName, input.goal);
+    report.suggestedChain = input.suggestedChain;
+    p.note(formatChainValidationReport(report), `Suggested ${input.chainName}`);
+  } catch (err) {
+    p.log.error(err instanceof Error ? err.message : String(err));
+  }
+}
+
+async function tuiBuildSystem(): Promise<void> {
+  const action = await p.select({
+    message: "Build the agent system",
+    options: [
+      { value: "new-team", label: "Create a new team" },
+      { value: "new-agent", label: "Scaffold a new agent" },
+      { value: "learn", label: "Build expertise from sources" },
+      { value: "expert", label: "Open expert session" },
+      { value: "validate", label: "Validate an agent" },
+      { value: "ralph", label: "Run Ralph dry-run" },
+    ],
+  });
+  if (p.isCancel(action)) return;
+
+  switch (action) {
+    case "new-team":
+      await teamWizard([]);
+      return;
+    case "new-agent": {
+      const name = await tuiText("Agent name", { placeholder: "API Reviewer", required: true });
+      if (!name) return;
+      const role = await p.select({
+        message: "Role",
+        options: [
+          { value: "worker", label: "worker" },
+          { value: "lead", label: "lead" },
+          { value: "orchestrator", label: "orchestrator" },
+        ],
+      });
+      if (p.isCancel(role)) return;
+      const team = await tuiText("Team", { defaultValue: "Engineering", required: true });
+      if (!team) return;
+      const model = await tuiText("Model alias/tier", { defaultValue: role === "worker" ? "main" : "quality", required: true });
+      if (!model) return;
+      await scaffoldAgent([name, asString(role), team, model]);
+      return;
+    }
+    case "learn": {
+      const source = await tuiText("Source path or URL", { defaultValue: "./engine", required: true });
+      const agent = await tuiText("Agent slug", { placeholder: "api-reviewer", required: true });
+      if (source && agent) await expertiseLearn(["--from", source, "--agent", agent]);
+      return;
+    }
+    case "expert": {
+      const target = await tuiText("Project path", { defaultValue: "./engine", required: true });
+      if (!target) return;
+      const agent = await tuiText("Agent slug (optional)", { placeholder: "api-reviewer" });
+      await expertSession(agent ? [target, "--agent", agent] : [target]);
+      return;
+    }
+    case "validate": {
+      const agent = await tuiText("Agent slug", { placeholder: "api-reviewer", required: true });
+      if (agent) await expertiseValidate([agent]);
+      return;
+    }
+    case "ralph": {
+      const iterations = await tuiText("Iterations", { defaultValue: "3", required: true });
+      if (!iterations) return;
+      const result = await runRalphLoop({ maxIterations: parseInt(iterations, 10), model: "quality", dryRun: true });
+      p.note(`Iterations: ${result.iterations}\nAccepted: ${result.accepted}\nRejected: ${result.rejected}\nMutations: ${result.mutations.length}`, "Ralph dry-run");
+      return;
+    }
+  }
+}
+
+async function tuiConfigure(): Promise<void> {
+  const action = await p.select({
+    message: "Configure and diagnose",
+    options: [
+      { value: "config", label: "Open config TUI" },
+      { value: "show", label: "Show config summary" },
+      { value: "discover", label: "Discover/probe models" },
+      { value: "health", label: "Run health check" },
+      { value: "adapters", label: "List adapters" },
+      { value: "version", label: "Show version" },
+    ],
+  });
+  if (p.isCancel(action)) return;
+
+  if (action === "config") {
+    await configInteractive();
+  } else if (action === "show") {
+    await configShow();
+  } else if (action === "discover") {
+    await configDiscover();
+	  } else if (action === "health") {
+	    const versionFile = join(BASE_DIR, "VERSION");
+	    let ver = "unknown";
+	    try { ver = readFile(versionFile, "utf-8").trim(); } catch {}
+	    const { adapters } = createAdapters();
+	    const report = await runHealthCheck(adapters, dashboardUrl, ver);
+	    p.note(formatHealthReport(report), "Health");
+	  } else if (action === "adapters") {
+	    const rows: string[] = [];
+	    const { adapters } = createAdapters();
+	    for (const adapter of adapters) {
+      const available = await adapter.isAvailable();
+      rows.push(`${available ? "OK " : "NO "} ${adapter.name}`);
+    }
+    p.note(rows.join("\n"), "Adapters");
+  } else if (action === "version") {
+    const versionFile = join(BASE_DIR, "VERSION");
+    let ver = "unknown";
+    try { ver = readFile(versionFile, "utf-8").trim(); } catch {}
+    p.note(`MAE v${ver}\nBun v${typeof Bun !== "undefined" ? Bun.version : "unknown"}\nDashboard: ${dashboardUrl}`, "Version");
+  }
 }
 
 async function scaffoldAgent(args: string[]) {

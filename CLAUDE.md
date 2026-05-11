@@ -32,6 +32,7 @@ multi-agent-engine/
     cli.ts           # CLI entry point — all mae commands
     orchestrator.ts  # Session lifecycle, adapter management, steer commands
     chain-runner.ts  # Chain execution loop, till_done verification
+    chain-validator.ts # Config-only chain preview, agent spawn and cost estimate
     team-execution.ts  # Decomposed team execution (7 exported sub-functions)
     worker-lifecycle.ts # Worker retry, Sr. agent spawning, lead review
     session-state.ts # Centralized status transition state machine
@@ -49,6 +50,8 @@ multi-agent-engine/
     budget.ts        # Budget enforcement with safe defaults on failure
     security.ts      # Input sanitization + URL validation (42 lines, no dead code)
     event-emitter.ts # Dashboard event system with HTTP retry + circuit breaker
+    health.ts        # Health check — adapter, trace, dashboard, Langfuse probes
+    tui-harness.ts   # tmux-backed CLI/TUI smoke test harness
     adapters/        # Platform adapters (pi, a2a, echo)
   specs/
     trace-schema.md  # JSONL trace schema — contract for Ralph loop
@@ -69,6 +72,7 @@ multi-agent-engine/
 | `mae score <id>` | Score a session with deterministic checks |
 | `mae compare <id1> <id2>` | Compare two session fingerprints |
 | `mae replay <id>` | Re-run a session's goal and compare |
+| `mae validate-chain <chain-or-goal>` | Preview configured chain teams, agents, checks, and cost |
 | `mae golden add <id>` | Mark a trace as golden reference |
 | `mae golden list` | List golden traces |
 | `mae ralph` | Run self-improvement loop (default 5 iterations) |
@@ -82,6 +86,8 @@ multi-agent-engine/
 | `mae learn --from <path>` | Build agent expertise from codebase |
 | `mae validate-agent <name>` | Test and grade agent quality |
 | `mae expert <path>` | Interactive expert REPL |
+| `mae health` | Engine health check (adapters, traces, dashboard, Langfuse) |
+| `mae health --json` | Machine-readable JSON health output |
 
 ## Observability Stack
 
@@ -121,6 +127,7 @@ No agent modifies its own config. Run `mae ralph` overnight.
 
 - `engine/orchestrator.ts` — session lifecycle, adapter management, steer commands
 - `engine/chain-runner.ts` — chain execution loop, till_done verification
+- `engine/chain-validator.ts` — config-only chain previews for teams, agents, checks, and cost
 - `engine/team-execution.ts` — decomposed into 7 sub-functions (prepareTeamStep → buildTeamResult)
 - `engine/session-state.ts` — centralized status transitions (active → paused → completed/error)
 - `engine/logger.ts` — all logging goes through this, no raw console.log
@@ -131,7 +138,7 @@ No agent modifies its own config. Run `mae ralph` overnight.
 
 ## Testing
 
-423 tests across 29 files. Run with `bun test` or `just test`.
+Run with `bun test` or `just test`. Tmux smoke coverage is opt-in with `MAE_RUN_TMUX_TESTS=1 bun test engine/tui-harness.test.ts`.
 
 Critical modules tested: team-execution (18), event-emitter (13), session-state (13), worker-lifecycle (6), replay (17), ralph-loop (25), logger (13), goal-classifier (8).
 
