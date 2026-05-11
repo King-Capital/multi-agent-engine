@@ -9,7 +9,7 @@ import type {
   Chain,
 } from "./types";
 import type { EventEmitter } from "./event-emitter";
-import type { BudgetState } from "./budget";
+import { checkBudget, type BudgetState } from "./budget";
 import { loadTeams, loadPersona, resolveModelForRole, buildSystemPrompt, getChain } from "./config";
 import { sanitizeAgentInput } from "./security";
 import { createLogger } from "./logger";
@@ -84,6 +84,9 @@ export class OrchestratorLoop {
   private orchThinking: ThinkingLevel = "medium";
   private orchSystemPrompt: string = ORCHESTRATOR_REASONING_PROMPT;
   private cachedChain: Chain | null = null;
+  private totalCostUsd = 0;
+  private totalTokensUsed = 0;
+  private idleWaiters: Array<() => void> = [];
 
   constructor(opts: OrchestratorLoopOpts) {
     this.opts = opts;
@@ -144,6 +147,26 @@ export class OrchestratorLoop {
       this.timer = null;
       log.info("Stopped", { session_id: this.opts.session.id });
     }
+  }
+
+  async stopAndDrain(timeoutMs = 5_000): Promise<{ costUsd: number; tokensUsed: number }> {
+    this.stop();
+    if (!this.cycleInFlight) {
+      return this.getCostSummary();
+    }
+
+    await Promise.race([
+      new Promise<void>((resolve) => this.idleWaiters.push(resolve)),
+      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
+    return this.getCostSummary();
+  }
+
+  getCostSummary(): { costUsd: number; tokensUsed: number } {
+    return {
+      costUsd: this.totalCostUsd,
+      tokensUsed: this.totalTokensUsed,
+    };
   }
 
   trigger(reason: OrchestratorTrigger, context?: Record<string, unknown>): void {
@@ -221,8 +244,12 @@ export class OrchestratorLoop {
 
       await this.emitSessionState(assessment);
 
+      checkBudget(this.opts.budgetState, this.opts.session, "orch-1", result.costUsd, result.tokensUsed, this.opts.emitter);
       this.opts.session.totalCost += result.costUsd;
       this.opts.session.totalTokens += result.tokensUsed;
+      this.totalCostUsd += result.costUsd;
+      this.totalTokensUsed += result.tokensUsed;
+      await this.opts.emitter.costUpdate(this.opts.session.id, "orch-1", this.totalCostUsd, this.totalTokensUsed, 0);
 
       log.info("Cycle complete", {
         trigger,
@@ -234,6 +261,8 @@ export class OrchestratorLoop {
       log.error("Cycle failed", { trigger, error: String(err), session_id: this.opts.session.id });
     } finally {
       this.cycleInFlight = false;
+      const waiters = this.idleWaiters.splice(0);
+      for (const resolve of waiters) resolve();
     }
   }
 

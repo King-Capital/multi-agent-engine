@@ -11,13 +11,14 @@ function createSpy() {
   return { fn, calls };
 }
 
-function mockAdapter(output: string): PlatformAdapter & { delegateCalls: DelegateOptions[] } {
+function mockAdapter(output: string, delayMs = 0): PlatformAdapter & { delegateCalls: DelegateOptions[] } {
   const delegateCalls: DelegateOptions[] = [];
   return {
     name: "mock",
     delegateCalls,
     async delegate(opts: DelegateOptions) {
       delegateCalls.push(opts);
+      if (delayMs > 0) await Bun.sleep(delayMs);
       return { agentId: "orch-loop", agentName: "Orchestrator", output, costUsd: 0.01, tokensUsed: 100, grade: "VERIFIED" as const };
     },
     async isAvailable() { return true; },
@@ -27,11 +28,14 @@ function mockAdapter(output: string): PlatformAdapter & { delegateCalls: Delegat
 function mockEmitter() {
   const sessionStateSpy = createSpy();
   const messageSpy = createSpy();
+  const costUpdateSpy = createSpy();
   return {
     sessionState: sessionStateSpy.fn,
     message: messageSpy.fn,
+    costUpdate: costUpdateSpy.fn,
     sessionStateCalls: sessionStateSpy.calls,
     messageCalls: messageSpy.calls,
+    costUpdateCalls: costUpdateSpy.calls,
   } as any;
 }
 
@@ -232,5 +236,34 @@ describe("OrchestratorLoop", () => {
     const costBefore = session.totalCost;
     await loop.handleUserMessage("check cost");
     expect(session.totalCost).toBe(costBefore + 0.01);
+  });
+
+  test("orchestrator cost is emitted for the orch agent", async () => {
+    const { loop, emitter } = createLoop(JSON.stringify({
+      assessment: "ok", actions: [{ type: "CONTINUE" }],
+    }));
+    activeLoop = loop;
+
+    await loop.handleUserMessage("check cost");
+
+    expect(emitter.costUpdateCalls).toEqual([
+      ["test-session", "orch-1", 0.01, 100, 0],
+    ]);
+    expect(loop.getCostSummary()).toEqual({ costUsd: 0.01, tokensUsed: 100 });
+  });
+
+  test("stopAndDrain waits for in-flight orchestrator cost", async () => {
+    const adapter = mockAdapter(JSON.stringify({
+      assessment: "ok", actions: [{ type: "CONTINUE" }],
+    }), 50);
+    const { loop } = createLoop("unused", { adapter });
+    activeLoop = loop;
+
+    const cycle = loop.handleUserMessage("check cost");
+    await Bun.sleep(10);
+    const summary = await loop.stopAndDrain(500);
+    await cycle;
+
+    expect(summary).toEqual({ costUsd: 0.01, tokensUsed: 100 });
   });
 });

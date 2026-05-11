@@ -185,9 +185,10 @@ describe("steering", () => {
     expect(received[0]).toBe("how's progress?");
   });
 
-  test("acknowledges frontend steer messages immediately", () => {
+  test("acknowledges frontend steer messages immediately and passes them to the orchestrator loop", async () => {
     const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
     const messages: { content: string; metadata: Record<string, unknown> }[] = [];
+    const loopMessages: string[] = [];
 
     const orchAny = orch as any;
     orchAny.emitter = {
@@ -202,12 +203,19 @@ describe("steering", () => {
         messages.push({ content, metadata });
       },
     };
+    orchAny.orchestratorLoop = {
+      handleUserMessage: async (content: string) => {
+        loopMessages.push(content);
+      },
+    };
 
     orch.sendUserMessage("session-1", "focus on the API contract first", "msg-123");
+    await Bun.sleep(10);
 
     expect(messages).toEqual([
       { content: "ACK: received steer message.", metadata: { ack_for: "msg-123" } },
     ]);
+    expect(loopMessages).toEqual(["focus on the API contract first"]);
   });
 });
 
