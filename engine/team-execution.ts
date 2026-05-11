@@ -306,7 +306,8 @@ export async function runTeamStep(
 
   // Accumulate costs sequentially after all workers complete — no parallel race
   const workerResults: DelegateResult[] = [];
-  for (const outcome of settled) {
+  const failedWorkers: { name: string; error: string }[] = [];
+  for (const [i, outcome] of settled.entries()) {
     if (outcome.status === "fulfilled") {
       const result = outcome.value;
       // Task 3 fix: checkBudget BEFORE accumulating cost to avoid double-counting
@@ -316,8 +317,31 @@ export async function runTeamStep(
       session.totalTokens += result.tokensUsed;
       workerResults.push(result);
     } else {
-      console.error("[orchestrator] Worker failed:", outcome.reason);
+      const workerName = teamConfig.members[i]?.name ?? `Worker ${i + 1}`;
+      const errorMsg = outcome.reason?.message ?? String(outcome.reason) ?? "unknown error";
+      failedWorkers.push({ name: workerName, error: errorMsg });
+      console.error(`[orchestrator] Worker ${workerName} failed:`, outcome.reason);
+
+      // Emit worker_failed event to dashboard
+      await emitter.emit({
+        session_id: session.id,
+        agent_id: `${step.team}-${workerName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+        event_type: "worker_failed",
+        timestamp: new Date().toISOString(),
+        data: { worker_name: workerName, error: errorMsg, team: teamConfig["team-name"] },
+      });
     }
+  }
+
+  // Build failure notice for lead review context
+  let failureNotice = "";
+  if (failedWorkers.length > 0) {
+    failureNotice = `\n\nWARNING: ${failedWorkers.length} worker(s) failed during execution:\n` +
+      failedWorkers.map(f => `- ${f.name}: ${f.error}`).join("\n") +
+      `\nYou are reviewing ${workerResults.length} of ${teamConfig.members.length} expected results.`;
+
+    await emitter.message(session.id, "orch-1", "Orchestrator", "user",
+      `⚠️ ${failedWorkers.length} worker(s) failed: ${failedWorkers.map(f => f.name).join(", ")}. Lead will review ${workerResults.length} of ${teamConfig.members.length} expected results.`);
   }
 
   // Build worker lifecycle deps for review/retry
@@ -328,10 +352,10 @@ export async function runTeamStep(
     checkBudget,
   };
 
-  // Lead reviews worker output
+  // Lead reviews worker output (include failure notice so lead knows about missing workers)
   let reviews = await leadReviewWorkers(
     lifecycleDeps, session, teamConfig, leadPersona, workerResults,
-    workerAssignments, task, adapter, step, leadId
+    workerAssignments, task + failureNotice, adapter, step, leadId
   );
 
   // Retry loop: NEEDS_WORK workers get reworked prompts and retry
@@ -495,12 +519,30 @@ export async function runParallelStep(
   }
 
   const results: DelegateResult[] = [];
-  for (const outcome of settled) {
+  const failedTeams: { name: string; error: string }[] = [];
+  for (const [i, outcome] of settled.entries()) {
     if (outcome.status === "fulfilled") {
       results.push(outcome.value);
     } else {
-      console.error("[orchestrator] Parallel team failed:", outcome.reason);
+      const teamName = teams[i]?.team ?? `Team ${i + 1}`;
+      const errorMsg = outcome.reason?.message ?? String(outcome.reason) ?? "unknown error";
+      failedTeams.push({ name: teamName, error: errorMsg });
+      console.error(`[orchestrator] Parallel team ${teamName} failed:`, outcome.reason);
+
+      // Emit worker_failed event to dashboard for each failed team
+      await deps.emitter.emit({
+        session_id: session.id,
+        agent_id: `${teamName}-lead`,
+        event_type: "worker_failed",
+        timestamp: new Date().toISOString(),
+        data: { worker_name: teamName, error: errorMsg, team: teamName },
+      });
     }
+  }
+
+  if (failedTeams.length > 0) {
+    await deps.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+      `⚠️ ${failedTeams.length} parallel team(s) failed: ${failedTeams.map(f => f.name).join(", ")}. Synthesizing ${results.length} of ${teams.length} expected results.`);
   }
 
   // Synthesize parallel results into unified report
@@ -520,6 +562,12 @@ export async function runParallelStep(
     `### Team: ${teams[i]?.team ?? `Team ${i + 1}`}\nGrade: ${r.grade ?? "UNGRADED"}\n\n${r.output}`
   ).join("\n\n---\n\n");
 
+  const failedTeamNotice = failedTeams.length > 0
+    ? `\n\nWARNING: ${failedTeams.length} team(s) failed during execution:\n` +
+      failedTeams.map(f => `- ${f.name}: ${f.error}`).join("\n") +
+      `\nYou are synthesizing ${results.length} of ${teams.length} expected team results.`
+    : "";
+
   const synthesisPrompt = [
     "Multiple teams completed this task in parallel. Synthesize their findings:",
     "",
@@ -531,6 +579,7 @@ export async function runParallelStep(
     "3. **Unique findings** — found by only one team, validate or dismiss",
     "4. **Final prioritized list** (P0-P3)",
     "5. **GRADE:** PASS | FEEDBACK | FAILED",
+    failedTeamNotice,
   ].join("\n");
 
   await emitter.message(session.id, synthId, "Orchestrator", "user",
