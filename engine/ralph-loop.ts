@@ -10,9 +10,9 @@
  * operated by this module, not by any agent.
  */
 
-import { readdirSync, readFileSync, writeFileSync, existsSync } from "fs";
+import { readdirSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
-import { loadTrace, scoreSession, extractFingerprint, compareFingerprints, getGoldenTraces } from "./replay";
+import { loadTrace, scoreSession, getGoldenTraces } from "./replay";
 import type { SessionTrace, ReplayScore } from "./replay";
 import { TRACE_DIR } from "./trace-recorder";
 import { BASE_DIR } from "./config";
