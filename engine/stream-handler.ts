@@ -2,6 +2,7 @@ import type { EventEmitter } from "./event-emitter";
 import type { SessionState, StreamEvent } from "./types";
 import type { OrchestratorLoop } from "./orchestrator-loop";
 import { scanSeverity, shouldAutoPause, extractFindingExcerpt } from "./severity-scanner";
+import { transitionStatus } from "./session-state";
 
 export interface StreamHandlerOpts {
   emitter: EventEmitter;
@@ -34,7 +35,7 @@ export function buildStreamHandler(opts: StreamHandlerOpts): (evt: StreamEvent) 
       const severity = scanSeverity(streamEvt.content);
       if (severity && shouldAutoPause(severity, sessionId)) {
         pausedSessions.add(sessionId);
-        session.status = "paused";
+        transitionStatus(session, "paused", "stream-handler:severity");
         const excerpt = extractFindingExcerpt(streamEvt.content, severity);
         emitter.severityAlert(sessionId, agentId, severity, excerpt);
         emitter.autoPause(sessionId, `severity:${severity}`);

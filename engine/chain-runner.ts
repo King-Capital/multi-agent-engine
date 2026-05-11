@@ -34,6 +34,7 @@ import type {
   TillDoneItem,
   OrchestratorAction,
 } from "./types";
+import { transitionStatus } from "./session-state";
 
 /** Dependencies injected by the Orchestrator into chain-runner functions. */
 export interface ChainRunnerDeps {
@@ -378,7 +379,7 @@ export async function processLoopAction(
   switch (action.type) {
     case "PAUSE":
       pausedSessions.add(session.id);
-      session.status = "paused";
+      transitionStatus(session, "paused", "chain-runner:PAUSE");
       await emitter.message(session.id, "orch-1", "Orchestrator", "user",
         `Session paused by orchestrator: ${action.reason}`);
       break;
@@ -414,7 +415,7 @@ export async function processLoopAction(
       await emitter.message(session.id, "orch-1", "Orchestrator", "user",
         `**Orchestrator needs your input:** ${action.message}`);
       pausedSessions.add(session.id);
-      session.status = "paused";
+      transitionStatus(session, "paused", "chain-runner:ESCALATE_TO_USER");
       break;
     case "CONTINUE":
       break;

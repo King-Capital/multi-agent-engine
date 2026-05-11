@@ -26,6 +26,7 @@ import type {
   SessionState,
   OrchestratorAction,
 } from "./types";
+import { transitionStatus } from "./session-state";
 
 export class Orchestrator {
   private adapters: Map<string, PlatformAdapter> = new Map();
@@ -61,7 +62,7 @@ export class Orchestrator {
     console.log("[orchestrator] Shutting down...");
     for (const [id, session] of this.sessions) {
       if (session.status === "active" || session.status === "paused") {
-        session.status = "error";
+        transitionStatus(session, "error", "orchestrator:shutdown");
         this.activeMonitor?.stop();
         stopListening(this.sseAbort);
         await this.emitter.sessionEnd(id, session.status);
@@ -120,7 +121,7 @@ export class Orchestrator {
         break;
       case "stop": {
         const session = this.sessions.get(sessionId);
-        if (session) session.status = "error";
+        if (session) transitionStatus(session, "error", "orchestrator:!stop");
         this.pausedSessions.delete(sessionId);
         await emit("session_end", "Session stopped by user.");
         break;
@@ -222,7 +223,7 @@ export class Orchestrator {
     this.activeMonitor = new ActiveMonitor({
       agentActivity: this.agentActivity, session, budgetState: this.budgetState,
       emitter: this.emitter, messageSenders: this.messageSenders,
-      onAutoPause: (reason) => { this.pausedSessions.add(sessionId); session.status = "paused"; console.warn(`[orchestrator] Auto-paused: ${reason}`); },
+      onAutoPause: (reason) => { this.pausedSessions.add(sessionId); transitionStatus(session, "paused", `orchestrator:auto-pause:${reason}`); console.warn(`[orchestrator] Auto-paused: ${reason}`); },
       getAdapter: () => this.getAdapter(),
     });
     this.activeMonitor.start();
@@ -240,10 +241,10 @@ export class Orchestrator {
     const chainRunnerDeps = this.buildChainRunnerDeps();
     try {
       await runChain(chainRunnerDeps, session, chain, taskBody, opts.adapter);
-      session.status = "completed";
+      transitionStatus(session, "completed", "orchestrator:run");
       pipeline?.complete();
     } catch (err) {
-      session.status = "error";
+      transitionStatus(session, "error", "orchestrator:run:catch");
       pipeline?.fail(String(err));
       console.error(`[orchestrator] Session failed:`, err);
       await this.emitter.pgUpdateSession(sessionId, { status: "failed" });
@@ -294,6 +295,7 @@ export class Orchestrator {
       checkBudget: (session: SessionState, agentId: string, agentCost: number, agentTokens: number) => checkBudget(this.budgetState, session, agentId, agentCost, agentTokens, this.emitter),
       getAdapter: (name?: string) => this.getAdapter(name),
       orchestratorLoop: this.orchestratorLoop,
+      pausedSessions: this.pausedSessions,
       sessionLimiter,
       teamLimiterMax: concurrency?.max_concurrent_per_team,
     };
