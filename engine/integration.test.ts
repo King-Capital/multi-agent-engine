@@ -217,6 +217,52 @@ describe("steering", () => {
     ]);
     expect(loopMessages).toEqual(["focus on the API contract first"]);
   });
+
+  test("pause and resume commands update session state and PG status", async () => {
+    const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
+    const session = { id: "session-1", status: "active" };
+    const messages: string[] = [];
+    const events: string[] = [];
+    const pgUpdates: Array<{ id: string; status?: string }> = [];
+
+    const orchAny = orch as any;
+    orchAny.sessions = new Map([["session-1", session]]);
+    orchAny.emitter = {
+      message: async (
+        _sessionId: string,
+        _agentId: string,
+        _name: string,
+        _channel: string,
+        content: string,
+      ) => {
+        messages.push(content);
+      },
+      emit: async (evt: { event_type: string }) => {
+        events.push(evt.event_type);
+      },
+      pgUpdateSession: async (id: string, updates: { status?: string }) => {
+        pgUpdates.push({ id, status: updates.status });
+      },
+    };
+
+    orch.sendUserMessage("session-1", "!pause");
+    await Bun.sleep(10);
+
+    expect(session.status).toBe("paused");
+    expect(orchAny.pausedSessions.has("session-1")).toBe(true);
+    expect(events).toContain("pause");
+    expect(messages).toContain("Session paused. Running agents will finish current work. Send !resume to continue.");
+    expect(pgUpdates).toContainEqual({ id: "session-1", status: "paused" });
+
+    orch.sendUserMessage("session-1", "!resume");
+    await Bun.sleep(10);
+
+    expect(session.status).toBe("active");
+    expect(orchAny.pausedSessions.has("session-1")).toBe(false);
+    expect(events).toContain("resume");
+    expect(messages).toContain("Session resumed.");
+    expect(pgUpdates).toContainEqual({ id: "session-1", status: "active" });
+  });
 });
 
 import { SandboxPool } from "./sandbox-pool";

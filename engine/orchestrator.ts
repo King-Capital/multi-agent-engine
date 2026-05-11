@@ -130,14 +130,24 @@ export class Orchestrator {
         this.emitter.emit({ session_id: sessionId, agent_id: "orch-1", event_type: type, timestamp: ts, data: {} }),
       ]);
     switch (command) {
-      case "pause":
+      case "pause": {
         this.pausedSessions.add(sessionId);
+        const session = this.sessions.get(sessionId);
+        if (session && transitionStatus(session, "paused", "orchestrator:!pause")) {
+          await this.emitter.pgUpdateSession(sessionId, { status: "paused" });
+        }
         await emit("pause", "Session paused. Running agents will finish current work. Send !resume to continue.");
         break;
-      case "resume":
+      }
+      case "resume": {
         this.pausedSessions.delete(sessionId);
+        const session = this.sessions.get(sessionId);
+        if (session && transitionStatus(session, "active", "orchestrator:!resume")) {
+          await this.emitter.pgUpdateSession(sessionId, { status: "active" });
+        }
         await emit("resume", "Session resumed.");
         break;
+      }
       case "stop": {
         const session = this.sessions.get(sessionId);
         if (session) transitionStatus(session, "error", "orchestrator:!stop");
