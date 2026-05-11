@@ -1,4 +1,4 @@
-import { test, expect, describe, beforeEach, afterEach, mock } from "bun:test";
+import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import {
   createLogger,
   setLogLevel,
@@ -179,8 +179,8 @@ describe("Logger", () => {
   test("multiple sinks all receive entries", () => {
     const entries1: LogEntry[] = [];
     const entries2: LogEntry[] = [];
-    addSink({ write: (e) => entries1.push(e) });
-    addSink({ write: (e) => entries2.push(e) });
+    addSink({ write: (e) => { entries1.push(e); } });
+    addSink({ write: (e) => { entries2.push(e); } });
 
     const log = createLogger("test");
     log.info("multi-sink");
