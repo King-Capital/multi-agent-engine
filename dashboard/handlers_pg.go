@@ -362,9 +362,12 @@ func handleAPISessionHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.QueryContext(r.Context(), `
-		SELECT 
+		SELECT
 			s.id, s.name, s.chain, s.status, s.created_at, s.completed_at,
-			COALESCE(SUM(a.cost_usd), 0) as total_cost,
+			GREATEST(
+				COALESCE(SUM(a.cost_usd), 0),
+				COALESCE((SELECT SUM((e.payload->>'cost_usd')::numeric) FROM events e WHERE e.session_id = s.id AND e.event_type = 'cost_update' AND e.payload->>'cost_usd' IS NOT NULL), 0)
+			) as total_cost,
 			COUNT(DISTINCT a.id) as agent_count,
 			EXTRACT(EPOCH FROM COALESCE(s.completed_at, NOW()) - s.created_at) as duration_secs
 		FROM sessions s
@@ -533,7 +536,7 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# HELP mae_total_cost_usd Total cost in USD across all agents\n")
 	fmt.Fprintf(w, "# TYPE mae_total_cost_usd gauge\n")
 	var totalCost float64
-	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd), 0) FROM agents`).Scan(&totalCost); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT GREATEST(COALESCE(SUM(cost_usd), 0), COALESCE((SELECT SUM((payload->>'cost_usd')::numeric) FROM events WHERE event_type = 'cost_update' AND payload->>'cost_usd' IS NOT NULL), 0)) FROM agents`).Scan(&totalCost); err != nil {
 		totalCost = 0
 	}
 	fmt.Fprintf(w, "mae_total_cost_usd %.6f\n\n", totalCost)
@@ -586,8 +589,11 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 		resp.TotalAgents = 0
 	}
 
-	// Total cost
-	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(cost_usd), 0) FROM agents`).Scan(&resp.TotalCost); err != nil {
+	// Total cost — use GREATEST of agent costs vs event costs (events are more reliable historically)
+	if err := db.QueryRowContext(ctx, `SELECT GREATEST(
+		COALESCE((SELECT SUM(cost_usd) FROM agents), 0),
+		COALESCE((SELECT SUM((payload->>'cost_usd')::numeric) FROM events WHERE event_type = 'cost_update' AND payload->>'cost_usd' IS NOT NULL), 0)
+	)`).Scan(&resp.TotalCost); err != nil {
 		resp.TotalCost = 0
 	}
 
@@ -596,12 +602,12 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 		resp.TotalEvents = 0
 	}
 
-	// Cost per day (last 30 days)
+	// Cost per day (last 30 days) — use events for cost since agents table has gaps
 	rows, err := db.QueryContext(ctx, `
-		SELECT DATE(s.created_at) as day, COALESCE(SUM(a.cost_usd), 0) as cost
-		FROM sessions s
-		LEFT JOIN agents a ON a.session_id = s.id
-		WHERE s.created_at > NOW() - INTERVAL '30 days'
+		SELECT DATE(e.created_at) as day, COALESCE(SUM((e.payload->>'cost_usd')::numeric), 0) as cost
+		FROM events e
+		WHERE e.event_type = 'cost_update' AND e.payload->>'cost_usd' IS NOT NULL
+		AND e.created_at > NOW() - INTERVAL '30 days'
 		GROUP BY day
 		ORDER BY day`)
 	if err == nil {
