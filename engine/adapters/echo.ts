@@ -1,4 +1,7 @@
 import type { PlatformAdapter, DelegateOptions, DelegateResult } from "../types";
+import { createLogger } from "../logger";
+
+const log = createLogger("echo-adapter");
 
 export class EchoAdapter implements PlatformAdapter {
   name = "echo";
@@ -8,12 +11,15 @@ export class EchoAdapter implements PlatformAdapter {
   }
 
   async delegate(opts: DelegateOptions): Promise<DelegateResult> {
-    console.log(`[echo] Delegating to ${opts.persona.name} (${opts.model})`);
-    console.log(`[echo] Team: ${opts.teamName}`);
-    console.log(`[echo] System prompt length: ${opts.systemPrompt.length} chars`);
-    console.log(`[echo] System prompt has Instructions: ${opts.systemPrompt.includes("## Instructions")}`);
-    console.log(`[echo] Prompt: ${opts.userPrompt.slice(0, 200)}...`);
-    console.log(`[echo] Domain write: ${opts.domain.write.join(", ")}`);
+    log.info("Delegating to echo agent", {
+      agent: opts.persona.name,
+      model: opts.model,
+      team: opts.teamName,
+      system_prompt_length: opts.systemPrompt.length,
+      has_instructions: opts.systemPrompt.includes("## Instructions"),
+      prompt_preview: opts.userPrompt.slice(0, 200),
+      domain_write: opts.domain.write.join(", "),
+    });
 
     await new Promise((r) => setTimeout(r, 50));
 

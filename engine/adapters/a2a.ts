@@ -21,6 +21,9 @@ import type {
   DelegateResult,
   StreamEvent,
 } from "../types";
+import { createLogger } from "../logger";
+
+const log = createLogger("a2a-adapter");
 
 // --- A2A Protocol Types ---
 
@@ -202,7 +205,7 @@ export class A2AAdapter implements PlatformAdapter {
 
     const timeout = opts.timeoutMs ?? 300_000;
 
-    console.log(`[a2a] Delegating to ${opts.persona.name} at ${endpoint.url}`);
+    log.info("Delegating to remote agent", { agent_id: agentId, persona: opts.persona.name, endpoint: endpoint.url });
 
     try {
       // Try streaming first if supported
@@ -222,7 +225,7 @@ export class A2AAdapter implements PlatformAdapter {
 
       return result;
     } catch (err) {
-      console.error(`[a2a] Error delegating to ${opts.persona.name}:`, err);
+      log.error("Delegation failed", { agent_id: agentId, persona: opts.persona.name, error: (err as Error)?.message });
       return {
         agentId,
         agentName: opts.persona.name,
@@ -388,7 +391,7 @@ export class A2AAdapter implements PlatformAdapter {
         clearTimeout(timer);
         // Fall back to sync if streaming not supported
         if (response.status === 405 || response.status === 501) {
-          console.log(`[a2a] Streaming not supported by ${endpoint.url}, falling back to sync`);
+          log.info("Streaming not supported, falling back to sync", { endpoint: endpoint.url });
           return this.delegateSync(endpoint, message, opts, agentId, timeout);
         }
 
@@ -596,7 +599,7 @@ export class A2AAdapter implements PlatformAdapter {
     const pollInterval = endpoint.pollIntervalMs ?? 2000;
     const startTime = Date.now();
 
-    console.log(`[a2a] Polling task ${taskId} every ${pollInterval}ms`);
+    log.debug("Polling task for completion", { task_id: taskId, poll_interval_ms: pollInterval });
 
     while (Date.now() - startTime < remainingTimeout) {
       await new Promise((resolve) => setTimeout(resolve, pollInterval));
@@ -689,7 +692,7 @@ export class A2AAdapter implements PlatformAdapter {
       endpoint.url = card.url ?? baseUrl;
       this.registerEndpoint(card.name, endpoint);
       this.agentCards.set(card.name.toLowerCase(), card);
-      console.log(`[a2a] Discovered agent: ${card.name} at ${endpoint.url}`);
+      log.info("Discovered remote agent", { agent_name: card.name, endpoint: endpoint.url });
       return card;
     }
     return null;

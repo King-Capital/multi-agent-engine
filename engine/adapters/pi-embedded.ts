@@ -12,6 +12,9 @@
 import { join } from "path";
 import { mkdirSync } from "fs";
 import type { PlatformAdapter, DelegateOptions, DelegateResult } from "../types";
+import { createLogger } from "../logger";
+
+const log = createLogger("pi-embedded-adapter");
 
 // Pi SDK types -- kept loose to avoid hard compile-time dependency.
 // The SDK is loaded dynamically at runtime; CI can type-check without it.
@@ -112,7 +115,7 @@ export class PiEmbeddedAdapter implements PlatformAdapter {
     const model = modelRegistry.find(provider, modelId);
 
     if (!model) {
-      console.error(`[pi-embedded] Model not found: ${opts.model} (provider=${provider}, id=${modelId})`);
+      log.error("Model not found", { agent_id: agentId, model: opts.model, provider, model_id: modelId });
       return {
         agentId,
         agentName: opts.persona.name,
@@ -124,7 +127,7 @@ export class PiEmbeddedAdapter implements PlatformAdapter {
       };
     }
 
-    console.log(`[pi-embedded] Creating session for ${opts.persona.name} with ${model.provider}/${model.id}`);
+    log.info("Creating embedded session", { agent_id: agentId, persona: opts.persona.name, provider: model.provider, model_id: model.id });
 
     let session: Awaited<ReturnType<typeof pi.createAgentSession>>["session"] | null = null;
     let unsubscribeFn: (() => void) | null = null;
@@ -190,7 +193,7 @@ export class PiEmbeddedAdapter implements PlatformAdapter {
         await new Promise(r => setTimeout(r, 100));
       }
       if (session!.isStreaming) {
-        console.error(`[pi-embedded] ${opts.persona.name} stream timed out, force-disposing`);
+        log.error("Stream timed out, force-disposing session", { agent_id: agentId, timeout_ms: opts.timeoutMs ?? 300_000 });
         const partialText = session!.getLastAssistantText?.() ?? "";
         unsubscribeFn?.();
         session!.dispose();
@@ -224,7 +227,7 @@ export class PiEmbeddedAdapter implements PlatformAdapter {
         tokensUsed: totalTokens,
       };
     } catch (err) {
-      console.error(`[pi-embedded] Session error for ${opts.persona.name}:`, err);
+      log.error("Session error", { agent_id: agentId, persona: opts.persona.name, error: err instanceof Error ? err.message : String(err) });
       try { unsubscribeFn?.(); } catch {}
       try { session?.dispose(); } catch {}
       return {

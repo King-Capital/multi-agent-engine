@@ -1,3 +1,7 @@
+import { createLogger } from "./logger";
+
+const log = createLogger("messaging");
+
 /**
  * Route a user message to the correct agent by @mention matching,
  * or broadcast to the first available sender in the session.
@@ -29,11 +33,11 @@ export function sendUserMessage(
 
     if (bestMatch) {
       bestMatch.rest = bestMatch.rest.replace(/^[:\s]+/, "");
-      console.log(`[orchestrator] Targeted message to ${bestMatch.agentKey}: ${bestMatch.rest.slice(0, 80)}`);
+      log.info("Targeted message to agent", { session_id: sessionId, agent: bestMatch.agentKey, preview: bestMatch.rest.slice(0, 80) });
       bestMatch.sender(bestMatch.rest);
       return;
     }
-    console.warn(`[orchestrator] No active agent matching @mention in: ${message.slice(0, 50)}`);
+    log.warn("No active agent matching @mention", { session_id: sessionId, mention_preview: message.slice(0, 50) });
   }
 
   // Broadcast to first available sender
@@ -85,7 +89,7 @@ export function listenForUserMessages(
             try {
               const evt = JSON.parse(line.slice(5));
               if (evt.data?.from === "user" && evt.data?.content) {
-                console.log(`[orchestrator] User message: ${evt.data.content.slice(0, 80)}`);
+                log.info("User message received", { session_id: sessionId, preview: evt.data.content.slice(0, 80) });
                 onMessage(sessionId, evt.data.content);
               }
             } catch { /* not JSON */ }
@@ -97,12 +101,12 @@ export function listenForUserMessages(
 
       if (!abort.signal.aborted) {
         retryDelay = BASE_RETRY_MS;
-        console.log(`[orchestrator] SSE stream ended, reconnecting in ${retryDelay}ms`);
+        log.info("SSE stream ended, reconnecting", { session_id: sessionId, retry_delay_ms: retryDelay });
         setTimeout(connect, retryDelay);
       }
     }).catch((err) => {
       if (abort.signal.aborted) return;
-      console.warn(`[orchestrator] SSE connection failed, retrying in ${retryDelay}ms:`, err.message ?? err);
+      log.warn("SSE connection failed, retrying", { session_id: sessionId, retry_delay_ms: retryDelay, error: err.message ?? String(err) });
       setTimeout(connect, retryDelay);
       retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
     });

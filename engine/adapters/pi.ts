@@ -2,6 +2,9 @@ import { $ } from "bun";
 import { mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import type { PlatformAdapter, DelegateOptions, DelegateResult, StreamEvent, GradeLevel } from "../types";
+import { createLogger } from "../logger";
+
+const log = createLogger("pi-adapter");
 
 export class PiAdapter implements PlatformAdapter {
   name = "pi";
@@ -106,7 +109,7 @@ export class PiAdapter implements PlatformAdapter {
       }
     }
 
-    console.log(`[pi-rpc] Spawning ${opts.persona.name} (${piModel}) [${opts.persona.skills.length} skills] in ${opts.workingDir}`);
+    log.info("Spawning pi-rpc agent", { agent_id: agentId, model: piModel, skills: opts.persona.skills.length, working_dir: opts.workingDir });
 
     const timeout = opts.timeoutMs ?? (PiAdapter.MODEL_TIMEOUTS[piModel] ?? 300_000);
 
@@ -153,7 +156,7 @@ export class PiAdapter implements PlatformAdapter {
       const stderrPromise = new Response(proc.stderr).text().then(t => { stderrText = t; }).catch(() => {});
 
       const timer = setTimeout(async () => {
-        console.error(`[pi-rpc] ${opts.persona.name} timed out after ${timeout}ms`);
+        log.error("Agent timed out", { agent_id: agentId, timeout_ms: timeout });
         // Step 1: send abort RPC + cancel reader
         this.sendCmd(proc, { type: "abort" }, agentId);
         try { reader.cancel(); } catch {}
@@ -270,12 +273,12 @@ export class PiAdapter implements PlatformAdapter {
                   return;
                 }
               } catch (e) {
-                console.error(`[pi-adapter:${agentId}] Failed to parse RPC line:`, (typeof line === 'string' ? line.slice(0, 200) : ''), e);
+                log.error("Failed to parse RPC line", { agent_id: agentId, line: typeof line === 'string' ? line.slice(0, 200) : '', error: (e as Error)?.message });
               }
             }
           }
         } catch (e) {
-          console.error(`[pi-adapter:${agentId}] Stream processing error:`, e);
+          log.error("Stream processing error", { agent_id: agentId, error: (e as Error)?.message });
         }
 
         // Stream ended without agent_end — race with proc.exited
@@ -299,7 +302,7 @@ export class PiAdapter implements PlatformAdapter {
         }
 
         if (exitCode !== 0 && !finalText) {
-          console.error(`[pi-rpc] ${opts.persona.name} exited ${exitCode}: ${stderr.slice(0, 500)}`);
+          log.error("Agent exited with error", { agent_id: agentId, exit_code: exitCode, stderr: stderr.slice(0, 500) });
           safeResolve({
             agentId,
             agentName: opts.persona.name,
@@ -330,7 +333,7 @@ export class PiAdapter implements PlatformAdapter {
         if (resolved) return;
 
         // Stream is hung — force resolve
-        console.error(`[pi-rpc] ${opts.persona.name} exited (code ${exitCode}) but stream still open, force-resolving`);
+        log.warn("Agent exited but stream still open, force-resolving", { agent_id: agentId, exit_code: exitCode });
         try { reader.cancel(); } catch {}
 
         const stderr = stderrText;
@@ -357,7 +360,7 @@ export class PiAdapter implements PlatformAdapter {
           });
         }
       }).catch((err) => {
-        console.error(`[pi-rpc] exitRace error for ${opts.persona.name}:`, err);
+        log.error("Exit race error", { agent_id: agentId, error: (err as Error)?.message });
       });
 
       processStream();
@@ -371,7 +374,7 @@ export class PiAdapter implements PlatformAdapter {
         (stdin as { write(data: string | Uint8Array): void }).write(JSON.stringify(cmd) + "\n");
       }
     } catch (e) {
-      console.error(`[pi-adapter:${agentId}] sendCmd failed — agent may not have received the message:`, e);
+      log.error("sendCmd failed — agent may not have received the message", { agent_id: agentId, error: (e as Error)?.message });
     }
   }
 
