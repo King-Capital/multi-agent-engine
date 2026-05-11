@@ -138,13 +138,17 @@ export class EventEmitter {
     });
   }
 
-  agentDone(sessionId: string, agentId: string, grade?: string) {
+  async agentDone(sessionId: string, agentId: string, grade?: string, costUsd?: number) {
+    await this.pgUpdateAgent(agentId, {
+      status: grade === "FAILED" ? "failed" : "completed",
+      cost_usd: costUsd ?? 0,
+    });
     return this.emit({
       session_id: sessionId,
       agent_id: agentId,
       event_type: "agent_done",
       timestamp: new Date().toISOString(),
-      data: { grade: grade ?? "unknown" },
+      data: { grade: grade ?? "unknown", cost_usd: costUsd ?? 0 },
     });
   }
 

@@ -125,7 +125,7 @@ export async function retryWorker(
 
   const workerSummary = summarizeOutput(result.output, 1500);
   await emitter.message(session.id, workerId, member.name, "user", workerSummary);
-  await emitter.agentDone(session.id, workerId, result.grade);
+  await emitter.agentDone(session.id, workerId, result.grade, result.costUsd);
 
   return result;
 }
@@ -265,7 +265,7 @@ export async function spawnSenior(
 
   const srSummary = summarizeOutput(result.output, 2000);
   await emitter.message(session.id, srId, `Sr. (${domainNames.join("+")})`, "user", srSummary);
-  await emitter.agentDone(session.id, srId, result.grade);
+  await emitter.agentDone(session.id, srId, result.grade, result.costUsd);
 
   return result;
 }
