@@ -354,9 +354,9 @@ func handleAPISessionHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := 50
+	limit := 500
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 200 {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 2000 {
 			limit = n
 		}
 	}
