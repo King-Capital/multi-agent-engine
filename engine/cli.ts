@@ -23,90 +23,7 @@ import { buildChainValidationReport, formatChainValidationReport, resolveValidat
 import * as p from "@clack/prompts";
 
 const args = process.argv.slice(2);
-
-if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
-  const examples = buildMainHelpExamples();
-  console.log(`
-Multi-Agent Orchestration Engine v${(() => { try { return readFile(join(import.meta.dir, "..", "VERSION"), "utf-8").trim(); } catch { return "?"; } })()}
-
-Commands:
-  Run work
-    task          Auto-pick a chain and run a task
-                  mae task "Fix the login redirect bug"
-                  ${examples.taskWithChain}
-    chain         Run a named chain directly
-                  ${examples.chainPrimary}
-                  ${examples.chainSecondary}
-    run           Run a prompt workflow
-                  ${examples.promptPrimary}
-                  ${examples.promptSecondary}
-
-  Operate runs
-    session       List or close dashboard sessions
-                  mae session list
-                  mae session close 2dbc90f5 --status error
-    design    ◆   Run a design review/build flow with a gallery
-                  ${examples.designReview}
-                  ${examples.designBuild}
-
-  Inspect and verify
-    traces        List or inspect local JSONL traces
-                  mae traces
-                  mae traces 2dbc90f5
-    score         Score a session trace
-                  mae score 2dbc90f5
-    compare       Compare two session fingerprints
-                  mae compare 2dbc90f5 8fa2c1b3
-    replay        Re-run a past session goal and compare behavior
-                  mae replay 2dbc90f5 --dry-run
-    validate-chain Preview configured chain agents, teams, checks, and cost
-                  ${examples.validateStandard}
-                  ${examples.validateGoal}
-    golden        Manage golden reference traces
-                  mae golden add 2dbc90f5 --verdict pass --notes "good swarm"
-                  mae golden list
-
-  Build the agent system
-    new-team  ◆   Create a new agent team
-                  mae new-team
-                  mae new-team --template frontend
-    new-agent     Scaffold one persona
-                  mae new-agent "API Reviewer" lead Engineering quality
-    learn         Build expertise from sources
-                  mae learn --from ./engine --agent api-reviewer
-    expert    ◆   Interactive expert session
-                  mae expert ./engine --agent api-reviewer
-    validate-agent  Test expertise quality
-                  mae validate-agent api-reviewer
-    ralph         Self-improvement loop
-                  mae ralph --dry-run --iterations 3
-
-  Configure and diagnose
-    config    ◆   Configure models, aliases, roles, and budgets
-                  mae config
-                  mae config show
-    tui       ◆   Full interactive launcher
-                  mae tui
-    health        Probe adapters, traces, dashboard, and Langfuse
-                  mae health
-                  mae health --json
-    info          Full system overview
-                  mae info
-    adapters      List adapter availability
-                  mae adapters
-    discover      Discover an A2A agent card
-                  mae discover http://localhost:9000
-    version       Show local binary and config counts
-                  mae version
-    update        Pull, build, and install the local mae binary
-                  mae update
-
-  ◆ = interactive prompt/TUI flow.
-
-Run 'mae <command> --help' for command-specific options and more examples.
-  `);
-  process.exit(0);
-}
+const wantsRootHelp = args.length === 0 || args[0] === "--help" || args[0] === "-h";
 
 function configuredChains(): string[] {
   try {
@@ -165,7 +82,190 @@ function showSubHelp(text: string): never {
   process.exit(0);
 }
 
+function maeVersion(): string {
+  try {
+    return readFile(join(BASE_DIR, "VERSION"), "utf-8").trim();
+  } catch {
+    return "?";
+  }
+}
+
+type HelpSection = "work" | "operate" | "inspect" | "build" | "configure";
+
+function sectionForCommand(command: string | undefined): HelpSection | null {
+  switch (command) {
+    case "work":
+      return "work";
+    case "operate":
+      return "operate";
+    case "inspect":
+    case "verify":
+      return "inspect";
+    case "build":
+      return "build";
+    case "configure":
+    case "diagnose":
+      return "configure";
+    default:
+      return null;
+  }
+}
+
+function showMainHelp(): never {
+  console.log(`
+Multi-Agent Orchestration Engine v${maeVersion()}
+
+Sections:
+  work       Run tasks, named chains, and prompt workflows
+  operate    Manage dashboard sessions and design runs
+  inspect    Read traces, score/replay runs, and validate chains
+  build      Create teams, agents, expertise, and improvement loops
+  configure  Configure models, check health, and inspect adapters
+
+Start here:
+  mae work
+  mae build
+  mae inspect
+  mae tui
+
+Run 'mae <section>' or 'mae <command> --help' for examples.
+`);
+  process.exit(0);
+}
+
+function showSectionHelp(section: HelpSection): never {
+  const examples = buildMainHelpExamples();
+  const sections: Record<HelpSection, string> = {
+    work: `
+mae work — Run agent work
+
+Commands:
+  task    Auto-pick a chain and run a task
+  chain   Run a named chain directly
+  run     Run a prompt workflow
+
+Examples:
+  mae task "Fix the login redirect bug"
+  ${examples.taskWithChain}
+  ${examples.chainPrimary}
+  ${examples.chainSecondary}
+  ${examples.promptPrimary}
+  ${examples.promptSecondary}
+
+More:
+  mae task --help
+  mae chain --help
+  mae run --help
+`,
+    operate: `
+mae operate — Manage active work
+
+Commands:
+  session  List or close dashboard sessions
+  design   Run a design review/build flow with a gallery
+
+Examples:
+  mae session list
+  mae session close 2dbc90f5 --status error
+  ${examples.designReview}
+  ${examples.designBuild}
+
+More:
+  mae session --help
+  mae design --help
+`,
+    inspect: `
+mae inspect — Inspect and verify runs
+
+Commands:
+  traces          List or inspect local JSONL traces
+  score           Score a session trace
+  compare         Compare two session fingerprints
+  replay          Re-run a past session goal and compare behavior
+  validate-chain  Preview configured chain agents, teams, checks, and cost
+  golden          Manage golden reference traces
+
+Examples:
+  mae traces
+  mae traces 2dbc90f5
+  mae score 2dbc90f5
+  mae compare 2dbc90f5 8fa2c1b3
+  mae replay 2dbc90f5 --dry-run
+  ${examples.validateStandard}
+  ${examples.validateGoal}
+  mae golden add 2dbc90f5 --verdict pass --notes "good swarm"
+  mae golden list
+
+More:
+  mae validate-chain --help
+  mae golden --help
+`,
+    build: `
+mae build — Build the agent system
+
+Commands:
+  new-team        Create a new agent team
+  new-agent       Scaffold one persona
+  learn           Build expertise from sources
+  expert          Interactive expert session
+  validate-agent  Test expertise quality
+  ralph           Self-improvement loop
+
+Examples:
+  mae new-team
+  mae new-team --template frontend
+  mae new-agent "API Reviewer" lead Engineering quality
+  mae learn --from ./engine --agent api-reviewer
+  mae expert ./engine --agent api-reviewer
+  mae validate-agent api-reviewer
+  mae ralph --dry-run --iterations 3
+
+More:
+  mae new-team --help
+  mae learn --help
+  mae ralph --help
+`,
+    configure: `
+mae configure — Configure and diagnose
+
+Commands:
+  config    Configure models, aliases, roles, and budgets
+  tui       Full interactive launcher
+  health    Probe adapters, traces, dashboard, and Langfuse
+  info      Full system overview
+  adapters  List adapter availability
+  discover  Discover an A2A agent card
+  version   Show local binary and config counts
+  update    Pull, build, and install the local mae binary
+
+Examples:
+  mae config
+  mae config show
+  mae tui
+  mae health
+  mae health --json
+  mae info
+  mae adapters
+  mae discover http://localhost:9000
+  mae version
+  mae update
+
+More:
+  mae config --help
+  mae health --help
+`,
+  };
+
+  console.log(sections[section]);
+  process.exit(0);
+}
+
 const command = args[0];
+if (wantsRootHelp) showMainHelp();
+
+const helpSection = sectionForCommand(command);
+if (helpSection) showSectionHelp(helpSection);
+
 if (command === "tui" && subHelp) showSubHelp(`
 mae tui — Full interactive launcher
 
@@ -1258,13 +1358,8 @@ Probes: adapters, traces, dashboard, langfuse
 
   default:
     console.error(`Unknown command: ${command}`);
-    console.error("Valid commands by group:");
-    console.error("  Run:        task, chain, run");
-    console.error("  Operate:    session, design");
-    console.error("  Inspect:    traces, score, compare, replay, validate-chain, golden");
-    console.error("  Build:      new-team, new-agent, learn, expert, validate-agent, ralph");
-    console.error("  Configure:  config, tui, health, info, adapters, discover, version, update");
-    console.error("Run 'mae --help' for examples.");
+    console.error("Sections: work, operate, inspect, build, configure");
+    console.error("Run 'mae <section>' for grouped help or 'mae <command> --help'.");
     process.exit(1);
 }
 
