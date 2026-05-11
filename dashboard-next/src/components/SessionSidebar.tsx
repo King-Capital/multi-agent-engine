@@ -14,7 +14,7 @@
 import * as React from "react";
 import { Zap } from "lucide-react";
 import { apiFetch, api } from "@/lib/api";
-import type { DBSession, DBUser, HistoryEntry } from "@/lib/types";
+import type { DBSession, DBUser } from "@/lib/types";
 import { cn, formatCurrency, shortId, statusColor } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -28,7 +28,7 @@ type StatusFilter =
 	| "paused"
 	| "completed"
 	| "error";
-type SortMode = "newest" | "oldest" | "cost";
+type SortMode = "newest" | "oldest" | "cost" | "tokens";
 
 const STATUS_PILLS: {
 	value: StatusFilter;
@@ -96,7 +96,7 @@ function saveFilters(filters: Set<StatusFilter>) {
 function loadSort(): SortMode {
 	try {
 		const v = localStorage.getItem("mae-sort") as SortMode | null;
-		if (v && ["newest", "oldest", "cost"].includes(v)) return v;
+		if (v && ["newest", "oldest", "cost", "tokens"].includes(v)) return v;
 	} catch {}
 	return "newest";
 }
@@ -167,12 +167,12 @@ export function SessionSidebar({
 	}, []);
 
 	// Fetch history for cost data (keyed by session ID)
-	const [costMap, setCostMap] = React.useState<Map<string, { cost: number; agents: number }>>(new Map());
+	const [costMap, setCostMap] = React.useState<Map<string, { cost: number; agents: number; tokens: number }>>(new Map());
 	React.useEffect(() => {
 		api.history(500)
 			.then((h) => {
-				const m = new Map<string, { cost: number; agents: number }>();
-				for (const e of h) m.set(e.id, { cost: e.total_cost, agents: e.agent_count });
+				const m = new Map<string, { cost: number; agents: number; tokens: number }>();
+				for (const e of h) m.set(e.id, { cost: e.total_cost, agents: e.agent_count, tokens: e.total_tokens ?? 0 });
 				setCostMap(m);
 			})
 			.catch(() => {});
@@ -246,10 +246,17 @@ export function SessionSidebar({
 					return cb - ca;
 				});
 				break;
+			case "tokens":
+				sorted.sort((a, b) => {
+					const ta = costMap.get(a.id)?.tokens ?? 0;
+					const tb = costMap.get(b.id)?.tokens ?? 0;
+					return tb - ta;
+				});
+				break;
 		}
 
 		return sorted;
-	}, [sessions, filters, sort, selectedUser, users]);
+	}, [sessions, filters, sort, selectedUser, users, costMap]);
 
 	return (
 		<div className="flex h-full w-full flex-col">
@@ -314,6 +321,7 @@ export function SessionSidebar({
 							<option value="newest">Newest</option>
 							<option value="oldest">Oldest</option>
 							<option value="cost">Cost ↓</option>
+							<option value="tokens">Tokens ↓</option>
 						</select>
 					</div>
 					<span className="text-xs text-zinc-600">
@@ -356,11 +364,20 @@ export function SessionSidebar({
 								{s.chain && <Badge variant="secondary" className="text-[10px]">{s.chain}</Badge>}
 								{(() => {
 									const info = costMap.get(s.id);
-									if (!info || info.cost === 0) return null;
+									if (!info) return null;
 									return (
-										<span className="text-[10px] text-emerald-400 font-mono">
-											{formatCurrency(info.cost)}
-										</span>
+										<>
+											{info.cost > 0 && (
+												<span className="text-[10px] text-emerald-400 font-mono">
+													{formatCurrency(info.cost)}
+												</span>
+											)}
+											{info.tokens > 0 && (
+												<span className="text-[10px] text-cyan-400 font-mono">
+													{(info.tokens / 1000).toFixed(0)}K tok
+												</span>
+											)}
+										</>
 									);
 								})()}
 							</div>

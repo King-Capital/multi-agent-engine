@@ -368,6 +368,7 @@ func handleAPISessionHistory(w http.ResponseWriter, r *http.Request) {
 				COALESCE(SUM(a.cost_usd), 0),
 				COALESCE((SELECT SUM((e.payload->>'cost_usd')::numeric) FROM events e WHERE e.session_id = s.id AND e.event_type = 'cost_update' AND e.payload->>'cost_usd' IS NOT NULL), 0)
 			) as total_cost,
+			COALESCE((SELECT SUM((e.payload->>'tokens')::bigint) FROM events e WHERE e.session_id = s.id AND e.event_type = 'cost_update' AND e.payload->>'tokens' IS NOT NULL), 0) as total_tokens,
 			COUNT(DISTINCT a.id) as agent_count,
 			EXTRACT(EPOCH FROM COALESCE(s.completed_at, NOW()) - s.created_at) as duration_secs
 		FROM sessions s
@@ -389,6 +390,7 @@ func handleAPISessionHistory(w http.ResponseWriter, r *http.Request) {
 		CreatedAt   time.Time  `json:"created_at"`
 		CompletedAt *time.Time `json:"completed_at"`
 		TotalCost   float64    `json:"total_cost"`
+		TotalTokens int64      `json:"total_tokens"`
 		AgentCount  int        `json:"agent_count"`
 		DurationSec float64    `json:"duration_secs"`
 	}
@@ -397,7 +399,7 @@ func handleAPISessionHistory(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var h HistoryEntry
 		if err := rows.Scan(&h.ID, &h.Name, &h.Chain, &h.Status, &h.CreatedAt, &h.CompletedAt,
-			&h.TotalCost, &h.AgentCount, &h.DurationSec); err != nil {
+			&h.TotalCost, &h.TotalTokens, &h.AgentCount, &h.DurationSec); err != nil {
 			continue
 		}
 		history = append(history, h)

@@ -232,6 +232,7 @@ export interface HistoryEntry {
   created_at: string;
   completed_at?: string | null;
   total_cost: number;
+  total_tokens: number;
   agent_count: number;
   duration_secs: number;
 }
