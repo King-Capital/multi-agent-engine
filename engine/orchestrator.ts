@@ -271,7 +271,15 @@ export class Orchestrator {
 
     this.activeMonitor?.stop();
     this.activeMonitor = null;
-    this.orchestratorLoop?.stop();
+    const orchCost = await this.orchestratorLoop?.stopAndDrain();
+    if (orchCost) {
+      await this.emitter.agentDone(
+        sessionId,
+        "orch-1",
+        session.status === "completed" ? "VERIFIED" : "FAILED",
+        orchCost.costUsd,
+      );
+    }
     this.orchestratorLoop = null;
     this.actionQueues.delete(sessionId);
     await this.emitter.sessionEnd(sessionId, session.status);

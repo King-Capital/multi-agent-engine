@@ -43,8 +43,10 @@ export function buildAgentsFromEvents(dbEvents: DBEvent[]): LiveAgent[] {
       const existing = agentMap.get(agentId);
       if (existing) {
         existing.status = String(data.status ?? "done");
-        if (typeof payload.cost_usd === "number") existing.cost_usd = payload.cost_usd;
-        if (typeof payload.tokens_used === "number") existing.tokens_used = payload.tokens_used;
+        const cost = typeof payload.cost_usd === "number" ? payload.cost_usd : data.cost_usd;
+        const tokens = typeof payload.tokens_used === "number" ? payload.tokens_used : data.tokens_used;
+        if (typeof cost === "number") existing.cost_usd = cost;
+        if (typeof tokens === "number") existing.tokens_used = tokens;
       }
     } else if (eventType === "cost_update") {
       const existing = agentMap.get(agentId);
