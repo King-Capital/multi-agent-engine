@@ -1,0 +1,246 @@
+/**
+ * Replay & Evaluation Module — session scoring, behavioral fingerprinting,
+ * fingerprint comparison, and golden trace registry.
+ * Trace files: ~/.mae/traces/{session_id}.jsonl (specs/trace-schema.md)
+ */
+import { join } from "path";
+import { TRACE_DIR } from "./trace-recorder";
+
+export interface TraceEvent {
+  ts: string;
+  type: string;
+  id: string;
+  parent_id?: string;
+  session_id: string;
+  [key: string]: unknown;
+}
+
+export interface SessionTrace {
+  sessionId: string;
+  goal: string;
+  chain: string;
+  status: string;
+  events: TraceEvent[];
+  duration_ms?: number;
+  totalCost?: number;
+}
+
+export interface ReplayScore {
+  sessionId: string;
+  overall: "pass" | "partial" | "fail";
+  checks: Array<{ name: string; pass: boolean; details?: string }>;
+  fingerprint: BehavioralFingerprint;
+}
+
+export interface BehavioralFingerprint {
+  toolSequence: string[];
+  agentCount: number;
+  teamSequence: string[];
+  stepCount: number;
+  errorCount: number;
+  statusTransitions: string[];
+}
+
+export interface GoldenEntry {
+  sessionId: string;
+  goal: string;
+  verdict: "pass" | "fail";
+  addedAt: string;
+  notes?: string;
+}
+
+export interface FingerprintComparison {
+  similarity: number;
+  diffs: string[];
+}
+
+/** Load a JSONL trace file and parse it into a SessionTrace. */
+export function loadTrace(sessionId: string, traceDirOverride?: string): SessionTrace {
+  const traceDir = traceDirOverride ?? TRACE_DIR;
+  const filePath = join(traceDir, `${sessionId}.jsonl`);
+  const { readFileSync, existsSync } = require("fs") as typeof import("fs");
+
+  if (!existsSync(filePath)) throw new Error(`Trace not found: ${filePath}`);
+
+  let content: string;
+  try { content = readFileSync(filePath, "utf-8").trim(); }
+  catch { throw new Error(`Trace not found: ${filePath}`); }
+
+  if (!content) throw new Error(`Empty trace file: ${filePath}`);
+
+  const events: TraceEvent[] = [];
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    try { events.push(JSON.parse(line) as TraceEvent); } catch { /* skip malformed */ }
+  }
+  if (events.length === 0) throw new Error(`No valid events in trace: ${filePath}`);
+
+  const startEvent = events.find((e) => e.type === "session.start");
+  const endEvent = events.find((e) => e.type === "session.end");
+  const goal = (startEvent?.goal as string) ?? (startEvent?.task_preview as string) ?? "";
+  const chain = (startEvent?.chain as string) ?? "";
+  const status = (endEvent?.status as string) ?? "unknown";
+
+  let duration_ms: number | undefined;
+  if (endEvent?.duration_ms !== undefined) {
+    duration_ms = endEvent.duration_ms as number;
+  } else if (events.length >= 2) {
+    duration_ms = new Date(events[events.length - 1]!.ts).getTime() - new Date(events[0]!.ts).getTime();
+  }
+
+  return { sessionId, goal, chain, status, events, duration_ms, totalCost: (endEvent?.total_cost as number) ?? undefined };
+}
+
+/** Extract a behavioral fingerprint from a session trace. */
+export function extractFingerprint(trace: SessionTrace): BehavioralFingerprint {
+  const toolSequence: string[] = [];
+  const teamSet = new Set<string>();
+  const teamSequence: string[] = [];
+  const statusTransitions: string[] = [];
+  let agentCount = 0, stepCount = 0, errorCount = 0;
+
+  for (const event of trace.events) {
+    switch (event.type) {
+      case "tool.call":
+        if (event.tool) toolSequence.push(event.tool as string);
+        break;
+      case "agent.start":
+        agentCount++;
+        if (event.team && !teamSet.has(event.team as string)) {
+          teamSet.add(event.team as string);
+          teamSequence.push(event.team as string);
+        }
+        break;
+      case "chain.step.start": stepCount++; break;
+      case "agent.error": errorCount++; break;
+      case "session.end":
+        if (event.status) statusTransitions.push(event.status as string);
+        break;
+      case "chain.step.end":
+        if (event.status) statusTransitions.push(`step:${event.status as string}`);
+        break;
+    }
+  }
+
+  // Count ERROR/CRITICAL log events as errors too
+  for (const event of trace.events) {
+    if (event.type === "log" && (event.level === "ERROR" || event.level === "CRITICAL")) errorCount++;
+  }
+
+  return { toolSequence, agentCount, teamSequence, stepCount, errorCount, statusTransitions };
+}
+
+/** Compare two behavioral fingerprints. Returns 0-1 similarity and a list of diffs. */
+export function compareFingerprints(a: BehavioralFingerprint, b: BehavioralFingerprint): FingerprintComparison {
+  const diffs: string[] = [];
+  let matchScore = 0, totalChecks = 0;
+
+  const checkScalar = (name: string, va: number, vb: number) => {
+    totalChecks++;
+    if (va === vb) { matchScore++; } else { diffs.push(`${name}: ${va} vs ${vb}`); }
+  };
+
+  const checkSeq = (name: string, sa: string[], sb: string[]) => {
+    totalChecks++;
+    const sim = sequenceSimilarity(sa, sb);
+    matchScore += sim;
+    if (sim < 1.0) {
+      if (name === "toolSequence") {
+        diffs.push(`${name}: ${sa.length} tools vs ${sb.length} tools (${(sim * 100).toFixed(0)}% similar)`);
+      } else {
+        diffs.push(`${name}: [${sa.join(",")}] vs [${sb.join(",")}]`);
+      }
+    }
+  };
+
+  checkScalar("agentCount", a.agentCount, b.agentCount);
+  checkScalar("stepCount", a.stepCount, b.stepCount);
+  checkScalar("errorCount", a.errorCount, b.errorCount);
+  checkSeq("toolSequence", a.toolSequence, b.toolSequence);
+  checkSeq("teamSequence", a.teamSequence, b.teamSequence);
+  checkSeq("statusTransitions", a.statusTransitions, b.statusTransitions);
+
+  return { similarity: totalChecks > 0 ? matchScore / totalChecks : 1.0, diffs };
+}
+
+/** Jaccard similarity on bigrams for order-sensitive sequence comparison. */
+function sequenceSimilarity(a: string[], b: string[]): number {
+  if (a.length === 0 && b.length === 0) return 1.0;
+  if (a.length === 0 || b.length === 0) return 0.0;
+  if (a.length === 1 && b.length === 1) return a[0] === b[0] ? 1.0 : 0.0;
+
+  const bigramsA = new Set<string>();
+  const bigramsB = new Set<string>();
+  for (let i = 0; i < a.length - 1; i++) bigramsA.add(`${a[i]}|${a[i + 1]}`);
+  for (let i = 0; i < b.length - 1; i++) bigramsB.add(`${b[i]}|${b[i + 1]}`);
+
+  if (bigramsA.size === 0 && bigramsB.size === 0) return a[0] === b[0] ? 1.0 : 0.0;
+
+  let intersection = 0;
+  for (const bg of bigramsA) { if (bigramsB.has(bg)) intersection++; }
+  const union = bigramsA.size + bigramsB.size - intersection;
+  return union > 0 ? intersection / union : 1.0;
+}
+
+/** Run deterministic checks against a session trace. */
+export function scoreSession(trace: SessionTrace): ReplayScore {
+  const fingerprint = extractFingerprint(trace);
+  const checks: Array<{ name: string; pass: boolean; details?: string }> = [];
+
+  const completed = trace.status === "completed";
+  checks.push({ name: "session_completed", pass: completed, details: completed ? undefined : `status: ${trace.status}` });
+
+  const stepStarts = trace.events.filter((e) => e.type === "chain.step.start").length;
+  const stepEnds = trace.events.filter((e) => e.type === "chain.step.end").length;
+  const allStepsRan = stepStarts > 0 && stepStarts === stepEnds;
+  checks.push({ name: "all_steps_executed", pass: allStepsRan, details: allStepsRan ? undefined : `started: ${stepStarts}, ended: ${stepEnds}` });
+
+  const failedAgents = trace.events.filter((e) => e.type === "agent.error").length;
+  checks.push({ name: "no_agent_failures", pass: failedAgents === 0, details: failedAgents > 0 ? `${failedAgents} agent error(s)` : undefined });
+
+  const errorLogs = trace.events.filter((e) => e.level === "ERROR" || e.level === "CRITICAL").length;
+  checks.push({ name: "no_error_logs", pass: errorLogs === 0, details: errorLogs > 0 ? `${errorLogs} error/critical log(s)` : undefined });
+
+  const maxCost = 5.0;
+  const costOk = trace.totalCost === undefined || trace.totalCost <= maxCost;
+  checks.push({ name: "cost_reasonable", pass: costOk, details: costOk ? undefined : `$${trace.totalCost?.toFixed(3)} exceeds $${maxCost.toFixed(2)} limit` });
+
+  const failCount = checks.filter((c) => !c.pass).length;
+  const overall: "pass" | "partial" | "fail" = failCount === 0 ? "pass" : !completed ? "fail" : "partial";
+
+  return { sessionId: trace.sessionId, overall, checks, fingerprint };
+}
+
+// --- Golden Trace Registry ---
+
+function goldenPath(traceDirOverride?: string): string {
+  return join(traceDirOverride ?? TRACE_DIR, "golden.json");
+}
+
+/** Mark a trace as a golden reference in the registry. */
+export function addGoldenTrace(sessionId: string, verdict: "pass" | "fail", notes?: string, traceDirOverride?: string): void {
+  const { readFileSync, writeFileSync, existsSync } = require("fs") as typeof import("fs");
+  const filePath = goldenPath(traceDirOverride);
+
+  let entries: GoldenEntry[] = [];
+  if (existsSync(filePath)) {
+    try { entries = JSON.parse(readFileSync(filePath, "utf-8")) as GoldenEntry[]; } catch { entries = []; }
+  }
+
+  let goal = "";
+  try { goal = loadTrace(sessionId, traceDirOverride ?? TRACE_DIR).goal; } catch { /* proceed without goal */ }
+
+  const entry: GoldenEntry = { sessionId, goal, verdict, addedAt: new Date().toISOString().slice(0, 10), notes };
+  const idx = entries.findIndex((e) => e.sessionId === sessionId);
+  if (idx >= 0) { entries[idx] = entry; } else { entries.push(entry); }
+
+  writeFileSync(filePath, JSON.stringify(entries, null, 2) + "\n");
+}
+
+/** List all golden traces from the registry. */
+export function getGoldenTraces(traceDirOverride?: string): GoldenEntry[] {
+  const { readFileSync, existsSync } = require("fs") as typeof import("fs");
+  const filePath = goldenPath(traceDirOverride);
+  if (!existsSync(filePath)) return [];
+  try { return JSON.parse(readFileSync(filePath, "utf-8")) as GoldenEntry[]; } catch { return []; }
+}
