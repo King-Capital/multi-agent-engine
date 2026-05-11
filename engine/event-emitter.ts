@@ -1,6 +1,8 @@
 import type { SessionEvent, SessionStateEvent } from "./types";
 import type { BudgetProjection } from "./budget";
+import { createLogger } from "./logger";
 
+const log = createLogger("event-emitter");
 const RETRY_DELAYS = [100, 500, 2000];
 
 export class EventEmitter {
@@ -18,7 +20,7 @@ export class EventEmitter {
 
   constructor(dashboardUrl?: string, apiToken?: string) {
     this.dashboardUrl = dashboardUrl ?? process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400";
-    console.log("[event-emitter] Dashboard URL:", this.dashboardUrl);
+    log.info("Dashboard URL configured", { dashboardUrl: this.dashboardUrl });
     this.apiToken = apiToken ?? process.env.MAE_API_TOKEN;
   }
 
@@ -89,7 +91,7 @@ export class EventEmitter {
         });
         if (!res) {
           this.droppedEvents++;
-          console.error(`[event-emitter] Dropped event after retries: ${event.event_type}`);
+          log.error("Dropped event after retries", { event_type: event.event_type });
         }
       }
     }
@@ -310,7 +312,7 @@ export class EventEmitter {
 
   async sessionEnd(sessionId: string, status: string = "completed") {
     if (this.droppedEvents > 0) {
-      console.error(`[event-emitter] Session ended with ${this.droppedEvents} dropped events`);
+      log.warn("Session ended with dropped events", { dropped_events: this.droppedEvents });
     }
     await this.pgUpdateSession(sessionId, { status });
     return this.emit({
@@ -346,7 +348,7 @@ export class EventEmitter {
         config: opts.config,
       }),
     });
-    if (!res) console.error(`[event-emitter] Failed to create PG session after retries: ${opts.id}`);
+    if (!res) log.error("Failed to create PG session after retries", { session_id: opts.id });
   }
 
   async pgUpdateSession(sessionId: string, updates: { name?: string; status?: string }): Promise<void> {
@@ -355,7 +357,7 @@ export class EventEmitter {
       headers: this.authHeaders(),
       body: JSON.stringify(updates),
     });
-    if (!res) console.error(`[event-emitter] Failed to update PG session after retries: ${sessionId}`);
+    if (!res) log.error("Failed to update PG session after retries", { session_id: sessionId });
   }
 
   async pgCreateAgent(opts: {
@@ -387,7 +389,7 @@ export class EventEmitter {
         this.pgAgentIds.set(opts.agentId, agent.id);
       }
     } else {
-      console.error(`[event-emitter] Failed to create PG agent after retries: ${opts.agentId}`);
+      log.error("Failed to create PG agent after retries", { agent_id: opts.agentId });
     }
   }
 
@@ -404,7 +406,7 @@ export class EventEmitter {
       headers: this.authHeaders(),
       body: JSON.stringify(updates),
     });
-    if (!res) console.error(`[event-emitter] Failed to update PG agent after retries: ${agentId}`);
+    if (!res) log.error("Failed to update PG agent after retries", { agent_id: agentId });
   }
 
   async trace(sessionId: string, agentId: string, direction: "input" | "output", content: string, metadata?: Record<string, unknown>): Promise<void> {
@@ -419,6 +421,6 @@ export class EventEmitter {
         metadata,
       }),
     });
-    if (!res) console.error(`[event-emitter] Failed to record trace for ${agentId} (${direction})`);
+    if (!res) log.error("Failed to record trace", { agent_id: agentId, direction });
   }
 }

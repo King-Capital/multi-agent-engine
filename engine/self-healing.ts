@@ -2,7 +2,10 @@ import { writeFileSync } from "fs";
 import { join } from "path";
 import { resolveModel, getModelFallbacks } from "./config";
 import { sanitizeAgentInput } from "./security";
+import { createLogger } from "./logger";
 import type { DelegateResult, DelegateOptions, PlatformAdapter, ThinkingLevel } from "./types";
+
+const log = createLogger("self-heal");
 
 const MODEL_ESCALATION: Record<string, string> = {
   "litellm/sonnet-nocache": "litellm/opus-nocache",
@@ -64,7 +67,7 @@ export async function delegateWithHealing(ctx: SelfHealContext): Promise<Delegat
   const healOpts = { ...opts, timeoutMs };
 
   // Attempt 1: Normal run
-  console.log(`[self-heal] Attempt 1: ${healOpts.persona.name} (${healOpts.model})`);
+  log.info("Attempt 1: normal run", { agent: healOpts.persona.name, model: healOpts.model });
   let result = await adapter.delegate(healOpts);
   logOutput(opts.sessionDir, opts.persona.name, 1, result);
 
@@ -72,7 +75,7 @@ export async function delegateWithHealing(ctx: SelfHealContext): Promise<Delegat
 
   // Attempt 1.5: Try deterministic autofix before burning tokens on retry
   if (opts.workingDir) {
-    console.log(`[self-heal] Attempting deterministic autofix in ${opts.workingDir}`);
+    log.info("Attempting deterministic autofix", { workingDir: opts.workingDir });
     try {
       // Run common autofixers -- they either fix the issue or no-op harmlessly
       const fixProc = Bun.spawn(["bash", "-c", [
@@ -90,13 +93,13 @@ export async function delegateWithHealing(ctx: SelfHealContext): Promise<Delegat
       const fixOutput = await new Response(fixProc.stdout).text();
       const fixExit = await fixProc.exited;
       if (fixExit === 0 && fixOutput.trim()) {
-        console.log(`[self-heal] Autofix output: ${fixOutput.slice(0, 200)}`);
+        log.debug("Autofix output", { output: fixOutput.slice(0, 200) });
       }
     } catch { /* autofix is best-effort */ }
   }
 
   // Attempt 2: Same model, more context
-  console.log(`[self-heal] Attempt 2: retry with error context`);
+  log.info("Attempt 2: retry with error context", { agent: opts.persona.name });
   await onEvent("self_heal", {
     failed_worker: opts.persona.name,
     heal_action: `Attempt 1 failed (${result.grade ?? "empty"}). Retrying with error context.`,
@@ -122,7 +125,7 @@ export async function delegateWithHealing(ctx: SelfHealContext): Promise<Delegat
   const modelChanged = upgradedModel !== opts.model;
 
   if (modelChanged) {
-    console.log(`[self-heal] Attempt 3: upgrading ${opts.model} → ${upgradedModel}, thinking ${opts.thinking} → ${upgradedThinking}`);
+    log.info("Attempt 3: model upgrade", { from_model: opts.model, to_model: upgradedModel, from_thinking: opts.thinking, to_thinking: upgradedThinking });
     await onEvent("self_heal", {
       failed_worker: opts.persona.name,
       heal_action: `Escalating from ${opts.model} to ${upgradedModel} after 2 failed attempts.`,
@@ -141,7 +144,7 @@ export async function delegateWithHealing(ctx: SelfHealContext): Promise<Delegat
 
   // Attempt 4: This is handled by the orchestrator (lead takes over)
   // Return the failed result so the orchestrator knows to self-heal
-  console.log(`[self-heal] All ${modelChanged ? 3 : 2} attempts failed for ${opts.persona.name}. Escalating.`);
+  log.warn("All attempts failed, escalating", { agent: opts.persona.name, attempts: modelChanged ? 3 : 2 });
   await onEvent("self_heal", {
     failed_worker: opts.persona.name,
     heal_action: `All attempts exhausted. Escalating to lead or user.`,
