@@ -48,7 +48,7 @@ export class Orchestrator {
   private orchestratorLoop: OrchestratorLoop | null = null;
 
   constructor(dashboardUrl?: string, apiToken?: string) {
-    this.dashboardUrl = dashboardUrl ?? "http://localhost:8400";
+    this.dashboardUrl = dashboardUrl ?? process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400";
     this.emitter = new EventEmitter(dashboardUrl, apiToken);
   }
 

@@ -508,6 +508,11 @@ func rateLimitMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// Exempt authenticated API clients (engine → dashboard)
+		if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		ip := strings.Split(r.RemoteAddr, ":")[0]
 		rateMu.Lock()
 		rl, ok := rateMap[ip]

@@ -17,7 +17,7 @@ export class EventEmitter {
   private static readonly MAX_BUFFER_SIZE = 1000;
 
   constructor(dashboardUrl?: string, apiToken?: string) {
-    this.dashboardUrl = dashboardUrl ?? "http://localhost:8400";
+    this.dashboardUrl = dashboardUrl ?? process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400";
     console.log("[event-emitter] Dashboard URL:", this.dashboardUrl);
     this.apiToken = apiToken ?? process.env.MAE_API_TOKEN;
   }
@@ -38,7 +38,7 @@ export class EventEmitter {
     for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
       try {
         const res = await fetch(url, init);
-        if (res.ok || res.status < 500) return res;
+        if (res.ok || (res.status < 500 && res.status !== 429)) return res;
         if (attempt < RETRY_DELAYS.length) {
           await Bun.sleep(RETRY_DELAYS[attempt]!);
         }
