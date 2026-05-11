@@ -107,18 +107,20 @@ function AgentCostRow({
 
 interface CostBreakdownProps {
   agents: LiveAgent[];
+  sessionCost?: number;
 }
 
-export function CostBreakdown({ agents }: CostBreakdownProps) {
+export function CostBreakdown({ agents, sessionCost }: CostBreakdownProps) {
   const sorted = React.useMemo(
     () => [...agents].sort((a, b) => b.cost_usd - a.cost_usd),
     [agents],
   );
 
-  const totalCost = React.useMemo(
+  const agentCostSum = React.useMemo(
     () => agents.reduce((s, a) => s + a.cost_usd, 0),
     [agents],
   );
+  const totalCost = Math.max(sessionCost ?? 0, agentCostSum);
 
   const totalTokens = React.useMemo(
     () => agents.reduce((s, a) => s + a.tokens_used, 0),

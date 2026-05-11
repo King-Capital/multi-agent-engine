@@ -183,6 +183,8 @@ interface AgentTreePanelProps {
 	onAgentSelect?: (agentId: string | null) => void;
 	/** Hide the back button (used when inline on session list page) */
 	hideBack?: boolean;
+	/** Events-based session cost (more accurate than summing agent costs) */
+	sessionCost?: number;
 }
 
 export function AgentTreePanel({
@@ -190,11 +192,13 @@ export function AgentTreePanel({
 	selectedAgentId,
 	onAgentSelect,
 	hideBack,
+	sessionCost,
 }: AgentTreePanelProps) {
 	const navigate = useNavigate();
 	const [agents, setAgents] = React.useState<LiveAgent[]>([]);
 	const [loading, setLoading] = React.useState(true);
 	const [showTokens, setShowTokens] = React.useState(false);
+	const [eventsCost, setEventsCost] = React.useState(0);
 
 	// Load agents from events + PG
 	React.useEffect(() => {
@@ -209,6 +213,11 @@ export function AgentTreePanel({
 				if (cancelled) return;
 				const fromEvents = buildAgentsFromEvents(dbEvents);
 				setAgents(mergeAgents(pgAgents, fromEvents));
+				// Compute events-based cost from cost_update events
+				const costFromEvents = dbEvents
+					.filter((e) => e.event_type === "cost_update" && e.payload?.cost_usd != null)
+					.reduce((sum, e) => sum + (Number(e.payload?.cost_usd) || 0), 0);
+				setEventsCost(costFromEvents);
 				setLoading(false);
 			})
 			.catch(() => {
@@ -279,7 +288,8 @@ export function AgentTreePanel({
 
 	const tree = React.useMemo(() => buildTree(agents), [agents]);
 	const flat = React.useMemo(() => flattenTree(tree), [tree]);
-	const totalCost = agents.reduce((s, a) => s + a.cost_usd, 0);
+	const agentCostSum = agents.reduce((s, a) => s + a.cost_usd, 0);
+	const totalCost = Math.max(sessionCost ?? 0, eventsCost, agentCostSum);
 	const totalTokens = agents.reduce((s, a) => s + a.tokens_used, 0);
 
 	return (
