@@ -30,6 +30,16 @@ export function trackActivity(
 }
 
 /**
+ * Remove an agent from activity tracking (called when agent completes or fails).
+ */
+export function untrackActivity(
+  agentActivity: Map<string, AgentActivity>,
+  agentId: string,
+): void {
+  agentActivity.delete(agentId);
+}
+
+/**
  * Record a tool call for an agent, resetting idle tracking.
  */
 export function trackToolCall(
