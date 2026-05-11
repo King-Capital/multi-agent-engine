@@ -64,20 +64,20 @@ jobs:
         run: |
           set -euo pipefail
 
-          TOKEN="$(sudo -u postgres psql -d mae -tAc "SELECT api_token FROM users WHERE username = 'skippy' AND api_token IS NOT NULL LIMIT 1")"
+          DB_URL="${DATABASE_URL:-postgres://mae:mae@localhost:5432/mae?sslmode=disable}"
+          TOKEN="$(psql "$DB_URL" -tAc "SELECT api_token FROM users WHERE username = 'skippy' AND api_token IS NOT NULL LIMIT 1")"
           if [ -z "$TOKEN" ]; then
-            TOKEN="$(sudo -u postgres psql -d mae -tAc "SELECT api_token FROM users WHERE role = 'agent' AND api_token IS NOT NULL ORDER BY id LIMIT 1")"
+            TOKEN="$(psql "$DB_URL" -tAc "SELECT api_token FROM users WHERE role = 'agent' AND api_token IS NOT NULL ORDER BY id LIMIT 1")"
           fi
           if [ -z "$TOKEN" ]; then
-            TOKEN="$(sudo -u postgres psql -d mae -tAc "SELECT api_token FROM users WHERE api_token IS NOT NULL ORDER BY id LIMIT 1")"
+            TOKEN="$(psql "$DB_URL" -tAc "SELECT api_token FROM users WHERE api_token IS NOT NULL ORDER BY id LIMIT 1")"
           fi
           if [ -z "$TOKEN" ]; then
             echo "No dashboard API token available for engine runtime" >&2
             exit 1
           fi
 
-          install -d -o mae -g mae -m 0775 /opt/mae/data /opt/mae/data/pipelines
-          chown -R mae:mae /opt/mae/data
+          install -d -m 0775 /opt/mae/data /opt/mae/data/pipelines
 
           tmp_env="$(mktemp)"
           {
@@ -85,7 +85,7 @@ jobs:
             echo "MAE_DASHBOARD_URL=http://localhost:8400"
             printf 'MAE_API_TOKEN=%s\n' "$TOKEN"
           } > "$tmp_env"
-          install -o mae -g mae -m 0600 "$tmp_env" /opt/mae/.env
+          install -m 0600 "$tmp_env" /opt/mae/.env
           rm -f "$tmp_env"
 
       - name: Health check
