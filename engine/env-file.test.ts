@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { loadEnvFile } from "./env-file";
@@ -36,5 +36,22 @@ describe("loadEnvFile", () => {
     const env: Record<string, string | undefined> = {};
     loadEnvFile("/tmp/mae-missing-env-file", env);
     expect(env).toEqual({});
+  });
+
+  test("ignores unreadable files", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mae-env-"));
+    const path = join(dir, ".env");
+    writeFileSync(path, "MAE_DASHBOARD_URL=http://localhost:8400\n");
+    chmodSync(path, 0o000);
+
+    const env: Record<string, string | undefined> = {
+      MAE_DASHBOARD_URL: "http://10.71.20.72:8400",
+    };
+    loadEnvFile(path, env);
+
+    expect(env.MAE_DASHBOARD_URL).toBe("http://10.71.20.72:8400");
+
+    chmodSync(path, 0o600);
+    rmSync(dir, { recursive: true, force: true });
   });
 });

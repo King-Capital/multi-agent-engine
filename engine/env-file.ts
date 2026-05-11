@@ -5,7 +5,13 @@ type MutableEnv = Record<string, string | undefined>;
 export function loadEnvFile(path: string, env: MutableEnv = process.env): void {
   if (!existsSync(path)) return;
 
-  const raw = readFileSync(path, "utf-8");
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf-8");
+  } catch {
+    return;
+  }
+
   for (const line of raw.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
