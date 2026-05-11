@@ -14,7 +14,7 @@
 import * as React from "react";
 import { Zap } from "lucide-react";
 import { apiFetch, api } from "@/lib/api";
-import type { DBSession, DBUser, HistoryEntry } from "@/lib/types";
+import type { DBSession, DBUser } from "@/lib/types";
 import { cn, formatCurrency, shortId, statusColor } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
