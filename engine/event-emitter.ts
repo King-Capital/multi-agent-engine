@@ -308,17 +308,17 @@ export class EventEmitter {
     });
   }
 
-  async sessionEnd(sessionId: string) {
+  async sessionEnd(sessionId: string, status: string = "completed") {
     if (this.droppedEvents > 0) {
       console.error(`[event-emitter] Session ended with ${this.droppedEvents} dropped events`);
     }
-    await this.pgUpdateSession(sessionId, { status: "completed" });
+    await this.pgUpdateSession(sessionId, { status });
     return this.emit({
       session_id: sessionId,
       agent_id: "orchestrator",
       event_type: "session_end",
       timestamp: new Date().toISOString(),
-      data: {},
+      data: { status },
     });
   }
 
