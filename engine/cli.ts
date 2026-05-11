@@ -1000,19 +1000,29 @@ Accepted mutations are git-committed for easy rollback.
   }
 
   case "update": {
-    console.log("[mae] Rebuilding from source...");
+    const installPath = join(process.env.HOME ?? "/tmp", ".local", "bin", "mae");
+    const { copyFileSync, chmodSync, mkdirSync } = await import("fs");
+
+    console.log("[mae] Pulling latest from GitHub...");
+    const pullProc = Bun.spawn(["git", "pull", "origin", "main"], { cwd: BASE_DIR, stdout: "inherit", stderr: "inherit" });
+    await pullProc.exited;
+    if (pullProc.exitCode !== 0) { console.error("[mae] Git pull failed"); process.exit(1); }
+
+    console.log("[mae] Installing dependencies...");
+    const installProc = Bun.spawn(["bun", "install"], { cwd: BASE_DIR, stdout: "inherit", stderr: "inherit" });
+    await installProc.exited;
+
+    console.log("[mae] Building...");
     const buildProc = Bun.spawn(["bun", "build", "engine/cli.ts", "--target=bun", "--outfile=./agent"], { cwd: BASE_DIR, stdout: "inherit", stderr: "inherit" });
     await buildProc.exited;
     if (buildProc.exitCode !== 0) { console.error("[mae] Build failed"); process.exit(1); }
 
-    const installPath = join(process.env.HOME ?? "/tmp", ".local", "bin", "mae");
-    const { copyFileSync, chmodSync } = await import("fs");
+    mkdirSync(join(process.env.HOME ?? "/tmp", ".local", "bin"), { recursive: true });
     copyFileSync(join(BASE_DIR, "agent"), installPath);
     chmodSync(installPath, 0o755);
-    console.log(`[mae] Installed to ${installPath}`);
 
     const ver = (() => { try { return readFile(join(BASE_DIR, "VERSION"), "utf-8").trim(); } catch { return "?"; } })();
-    console.log(`[mae] Updated to v${ver}`);
+    console.log(`[mae] Updated to v${ver} — installed at ${installPath}`);
     break;
   }
 
