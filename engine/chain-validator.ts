@@ -19,6 +19,7 @@ import type {
 } from "./types";
 
 type AgentKind = "lead" | "worker" | "scout" | "agent";
+type ChainSuggestion = NonNullable<ChainValidationReport["suggestedChain"]>;
 
 export interface ValidationAgent {
   name: string;
@@ -256,7 +257,7 @@ function summarize(steps: ValidationStep[]): ChainValidationReport["summary"] {
   };
 }
 
-export function suggestChainForGoal(goal: string): ChainValidationReport["suggestedChain"] {
+export function suggestChainForGoal(goal: string): ChainSuggestion {
   const chains = loadChains().chains;
   const words = goal.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
   const scored = Object.entries(chains).map(([name, chain]) => {
