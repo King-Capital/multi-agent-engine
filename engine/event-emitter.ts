@@ -112,7 +112,7 @@ export class EventEmitter {
     });
   }
 
-  agentSpawn(
+  async agentSpawn(
     sessionId: string,
     agentId: string,
     parentId: string,
@@ -122,6 +122,13 @@ export class EventEmitter {
     teamName: string,
     teamColor: string
   ) {
+    await this.pgCreateAgent({
+      sessionId,
+      agentId,
+      role,
+      persona: name,
+      config: { model, team_name: teamName, team_color: teamColor, parent_id: parentId },
+    });
     return this.emit({
       session_id: sessionId,
       agent_id: agentId,
