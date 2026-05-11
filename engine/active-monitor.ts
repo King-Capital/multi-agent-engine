@@ -5,6 +5,9 @@ import type { BudgetState } from "./budget";
 import { checkBudgetProactive } from "./budget";
 import type { SessionState, PlatformAdapter } from "./types";
 import { createNudgeState, executeNudge, type NudgeState } from "./nudge";
+import { createLogger } from "./logger";
+
+const log = createLogger("active-monitor");
 
 export interface ActiveMonitorOpts {
   agentActivity: Map<string, AgentActivity>;
@@ -63,9 +66,16 @@ export class ActiveMonitor {
 
       if (isHeartbeat) {
         const status = idle > IDLE_WARN_MS ? "idle" : "working";
-        console.log(
-          `[heartbeat] ${activity.name} (${activity.role}): ${status} | ${activity.toolCalls} tools | last: ${activity.lastTool || "none"} | idle: ${Math.round(idle / 1000)}s`,
-        );
+        log.debug("Heartbeat", {
+          agent_id: id,
+          agent_name: activity.name,
+          role: activity.role,
+          status,
+          tool_calls: activity.toolCalls,
+          last_tool: activity.lastTool || "none",
+          idle_s: Math.round(idle / 1000),
+          session_id: this.opts.session.id,
+        });
       }
 
       if (idle <= IDLE_WARN_MS) {
@@ -78,9 +88,12 @@ export class ActiveMonitor {
 
       if (!activity.warned) {
         activity.warned = true;
-        console.warn(
-          `[monitor] STALL: ${activity.name} (${id}) -- ${Math.round(idle / 1000)}s`,
-        );
+        log.warn("Agent stall detected", {
+          agent_id: id,
+          agent_name: activity.name,
+          idle_s: Math.round(idle / 1000),
+          session_id: this.opts.session.id,
+        });
         this.opts.emitter.stallDetected(
           this.opts.session.id,
           id,
@@ -118,7 +131,7 @@ export class ActiveMonitor {
       adapter,
     )
       .catch((err) => {
-        console.error(`[monitor] Nudge failed for ${activity.name}:`, err);
+        log.error("Nudge failed", { agent_id: agentId, agent_name: activity.name, error: String(err), session_id: this.opts.session.id });
       })
       .finally(() => {
         if (needsLLM) this.llmNudgeInFlight = false;
@@ -136,7 +149,7 @@ export class ActiveMonitor {
 
     if (shouldPause) {
       this.autoPauseFired = true;
-      console.warn("[monitor] Budget threshold exceeded — auto-pausing session");
+      log.warn("Budget threshold exceeded -- auto-pausing session", { session_id: this.opts.session.id });
       this.opts.emitter.autoPause(this.opts.session.id, "budget");
       this.opts.onAutoPause("budget");
     }

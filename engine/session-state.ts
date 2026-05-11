@@ -1,3 +1,7 @@
+import { createLogger } from "./logger";
+
+const log = createLogger("session-state");
+
 export type SessionStatus = "active" | "paused" | "completed" | "error";
 
 const VALID_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = {
@@ -15,12 +19,10 @@ export function transitionStatus(
   const current = session.status as SessionStatus;
   const allowed = VALID_TRANSITIONS[current];
   if (!allowed || !allowed.includes(newStatus)) {
-    console.warn(
-      `[session-state] Rejected status transition: ${current} → ${newStatus} (source: ${source}, session: ${session.id ?? "unknown"})`,
-    );
+    log.warn("Rejected status transition", { from: current, to: newStatus, source, session_id: session.id ?? "unknown" });
     return false;
   }
   session.status = newStatus;
-  console.log(`[session-state] Status: ${current} → ${newStatus} (source: ${source})`);
+  log.info("Status transition", { from: current, to: newStatus, source, session_id: session.id });
   return true;
 }

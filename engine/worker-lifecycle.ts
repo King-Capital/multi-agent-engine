@@ -6,7 +6,10 @@ import {
   loadPreamble,
   resolveModelForRole,
 } from "./config";
+import { createLogger } from "./logger";
 import { logPerformance } from "./perf-log";
+
+const log = createLogger("worker-lifecycle");
 import { delegateWithHealing } from "./self-healing";
 import { summarizeOutput } from "./output-parsing";
 import { parseReviews } from "./output-parsing";
@@ -53,7 +56,7 @@ export async function retryWorker(
   const workerPersona = loadPersona(member.path);
   const workerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 
-  console.log(`[orchestrator] Retrying ${member.name} (attempt ${attempt}) with reworked prompt`);
+  log.info("Retrying worker with reworked prompt", { worker: member.name, attempt, session_id: session.id });
 
   const retryResolved = resolveModelForRole("worker", member.model);
 
@@ -145,7 +148,7 @@ export async function spawnSenior(
   const domainNames = failedReview.srDomains ?? [];
   const srId = `${step.team}-sr-${domainNames.join("-").toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 
-  console.log(`[orchestrator] Spawning Sr. for ${failedReview.workerName} -- combining domains: ${domainNames.join(", ")}`);
+  log.info("Spawning Sr. agent", { worker: failedReview.workerName, domains: domainNames, session_id: session.id });
 
   // Find and load personas for each domain
   const memberPersonas = domainNames.map(name => {
@@ -161,7 +164,7 @@ export async function spawnSenior(
   }).filter((p): p is PersonaConfig => p !== null);
 
   if (memberPersonas.length === 0) {
-    console.warn(`[orchestrator] No personas found for Sr. domains: ${domainNames.join(", ")}`);
+    log.warn("No personas found for Sr. domains", { domains: domainNames, session_id: session.id });
     return {
       agentId: srId, agentName: `Sr. (${domainNames.join("+")})`,
       output: "ERROR: Could not find personas for requested domains",
@@ -284,7 +287,7 @@ export async function leadReviewWorkers(
 ): Promise<WorkerReview[]> {
   const { emitter, messageSenders, trackToolCall, orchestratorLoop, pausedSessions } = deps;
 
-  console.log(`[orchestrator] ${teamConfig.lead.name} reviewing ${workerResults.length} workers`);
+  log.info("Lead reviewing workers", { lead: teamConfig.lead.name, worker_count: workerResults.length, session_id: session.id });
 
   await emitter.message(session.id, leadId, "Orchestrator", "user",
     `${teamConfig.lead.name} is now reviewing worker output.`);

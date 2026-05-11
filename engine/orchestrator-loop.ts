@@ -12,6 +12,9 @@ import type { EventEmitter } from "./event-emitter";
 import type { BudgetState } from "./budget";
 import { loadTeams, loadPersona, resolveModelForRole, buildSystemPrompt, getChain } from "./config";
 import { sanitizeAgentInput } from "./security";
+import { createLogger } from "./logger";
+
+const log = createLogger("orchestrator-loop");
 
 const ORCHESTRATOR_REASONING_PROMPT = `You are the orchestrator intelligence for a multi-agent coding session. You monitor progress, detect issues, and take corrective action.
 
@@ -127,19 +130,19 @@ export class OrchestratorLoop {
       if (this.pendingTrigger) {
         const { reason, context } = this.pendingTrigger;
         this.pendingTrigger = null;
-        void this.runReasoningCycle(reason, context).catch(err => console.error("[orchestrator-loop] Periodic cycle failed:", err));
+        void this.runReasoningCycle(reason, context).catch(err => log.error("Periodic cycle failed", { trigger: reason, error: String(err), session_id: this.opts.session.id }));
       } else {
-        void this.runReasoningCycle("periodic").catch(err => console.error("[orchestrator-loop] Periodic cycle failed:", err));
+        void this.runReasoningCycle("periodic").catch(err => log.error("Periodic cycle failed", { trigger: "periodic", error: String(err), session_id: this.opts.session.id }));
       }
     }, ms);
-    console.log(`[orchestrator-loop] Started (interval: ${ms}ms)`);
+    log.info("Started", { interval_ms: ms, session_id: this.opts.session.id });
   }
 
   stop(): void {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
-      console.log("[orchestrator-loop] Stopped");
+      log.info("Stopped", { session_id: this.opts.session.id });
     }
   }
 
@@ -149,7 +152,7 @@ export class OrchestratorLoop {
       this.pendingTrigger = { reason, context };
       return;
     }
-    void this.runReasoningCycle(reason, context).catch(err => console.error("[orchestrator-loop] Triggered cycle failed:", err));
+    void this.runReasoningCycle(reason, context).catch(err => log.error("Triggered cycle failed", { trigger: reason, error: String(err), session_id: this.opts.session.id }));
   }
 
   async handleUserMessage(msg: string): Promise<void> {
@@ -176,7 +179,7 @@ export class OrchestratorLoop {
 
       // Use cached persona/model/prompt (loaded once in constructor)
       if (!this.orchPersona) {
-        console.error("[orchestrator-loop] No orchestrator persona loaded, skipping cycle");
+        log.error("No orchestrator persona loaded, skipping cycle", { session_id: this.opts.session.id });
         return;
       }
 
@@ -221,11 +224,14 @@ export class OrchestratorLoop {
       this.opts.session.totalCost += result.costUsd;
       this.opts.session.totalTokens += result.tokensUsed;
 
-      console.log(
-        `[orchestrator-loop] Cycle (${trigger}): ${assessment} | actions: ${actions.map((a) => a.type).join(", ")}`,
-      );
+      log.info("Cycle complete", {
+        trigger,
+        assessment,
+        actions: actions.map((a) => a.type),
+        session_id: this.opts.session.id,
+      });
     } catch (err) {
-      console.error(`[orchestrator-loop] Cycle failed (${trigger}):`, err);
+      log.error("Cycle failed", { trigger, error: String(err), session_id: this.opts.session.id });
     } finally {
       this.cycleInFlight = false;
     }

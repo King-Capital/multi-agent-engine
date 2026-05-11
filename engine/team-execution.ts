@@ -5,7 +5,10 @@ import {
   buildSystemPrompt,
   resolveModelForRole,
 } from "./config";
+import { createLogger } from "./logger";
 import { delegateWithHealing } from "./self-healing";
+
+const log = createLogger("team-execution");
 import { isGitRepo, createWorktree, mergeWorktree, cleanupWorktree } from "./worktree";
 import { parseAssignment, summarizeOutput } from "./output-parsing";
 import { collectIncrementally } from "./incremental-synthesis";
@@ -57,7 +60,7 @@ export async function runTeamStep(
   const leadPersona = loadPersona(teamConfig.lead.path);
   const leadId = `${step.team}-lead`;
 
-  console.log(`[orchestrator] Delegating to team: ${teamConfig["team-name"]}`);
+  log.info("Delegating to team", { team: teamConfig["team-name"], session_id: session.id });
 
   trackActivity(leadId, teamConfig.lead.name, "lead");
   const leadResolved = resolveModelForRole("lead", teamConfig.lead.model);
@@ -149,7 +152,7 @@ export async function runTeamStep(
   const useWorktrees = teamConfig.members.length > 1 && await isGitRepo(session.workingDir);
   const workerWtIds: string[] = [];
 
-  console.log(`[orchestrator] Lead briefed. Spawning ${teamConfig.members.length} workers: ${teamConfig.members.map((m) => m.name).join(", ")}`);
+  log.info("Lead briefed, spawning workers", { team: teamConfig["team-name"], worker_count: teamConfig.members.length, workers: teamConfig.members.map((m) => m.name), session_id: session.id });
   await emitter.message(session.id, "orch-1", "Orchestrator", "user",
     `${teamConfig["team-name"]} lead assigned ${teamConfig.members.length} workers: ${teamConfig.members.map((m) => m.name).join(", ")}.`);
 
@@ -246,7 +249,7 @@ export async function runTeamStep(
 
       return result;
     } catch (err) {
-      console.error(`[orchestrator] Worker ${member.name} threw:`, err);
+      log.error("Worker threw", { worker: member.name, worker_id: workerId, error: String(err), session_id: session.id });
       await emitter.agentDone(session.id, workerId, "FAILED");
       untrackActivity(workerId);
       throw err;
@@ -292,16 +295,16 @@ export async function runTeamStep(
       const { merged, hadChanges } = await mergeWorktree(session.workingDir, wtId);
       if (hadChanges) {
         if (merged) {
-          console.log(`[orchestrator] Merged worktree ${wtId} (had changes)`);
+          log.info("Merged worktree", { worktree_id: wtId, session_id: session.id });
         } else {
-          console.error(`[orchestrator] CRITICAL: Worktree merge failed for ${wtId} — worker changes LOST. Manual recovery needed from .git/worktrees/`);
+          log.critical("Worktree merge failed -- worker changes LOST", { worktree_id: wtId, recovery: ".git/worktrees/", session_id: session.id });
           await emitter.message(session.id, "orch-1", "Orchestrator", "user",
             `ERROR: Worktree merge failed for ${wtId} — worker changes were lost. Check .git/worktrees/ for manual recovery.`);
         }
       }
       await cleanupWorktree(session.workingDir, wtId);
     } catch (e) {
-      console.error(`[orchestrator] Worktree cleanup failed for ${wtId}:`, e);
+      log.error("Worktree cleanup failed", { worktree_id: wtId, error: String(e), session_id: session.id });
     }
   }
 
@@ -321,7 +324,7 @@ export async function runTeamStep(
       const workerName = teamConfig.members[i]?.name ?? `Worker ${i + 1}`;
       const errorMsg = outcome.reason?.message ?? String(outcome.reason) ?? "unknown error";
       failedWorkers.push({ name: workerName, error: errorMsg });
-      console.error(`[orchestrator] Worker ${workerName} failed:`, outcome.reason);
+      log.error("Worker failed", { worker: workerName, error: errorMsg, team: teamConfig["team-name"], session_id: session.id });
 
       // Emit worker_failed event to dashboard
       await emitter.emit({
@@ -367,13 +370,13 @@ export async function runTeamStep(
     const needsWork = reviews.filter(r => r.grade === "NEEDS_WORK");
     if (needsWork.length === 0) break;
 
-    console.log(`[orchestrator] Retry cycle ${attempt}/${maxRetries}: ${needsWork.length} workers need rework`);
+    log.info("Retry cycle", { attempt, max_retries: maxRetries, workers_needing_rework: needsWork.length, session_id: session.id });
     await emitter.message(session.id, leadId, "Orchestrator", "user",
       `Retry cycle ${attempt}/${maxRetries}: ${needsWork.map(r => r.workerName).join(", ")} need rework.`);
 
     for (const review of needsWork) {
       if (review.directFix) {
-        console.log(`[orchestrator] ${review.workerName}: lead applying direct fix`);
+        log.info("Lead applying direct fix", { worker: review.workerName, session_id: session.id });
         await emitter.message(session.id, leadId, teamConfig.lead.name, "user",
           `Applying direct fix for ${review.workerName}:\n${review.directFix.slice(0, 500)}`);
         review.grade = "PASS";
@@ -467,7 +470,7 @@ export async function runParallelStep(
   adapterName?: string,
 ): Promise<DelegateResult[]> {
   const teams = step.parallel!;
-  console.log(`[orchestrator] Running ${teams.length} teams in parallel: ${teams.map((t) => t.team).join(", ")}`);
+  log.info("Running parallel teams", { team_count: teams.length, teams: teams.map((t) => t.team), session_id: session.id });
 
   const useWorktrees = teams.length > 1 && await isGitRepo(session.workingDir);
   const teamWtIds: string[] = [];
@@ -487,7 +490,7 @@ export async function runParallelStep(
       const wtId = `${session.id.slice(0, 8)}-team-${idx}`;
       teamSession.workingDir = await createWorktree(session.workingDir, wtId);
       teamWtIds.push(wtId);
-      console.log(`[orchestrator] Created team worktree for ${t.team}: ${teamSession.workingDir}`);
+      log.debug("Created team worktree", { team: t.team, worktree_dir: teamSession.workingDir, session_id: session.id });
     }
     return runTeamStep(deps, teamSession, { ...step, team: t.team }, task, previousOutput, adapterName);
   });
@@ -500,16 +503,16 @@ export async function runParallelStep(
       const { merged, hadChanges } = await mergeWorktree(session.workingDir, wtId);
       if (hadChanges) {
         if (merged) {
-          console.log(`[orchestrator] Merged team worktree ${wtId} (had changes)`);
+          log.info("Merged team worktree", { worktree_id: wtId, session_id: session.id });
         } else {
-          console.error(`[orchestrator] CRITICAL: Team worktree merge failed for ${wtId} — worker changes LOST. Manual recovery needed from .git/worktrees/`);
+          log.critical("Team worktree merge failed -- worker changes LOST", { worktree_id: wtId, recovery: ".git/worktrees/", session_id: session.id });
           await deps.emitter.message(session.id, "orch-1", "Orchestrator", "user",
             `ERROR: Team worktree merge failed for ${wtId} — worker changes were lost. Check .git/worktrees/ for manual recovery.`);
         }
       }
       await cleanupWorktree(session.workingDir, wtId);
     } catch (e) {
-      console.error(`[orchestrator] Team worktree cleanup failed for ${wtId}:`, e);
+      log.error("Team worktree cleanup failed", { worktree_id: wtId, error: String(e), session_id: session.id });
     }
   }
 
@@ -530,7 +533,7 @@ export async function runParallelStep(
       const teamName = teams[i]?.team ?? `Team ${i + 1}`;
       const errorMsg = outcome.reason?.message ?? String(outcome.reason) ?? "unknown error";
       failedTeams.push({ name: teamName, error: errorMsg });
-      console.error(`[orchestrator] Parallel team ${teamName} failed:`, outcome.reason);
+      log.error("Parallel team failed", { team: teamName, error: errorMsg, session_id: session.id });
 
       // Emit worker_failed event to dashboard for each failed team
       await deps.emitter.emit({
@@ -556,7 +559,7 @@ export async function runParallelStep(
   const synthId = `synth-${session.id.slice(0, 8)}`;
   const adapter = getAdapter(adapterName);
 
-  console.log(`[orchestrator] Synthesizing ${results.length} parallel team outputs`);
+  log.info("Synthesizing parallel team outputs", { result_count: results.length, session_id: session.id });
 
   await emitter.agentSpawn(session.id, synthId, "orch-1", "Synthesis", "orchestrator",
     synthResolved.model, "Synthesis", "#a855f7");

@@ -1,6 +1,9 @@
 import { loadModelRouting } from "./config";
 import type { EventEmitter } from "./event-emitter";
 import type { SessionState } from "./types";
+import { createLogger } from "./logger";
+
+const log = createLogger("budget");
 
 export interface BudgetLimits {
   max_per_session_usd: number;
@@ -33,11 +36,11 @@ export function loadBudgets(): BudgetState {
   try {
     const budgets = loadModelRouting().budgets ?? null;
     if (budgets) {
-      console.log(`[budget] Limits: $${budgets.max_per_session_usd}/session, $${budgets.max_per_agent_usd}/agent, ${(budgets.max_total_tokens / 1e6).toFixed(0)}M tokens`);
+      log.info("Limits loaded", { max_per_session_usd: budgets.max_per_session_usd, max_per_agent_usd: budgets.max_per_agent_usd, max_total_tokens_m: Number((budgets.max_total_tokens / 1e6).toFixed(0)) });
     }
     return { budgets, budgetWarned: false };
   } catch (err) {
-    console.error("[budget] CRITICAL: Failed to load model-routing.yaml — applying safe defaults:", err);
+    log.critical("Failed to load model-routing.yaml -- applying safe defaults", { error: String(err) });
     return {
       budgets: {
         max_per_session_usd: 50.0,
@@ -127,7 +130,7 @@ export function checkBudget(
 
   if (!budgetState.budgetWarned && projectedCost >= budgetState.budgets.warn_at_usd) {
     budgetState.budgetWarned = true;
-    console.warn(`[budget] WARNING: Projected session cost $${projectedCost.toFixed(3)} passed warn threshold $${budgetState.budgets.warn_at_usd}`);
+    log.warn("Projected session cost passed warn threshold", { projected_cost_usd: projectedCost, warn_threshold_usd: budgetState.budgets.warn_at_usd, agent_id: agentId, session_id: session.id });
     emitter.message(session.id, "orch-1", "Orchestrator", "user",
       `Budget warning: projected session cost $${projectedCost.toFixed(2)} has passed the $${budgetState.budgets.warn_at_usd} threshold.`);
   }

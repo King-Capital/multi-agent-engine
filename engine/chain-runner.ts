@@ -5,6 +5,9 @@ import {
   resolveModelForRole,
 } from "./config";
 import { sanitizeAgentInput } from "./security";
+import { createLogger } from "./logger";
+
+const log = createLogger("chain-runner");
 
 function wrapStepOutput(output: string): string {
   return `<previous_agent_output>\n${sanitizeAgentInput(output)}\n</previous_agent_output>`;
@@ -236,7 +239,7 @@ export async function runDeterministicStep(
       }
 
       const errorMsg = (stderr || stdout).slice(0, 1000);
-      console.warn(`[orchestrator] Deterministic step failed (attempt ${attempt + 1}/${maxRetries + 1}): ${errorMsg.slice(0, 200)}`);
+      log.warn("Deterministic step failed", { label, attempt: attempt + 1, max_attempts: maxRetries + 1, error: errorMsg.slice(0, 200), session_id: session.id });
 
       if (onFailure === "continue") {
         await emitter.message(session.id, "orch-1", "Orchestrator", "user",
@@ -532,7 +535,7 @@ export async function runChain(
       let attempts = 0;
       while (attempts < fb.max_attempts && stepResult && (stepResult.grade === "FEEDBACK" || stepResult.grade === "FAILED")) {
         attempts++;
-        console.log(`[orchestrator] Retry ${attempts}/${fb.max_attempts} -- grade was ${stepResult.grade}`);
+        log.info("Retrying step", { attempt: attempts, max_attempts: fb.max_attempts, grade: stepResult.grade, session_id: session.id });
         await deps.emitter.message(session.id, "orch-1", "Orchestrator", "user",
           `Retry ${attempts}/${fb.max_attempts}: re-running (grade: ${stepResult.grade}).`);
 
@@ -543,7 +546,7 @@ export async function runChain(
         previousOutput = stepResult.output;
       }
       if (stepResult && (stepResult.grade === "FEEDBACK" || stepResult.grade === "FAILED")) {
-        console.warn(`[orchestrator] Exhausted ${fb.max_attempts} retries. Escalating to: ${fb.escalate_to}`);
+        log.warn("Exhausted retries, escalating", { max_attempts: fb.max_attempts, escalate_to: fb.escalate_to, grade: stepResult.grade, session_id: session.id });
         await deps.emitter.message(session.id, "orch-1", "Orchestrator", "user",
           `⚠️ Exhausted ${fb.max_attempts} feedback retries for step ${i + 1}. Escalation target: ${fb.escalate_to}. Grade: ${stepResult.grade}.`);
       }
