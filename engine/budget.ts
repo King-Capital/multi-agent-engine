@@ -36,8 +36,18 @@ export function loadBudgets(): BudgetState {
       console.log(`[budget] Limits: $${budgets.max_per_session_usd}/session, $${budgets.max_per_agent_usd}/agent, ${(budgets.max_total_tokens / 1e6).toFixed(0)}M tokens`);
     }
     return { budgets, budgetWarned: false };
-  } catch {
-    return { budgets: null, budgetWarned: false };
+  } catch (err) {
+    console.error("[budget] CRITICAL: Failed to load model-routing.yaml — applying safe defaults:", err);
+    return {
+      budgets: {
+        max_per_session_usd: 50.0,
+        warn_at_usd: 40.0,
+        max_per_agent_usd: 10.0,
+        max_total_tokens: 10_000_000,
+        budget_action: "pause",
+      },
+      budgetWarned: false,
+    };
   }
 }
 
