@@ -232,7 +232,6 @@ export class Orchestrator {
     const orchPersona = loadPersona(teams.orchestrator.path);
     const orchResolved = resolveModelForRole("orchestrator", teams.orchestrator.model);
     await this.emitter.agentSpawn(sessionId, "orch-1", "", orchPersona.name, "orchestrator", orchResolved.model, "Orchestration", teams.orchestrator.color ?? "#36f9f6");
-    await this.emitter.pgCreateAgent({ sessionId, agentId: "orch-1", role: "orchestrator", persona: orchPersona.name });
     log.info("Session started", { session_id: sessionId, name: sessionName, chain: chainName, dashboard: `${this.dashboardUrl}/session/${sessionId}`, task: opts.task?.slice(0, 200) });
     log.info("Trace file", { session_id: sessionId, path: join(TRACE_DIR, `${sessionId}.jsonl`) });
 

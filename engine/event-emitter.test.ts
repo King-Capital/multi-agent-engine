@@ -8,7 +8,10 @@ import { EventEmitter } from "./event-emitter";
 /** Captures fetch calls and returns configurable responses */
 function installFetchMock() {
   const calls: { url: string; init: RequestInit }[] = [];
-  let responseFactory: (url: string) => Response = () => new Response("ok", { status: 200 });
+  let responseFactory: (url: string) => Response = (url) => {
+    if (url.includes("/agents")) return new Response(JSON.stringify({ id: 1 }), { status: 201, headers: { "Content-Type": "application/json" } });
+    return new Response("ok", { status: 200 });
+  };
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
