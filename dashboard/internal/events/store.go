@@ -145,7 +145,11 @@ func (s *Store) applyEvent(evt models.Event) {
 		sess.TaskPrompt = evt.Data.TaskPrompt
 
 	case models.EventSessionEnd:
-		sess.Status = "completed"
+		if s := string(evt.Data.Status); s != "" {
+			sess.Status = s
+		} else {
+			sess.Status = "completed"
+		}
 
 	case models.EventPause:
 		sess.Status = "paused"

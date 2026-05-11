@@ -1,16 +1,17 @@
 import { randomUUID } from "crypto";
-import { getChain, loadPrompt, loadTeams, loadPersona, resolveModelForRole } from "./config";
+import { getChain, loadPrompt, loadTeams, loadPersona, resolveModelForRole, loadModelRouting } from "./config";
 import { EventEmitter } from "./event-emitter";
 import { sanitizeAgentInput } from "./security";
 import { PipelineTracker } from "./pipeline-state";
 import { SandboxPool } from "./sandbox-pool";
-import { trackActivity, trackToolCall } from "./monitoring";
+import { trackActivity, trackToolCall, untrackActivity } from "./monitoring";
 import type { AgentActivity } from "./monitoring";
 import { ActiveMonitor } from "./active-monitor";
 import { loadBudgets, checkBudget } from "./budget";
 import type { BudgetState } from "./budget";
 import { sendUserMessage, listenForUserMessages, stopListening } from "./messaging";
 import { OrchestratorLoop } from "./orchestrator-loop";
+import { ConcurrencyLimiter } from "./concurrency";
 
 // Extracted chain-runner module
 import {
@@ -63,7 +64,7 @@ export class Orchestrator {
         session.status = "error";
         this.activeMonitor?.stop();
         stopListening(this.sseAbort);
-        await this.emitter.sessionEnd(id);
+        await this.emitter.sessionEnd(id, session.status);
       }
     }
     this.sessions.clear();
@@ -253,7 +254,7 @@ export class Orchestrator {
     this.orchestratorLoop?.stop();
     this.orchestratorLoop = null;
     this.actionQueues.delete(sessionId);
-    await this.emitter.sessionEnd(sessionId);
+    await this.emitter.sessionEnd(sessionId, session.status);
     stopListening(this.sseAbort);
     this.sseAbort = null;
     const prefix = `${sessionId}:`;
@@ -279,13 +280,22 @@ export class Orchestrator {
   }
 
   private buildTeamDeps() {
+    const routing = loadModelRouting();
+    const concurrency = routing.concurrency;
+    const sessionLimiter = concurrency?.max_concurrent_agents
+      ? new ConcurrencyLimiter(concurrency.max_concurrent_agents)
+      : undefined;
+
     return {
       emitter: this.emitter, messageSenders: this.messageSenders,
       trackActivity: (agentId: string, name: string, role: string) => trackActivity(this.agentActivity, agentId, name, role),
+      untrackActivity: (agentId: string) => untrackActivity(this.agentActivity, agentId),
       trackToolCall: (agentId: string, tool: string) => trackToolCall(this.agentActivity, agentId, tool),
       checkBudget: (session: SessionState, agentId: string, agentCost: number, agentTokens: number) => checkBudget(this.budgetState, session, agentId, agentCost, agentTokens, this.emitter),
       getAdapter: (name?: string) => this.getAdapter(name),
       orchestratorLoop: this.orchestratorLoop,
+      sessionLimiter,
+      teamLimiterMax: concurrency?.max_concurrent_per_team,
     };
   }
 

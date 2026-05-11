@@ -238,6 +238,11 @@ export interface RoleDefault {
   thinking: ThinkingLevel;
 }
 
+export interface ConcurrencyConfig {
+  max_concurrent_agents: number;
+  max_concurrent_per_team: number;
+}
+
 export interface ModelRoutingConfig {
   tiers: Record<string, TierConfig>;
   aliases?: Record<string, string>;
@@ -245,6 +250,7 @@ export interface ModelRoutingConfig {
   roleDefaults: Record<string, RoleDefault>;
   crossModelPairs?: { builder: string; verifier: string }[];
   budgets?: { max_per_session_usd: number; warn_at_usd: number; max_per_agent_usd: number; max_total_tokens: number; budget_action?: "warn" | "pause" };
+  concurrency?: ConcurrencyConfig;
 }
 
 export interface StreamEvent {

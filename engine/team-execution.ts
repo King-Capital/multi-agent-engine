@@ -22,15 +22,21 @@ import type {
 } from "./types";
 import { buildStreamHandler, buildSendMessage } from "./stream-handler";
 import type { OrchestratorLoop } from "./orchestrator-loop";
+import type { ConcurrencyLimiter } from "./concurrency";
 
 export interface TeamExecutionDeps {
   emitter: EventEmitter;
   messageSenders: Map<string, (msg: string) => void>;
   trackActivity: (agentId: string, name: string, role: string) => void;
+  untrackActivity: (agentId: string) => void;
   trackToolCall: (agentId: string, tool: string) => void;
   checkBudget: (session: SessionState, agentId: string, agentCost: number, agentTokens: number) => void;
   getAdapter: (name?: string) => PlatformAdapter;
   orchestratorLoop?: OrchestratorLoop | null;
+  /** Global limiter across all teams in a session */
+  sessionLimiter?: ConcurrencyLimiter;
+  /** Per-team limiter (created per runTeamStep call) */
+  teamLimiterMax?: number;
 }
 
 /**
@@ -44,7 +50,7 @@ export async function runTeamStep(
   previousOutput: string,
   adapterName?: string,
 ): Promise<DelegateResult> {
-  const { emitter, messageSenders, trackActivity, trackToolCall, checkBudget, getAdapter } = deps;
+  const { emitter, messageSenders, trackActivity, untrackActivity, trackToolCall, checkBudget, getAdapter } = deps;
   const teamConfig = getTeam(step.team!);
   const adapter = getAdapter(adapterName);
   const leadPersona = loadPersona(teamConfig.lead.path);
@@ -130,6 +136,7 @@ export async function runTeamStep(
 
   if (leadResult.grade === "FAILED" || !teamConfig.members.length) {
     await emitter.agentDone(session.id, leadId, leadResult.grade);
+    untrackActivity(leadId);
     const msg = leadResult.grade === "FAILED"
       ? `${teamConfig["team-name"]} lead could not complete the task.`
       : `${teamConfig["team-name"]} complete (lead only).`;
@@ -147,7 +154,15 @@ export async function runTeamStep(
 
   const workerAssignments = new Map<string, string>();
 
+  // Create per-team concurrency limiter if configured
+  const { ConcurrencyLimiter: LimiterClass } = await import("./concurrency");
+  const teamLimiter = deps.teamLimiterMax
+    ? new LimiterClass(deps.teamLimiterMax)
+    : null;
+
   const workerPromises = teamConfig.members.map(async (member) => {
+    // Wrap entire worker in concurrency limiters (session-global + per-team)
+    const runWorker = async () => {
     const workerPersona = loadPersona(member.path);
     const workerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 
@@ -226,13 +241,26 @@ export async function runTeamStep(
       const workerSummary = summarizeOutput(result.output, 1500);
       await emitter.message(session.id, workerId, member.name, "user", workerSummary);
       await emitter.agentDone(session.id, workerId, result.grade);
+      untrackActivity(workerId);
 
       return result;
     } catch (err) {
       console.error(`[orchestrator] Worker ${member.name} threw:`, err);
       await emitter.agentDone(session.id, workerId, "FAILED");
+      untrackActivity(workerId);
       throw err;
     }
+    }; // end runWorker
+
+    // Apply concurrency limiters: session-global wraps per-team
+    if (deps.sessionLimiter && teamLimiter) {
+      return deps.sessionLimiter.run(() => teamLimiter.run(runWorker));
+    } else if (deps.sessionLimiter) {
+      return deps.sessionLimiter.run(runWorker);
+    } else if (teamLimiter) {
+      return teamLimiter.run(runWorker);
+    }
+    return runWorker();
   });
 
   const settled = await collectIncrementally(workerPromises, {
