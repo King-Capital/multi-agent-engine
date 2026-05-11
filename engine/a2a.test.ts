@@ -5,8 +5,9 @@ import type { DelegateOptions, PersonaConfig, DomainConfig } from "./types";
 // --- Mock A2A Server ---
 
 let mockServer: ReturnType<typeof Bun.serve> | null = null;
-const MOCK_PORT = 19876;
-const MOCK_URL = `http://localhost:${MOCK_PORT}`;
+const githubRunId = Number(Bun.env.GITHUB_RUN_ID ?? 0);
+const MOCK_PORT = githubRunId ? 20000 + (githubRunId % 20000) : 19876;
+const mockUrl = `http://localhost:${MOCK_PORT}`;
 
 // Track requests for assertions
 const receivedRequests: Array<{ method: string; params: any }> = [];
@@ -27,7 +28,7 @@ beforeAll(() => {
         return new Response(JSON.stringify({
           name: "Mock A2A Agent",
           description: "A test agent for A2A adapter testing",
-          url: `${MOCK_URL}/a2a/jsonrpc`,
+          url: `${mockUrl}/a2a/jsonrpc`,
           version: "1.0.0",
           protocolVersion: "1.0.0",
           skills: [
@@ -180,7 +181,7 @@ describe("A2A adapter", () => {
   describe("agent discovery", () => {
     it("fetches agent card from /.well-known/agent-card.json", async () => {
       const adapter = new A2AAdapter();
-      const endpoint: A2AEndpoint = { url: MOCK_URL };
+      const endpoint: A2AEndpoint = { url: mockUrl };
       const card = await adapter.fetchAgentCard(endpoint);
 
       expect(card).not.toBeNull();
@@ -191,7 +192,7 @@ describe("A2A adapter", () => {
 
     it("discovers and registers remote agent", async () => {
       const adapter = new A2AAdapter();
-      const card = await adapter.discover(MOCK_URL);
+      const card = await adapter.discover(mockUrl);
 
       expect(card).not.toBeNull();
       expect(card!.name).toBe("Mock A2A Agent");
@@ -214,7 +215,7 @@ describe("A2A adapter", () => {
       receivedRequests.length = 0;
 
       const adapter = new A2AAdapter();
-      adapter.setDefaultEndpoint({ url: `${MOCK_URL}/a2a/jsonrpc`, streaming: false });
+      adapter.setDefaultEndpoint({ url: `${mockUrl}/a2a/jsonrpc`, streaming: false });
 
       const result = await adapter.delegate(makeDelegateOpts());
 
@@ -235,7 +236,7 @@ describe("A2A adapter", () => {
       receivedRequests.length = 0;
 
       const adapter = new A2AAdapter();
-      adapter.setDefaultEndpoint({ url: `${MOCK_URL}/a2a/jsonrpc`, streaming: false });
+      adapter.setDefaultEndpoint({ url: `${mockUrl}/a2a/jsonrpc`, streaming: false });
 
       const result = await adapter.delegate(makeDelegateOpts());
 
@@ -249,7 +250,7 @@ describe("A2A adapter", () => {
       receivedRequests.length = 0;
 
       const adapter = new A2AAdapter();
-      adapter.setDefaultEndpoint({ url: `${MOCK_URL}/a2a/jsonrpc`, streaming: false });
+      adapter.setDefaultEndpoint({ url: `${mockUrl}/a2a/jsonrpc`, streaming: false });
 
       const result = await adapter.delegate(makeDelegateOpts());
 
@@ -264,7 +265,7 @@ describe("A2A adapter", () => {
       receivedRequests.length = 0;
 
       const adapter = new A2AAdapter();
-      adapter.setDefaultEndpoint({ url: `${MOCK_URL}/a2a/jsonrpc`, streaming: false });
+      adapter.setDefaultEndpoint({ url: `${mockUrl}/a2a/jsonrpc`, streaming: false });
 
       const result = await adapter.delegate(makeDelegateOpts());
 
@@ -280,7 +281,7 @@ describe("A2A adapter", () => {
 
       const adapter = new A2AAdapter();
       adapter.setDefaultEndpoint({
-        url: `${MOCK_URL}/a2a/jsonrpc`,
+        url: `${mockUrl}/a2a/jsonrpc`,
         streaming: false,
         pollIntervalMs: 100,
       });
@@ -313,7 +314,7 @@ describe("A2A adapter", () => {
       receivedRequests.length = 0;
 
       const adapter = new A2AAdapter();
-      adapter.registerEndpoint("validation", { url: `${MOCK_URL}/a2a/jsonrpc`, streaming: false });
+      adapter.registerEndpoint("validation", { url: `${mockUrl}/a2a/jsonrpc`, streaming: false });
 
       const result = await adapter.delegate(makeDelegateOpts({ teamName: "Validation" }));
 
@@ -329,7 +330,7 @@ describe("A2A adapter", () => {
 
     it("is available when endpoint has valid agent card", async () => {
       const adapter = new A2AAdapter();
-      adapter.registerEndpoint("test", { url: MOCK_URL });
+      adapter.registerEndpoint("test", { url: mockUrl });
       expect(await adapter.isAvailable()).toBe(true);
     });
   });

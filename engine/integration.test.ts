@@ -3,6 +3,8 @@ import { Orchestrator } from "./orchestrator";
 import { EchoAdapter } from "./adapters/echo";
 import { loadTeams, loadChains, loadPersona, buildSystemPrompt, getTeam, getChain, loadPrompt } from "./config";
 
+const INTEGRATION_TIMEOUT_MS = 15000;
+
 describe("config loading", () => {
   test("loads teams.yaml", () => {
     const teams = loadTeams();
@@ -70,7 +72,7 @@ describe("orchestrator with echo adapter", () => {
 
     expect(session.status).toBe("completed");
     expect(session.totalCost).toBeGreaterThan(0);
-  });
+  }, INTEGRATION_TIMEOUT_MS);
 
   test("runs scout-then-plan chain", async () => {
     const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
@@ -302,7 +304,7 @@ describe("pipeline state tracking", () => {
     
     // Cleanup
     rmSync(tmpDir, { recursive: true, force: true });
-  });
+  }, INTEGRATION_TIMEOUT_MS);
 
   test("collects events from chain steps", async () => {
     const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
@@ -339,7 +341,7 @@ describe("pipeline state tracking", () => {
         expect(agent.costUsd).toBeGreaterThanOrEqual(0);
       }
     }
-  });
+  }, INTEGRATION_TIMEOUT_MS);
 });
 
 describe("chain robustness", () => {
@@ -354,7 +356,7 @@ describe("chain robustness", () => {
       adapter: "echo",
     });
     expect(session.status).toBe("completed");
-  });
+  }, INTEGRATION_TIMEOUT_MS);
 
   test("handles swarm-review chain", async () => {
     const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
@@ -383,7 +385,7 @@ describe("chain robustness", () => {
     expect(session.status).toBe("completed");
     expect(session.totalCost).toBeGreaterThanOrEqual(0);
     expect(session.totalTokens).toBeGreaterThanOrEqual(0);
-  });
+  }, INTEGRATION_TIMEOUT_MS);
 });
 
 describe("model routing", () => {

@@ -1,11 +1,12 @@
 import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import { logPerformance, loadPerformance, buildScorecard } from "./perf-log";
 import type { PerfRecord } from "./perf-log";
-import { join, dirname } from "path";
+import { join } from "path";
+import { BASE_DIR } from "./config";
 import { unlinkSync, existsSync } from "fs";
 
 // Use the same path logic as perf-log.ts
-const dataPath = join(dirname(import.meta.dir), "data", "model-performance.jsonl");
+const dataPath = join(BASE_DIR, "data", "model-performance.jsonl");
 
 function makePerfRecord(overrides?: Partial<PerfRecord>): PerfRecord {
   return {
