@@ -63,51 +63,75 @@ export function listenForUserMessages(
   const BASE_RETRY_MS = 3_000;
   const MAX_RETRY_MS = 60_000;
   let retryDelay = BASE_RETRY_MS;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let activeReader: { cancel: () => Promise<void> } | null = null;
+
+  abort.signal.addEventListener("abort", () => {
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+    void activeReader?.cancel().catch(() => {});
+    activeReader = null;
+  });
+
+  const scheduleReconnect = (delay: number) => {
+    if (abort.signal.aborted) return;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      connect();
+    }, delay);
+  };
 
   const connect = () => {
     if (abort.signal.aborted) return;
     fetch(url, { signal: abort.signal }).then(async (res) => {
       if (!res.ok || !res.body) return;
       const reader = res.body.getReader();
+      activeReader = reader;
       const decoder = new TextDecoder();
       let buffer = "";
       let currentEvent = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
 
-        let lineEnd: number;
-        while ((lineEnd = buffer.indexOf("\n")) !== -1) {
-          const line = buffer.slice(0, lineEnd).trim();
-          buffer = buffer.slice(lineEnd + 1);
+          let lineEnd: number;
+          while ((lineEnd = buffer.indexOf("\n")) !== -1) {
+            const line = buffer.slice(0, lineEnd).trim();
+            buffer = buffer.slice(lineEnd + 1);
 
-          if (line.startsWith("event:")) {
-            currentEvent = line.slice(6).trim();
-          } else if (line.startsWith("data:") && currentEvent === "message") {
-            try {
-              const evt = JSON.parse(line.slice(5));
-              if (evt.data?.from === "user" && evt.data?.content) {
-                log.info("User message received", { session_id: sessionId, preview: evt.data.content.slice(0, 80) });
-                onMessage(sessionId, evt.data.content, evt.data.message_id);
-              }
-            } catch { /* not JSON */ }
-          } else if (line === "") {
-            currentEvent = "";
+            if (line.startsWith("event:")) {
+              currentEvent = line.slice(6).trim();
+            } else if (line.startsWith("data:") && currentEvent === "message") {
+              try {
+                const evt = JSON.parse(line.slice(5));
+                if (evt.data?.from === "user" && evt.data?.content) {
+                  log.info("User message received", { session_id: sessionId, preview: evt.data.content.slice(0, 80) });
+                  onMessage(sessionId, evt.data.content, evt.data.message_id);
+                }
+              } catch { /* not JSON */ }
+            } else if (line === "") {
+              currentEvent = "";
+            }
           }
         }
+      } finally {
+        if (activeReader === reader) activeReader = null;
       }
 
       if (!abort.signal.aborted) {
         retryDelay = BASE_RETRY_MS;
         log.info("SSE stream ended, reconnecting", { session_id: sessionId, retry_delay_ms: retryDelay });
-        setTimeout(connect, retryDelay);
+        scheduleReconnect(retryDelay);
       }
     }).catch((err) => {
       if (abort.signal.aborted) return;
       log.warn("SSE connection failed, retrying", { session_id: sessionId, retry_delay_ms: retryDelay, error: err.message ?? String(err) });
-      setTimeout(connect, retryDelay);
+      scheduleReconnect(retryDelay);
       retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
     });
   };

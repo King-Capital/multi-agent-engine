@@ -57,6 +57,9 @@ jobs:
       - name: Install engine dependencies
         run: cd /opt/mae/engine && bun install
 
+      - name: Build engine CLI
+        run: cd /opt/mae/engine && bun build cli.ts --target=bun --outfile=../agent
+
       - name: Health check
         run: |
           curl -sf http://localhost:8400/api/health > /dev/null

@@ -1,4 +1,7 @@
+import { mkdirSync, appendFileSync } from "fs";
 import { join, dirname } from "path";
+import { BASE_DIR } from "./config";
+import { createLogger } from "./logger";
 
 export interface PerfRecord {
   model: string;
@@ -23,18 +26,25 @@ export interface ModelScore {
 }
 
 const PASS_GRADES = new Set(["PASS", "VERIFIED", "PERFECT"]);
+const log = createLogger("perf-log");
 
 function getDataPath(): string {
-  return join(dirname(import.meta.dir), "data", "model-performance.jsonl");
+  return join(BASE_DIR, "data", "model-performance.jsonl");
 }
 
 export async function logPerformance(record: PerfRecord): Promise<void> {
   const filePath = getDataPath();
   const dir = dirname(filePath);
-  await Bun.write(join(dir, ".keep"), ""); // ensure directory exists
-  const line = JSON.stringify(record) + "\n";
-  const { appendFileSync } = await import("fs");
-  appendFileSync(filePath, line);
+  try {
+    mkdirSync(dir, { recursive: true });
+    const line = JSON.stringify(record) + "\n";
+    appendFileSync(filePath, line);
+  } catch (err) {
+    log.warn("Performance log write failed", {
+      path: filePath,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 export async function loadPerformance(): Promise<PerfRecord[]> {

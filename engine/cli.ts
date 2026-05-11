@@ -155,7 +155,7 @@ Examples:
       workingDir,
     });
     console.log(`\nSession ${session.id} ${session.status}. Cost: $${session.totalCost.toFixed(3)}`);
-    break;
+    process.exit(session.status === "completed" ? 0 : 1);
   }
 
   case "chain": {
@@ -195,7 +195,7 @@ Examples:
       workingDir,
     });
     console.log(`\nSession ${session.id} ${session.status}. Cost: $${session.totalCost.toFixed(3)}`);
-    break;
+    process.exit(session.status === "completed" ? 0 : 1);
   }
 
   case "task": {
@@ -245,7 +245,7 @@ Examples:
       workingDir,
     });
     console.log(`\nSession ${session.id} ${session.status}. Cost: $${session.totalCost.toFixed(3)}`);
-    break;
+    process.exit(session.status === "completed" ? 0 : 1);
   }
 
   case "discover": {
