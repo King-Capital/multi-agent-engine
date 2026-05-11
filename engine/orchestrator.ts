@@ -1,7 +1,17 @@
 import { randomUUID } from "crypto";
 import { getChain, loadPrompt, loadTeams, loadPersona, resolveModelForRole, loadModelRouting } from "./config";
 import { EventEmitter } from "./event-emitter";
+import { createLogger, addSink } from "./logger";
+import { createLangfuseSink } from "./langfuse-sink";
 import { sanitizeAgentInput } from "./security";
+
+if (process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY) {
+  addSink(createLangfuseSink({
+    publicKey: process.env.LANGFUSE_PUBLIC_KEY,
+    secretKey: process.env.LANGFUSE_SECRET_KEY,
+    host: process.env.LANGFUSE_HOST ?? "http://10.71.20.73:3000",
+  }));
+}
 import { PipelineTracker } from "./pipeline-state";
 import { SandboxPool } from "./sandbox-pool";
 import { trackActivity, trackToolCall, untrackActivity } from "./monitoring";
@@ -27,6 +37,8 @@ import type {
   OrchestratorAction,
 } from "./types";
 import { transitionStatus } from "./session-state";
+
+const log = createLogger("orchestrator");
 
 export class Orchestrator {
   private adapters: Map<string, PlatformAdapter> = new Map();
@@ -55,11 +67,11 @@ export class Orchestrator {
 
   enableSandboxPool(opts?: { pveApi?: string; pveToken?: string; poolSize?: number }): void {
     this.sandboxPool = new SandboxPool(opts);
-    console.log(`[orchestrator] Sandbox pool enabled (${this.sandboxPool.status().total} sandboxes)`);
+    log.info("Sandbox pool enabled", { total: this.sandboxPool.status().total });
   }
 
   async shutdown(): Promise<void> {
-    console.log("[orchestrator] Shutting down...");
+    log.info("Shutting down");
     for (const [id, session] of this.sessions) {
       if (session.status === "active" || session.status === "paused") {
         transitionStatus(session, "error", "orchestrator:shutdown");
@@ -95,7 +107,7 @@ export class Orchestrator {
     }
     if (this.orchestratorLoop) {
       void this.orchestratorLoop.handleUserMessage(message).catch(err =>
-        console.error("[orchestrator] Loop handleUserMessage failed:", err));
+        log.error("Loop handleUserMessage failed", { error: err instanceof Error ? err.message : String(err) }));
     }
     const buf = this.messageBuffers.get(sessionId) ?? [];
     buf.push(message);
@@ -138,7 +150,7 @@ export class Orchestrator {
         await this.emitter.message(sessionId, "orch-1", "Orchestrator", "user",
           `Unknown command: !${command}. Available: !pause, !resume, !stop, !budget <amount>`);
     }
-    console.log(`[orchestrator] Session ${sessionId} steer: !${command}`);
+    log.info("Steer command received", { session_id: sessionId, command });
   }
 
   private drainMessageBuffer(sessionId: string): string {
@@ -150,11 +162,11 @@ export class Orchestrator {
 
   async resume(sessionId: string, opts?: { adapter?: string }): Promise<SessionState | null> {
     const pipeline = PipelineTracker.resume(sessionId);
-    if (!pipeline) { console.error(`[orchestrator] No pipeline state for ${sessionId}`); return null; }
+    if (!pipeline) { log.error("No pipeline state for session", { session_id: sessionId }); return null; }
     const state = pipeline.getState();
     const nextStage = state.stages.findIndex(s => s.status === "pending" || s.status === "failed");
-    if (nextStage === -1) { console.log(`[orchestrator] All stages complete`); return null; }
-    console.log(`[orchestrator] Resuming ${sessionId} from stage ${nextStage}: ${state.stages[nextStage]?.name}`);
+    if (nextStage === -1) { log.info("All stages complete"); return null; }
+    log.info("Resuming session", { session_id: sessionId, stage: nextStage, stage_name: state.stages[nextStage]?.name });
     return this.run({ task: state.task, chain: state.chain, adapter: opts?.adapter, sessionName: `${state.name} (resumed)` });
   }
 
@@ -216,14 +228,14 @@ export class Orchestrator {
     const orchResolved = resolveModelForRole("orchestrator", teams.orchestrator.model);
     await this.emitter.agentSpawn(sessionId, "orch-1", "", orchPersona.name, "orchestrator", orchResolved.model, "Orchestration", teams.orchestrator.color ?? "#36f9f6");
     await this.emitter.pgCreateAgent({ sessionId, agentId: "orch-1", role: "orchestrator", persona: orchPersona.name });
-    console.log(`\n[orchestrator] Session: ${sessionName} | Chain: ${chainName}\n[orchestrator] Dashboard: ${this.dashboardUrl}/session/${sessionId}\n[orchestrator] Task: ${opts.task}\n`);
+    log.info("Session started", { session_id: sessionId, name: sessionName, chain: chainName, dashboard: `${this.dashboardUrl}/session/${sessionId}`, task: opts.task?.slice(0, 200) });
 
     this.budgetState = loadBudgets();
     await this.emitter.tillDone(sessionId, sessionName, session.tillDone);
     this.activeMonitor = new ActiveMonitor({
       agentActivity: this.agentActivity, session, budgetState: this.budgetState,
       emitter: this.emitter, messageSenders: this.messageSenders,
-      onAutoPause: (reason) => { this.pausedSessions.add(sessionId); transitionStatus(session, "paused", `orchestrator:auto-pause:${reason}`); console.warn(`[orchestrator] Auto-paused: ${reason}`); },
+      onAutoPause: (reason) => { this.pausedSessions.add(sessionId); transitionStatus(session, "paused", `orchestrator:auto-pause:${reason}`); log.warn("Auto-paused", { session_id: sessionId, reason }); },
       getAdapter: () => this.getAdapter(),
     });
     this.activeMonitor.start();
@@ -246,7 +258,7 @@ export class Orchestrator {
     } catch (err) {
       transitionStatus(session, "error", "orchestrator:run:catch");
       pipeline?.fail(String(err));
-      console.error(`[orchestrator] Session failed:`, err);
+      log.error("Session failed", { session_id: sessionId, error: err instanceof Error ? err.message : String(err) });
       await this.emitter.pgUpdateSession(sessionId, { status: "failed" });
     }
 
@@ -262,7 +274,7 @@ export class Orchestrator {
     for (const key of this.messageSenders.keys()) {
       if (key.startsWith(prefix)) this.messageSenders.delete(key);
     }
-    console.log(`\nSession ${sessionId} ${session.status}. Cost: $${session.totalCost.toFixed(3)}`);
+    log.info("Session ended", { session_id: sessionId, status: session.status, cost_usd: session.totalCost });
     return session;
   }
 
