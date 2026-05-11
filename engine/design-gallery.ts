@@ -1,9 +1,6 @@
 import { readFileSync, readdirSync, existsSync, watch, mkdirSync } from "fs";
 import { join, extname, resolve } from "path";
 import type { DesignVariant } from "./types";
-import { createLogger } from "./logger";
-
-const log = createLogger("design-gallery");
 
 const DEFAULT_PORT = 8401;
 const DEFAULT_HOST = process.env.MAE_GALLERY_HOST ?? process.env.MAE_AGENT_HOST ?? "127.0.0.1";

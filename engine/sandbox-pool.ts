@@ -5,7 +5,6 @@
  * Sandboxes run warm at 512MB RAM and scale to 4GB when assigned to an agent.
  */
 
-import type { DelegateOptions } from "./types";
 import { createLogger } from "./logger";
 
 const log = createLogger("sandbox-pool");
