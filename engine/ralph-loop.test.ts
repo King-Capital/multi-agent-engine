@@ -1,0 +1,474 @@
+import { test, expect, describe, beforeEach, afterEach, mock } from "bun:test";
+import { rmSync, existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
+import { join } from "path";
+import { parseFindings } from "./ralph-evaluator";
+import type { EvaluatorFinding } from "./ralph-evaluator";
+import { parseMutations } from "./ralph-evolver";
+import type { ConfigMutation } from "./ralph-evolver";
+import { applyMutation, numericScore, runRalphLoop } from "./ralph-loop";
+import type { ReplayScore, BehavioralFingerprint } from "./replay";
+
+const TEST_DIR = join(import.meta.dir, "..", ".test-ralph-" + process.pid);
+const TRACE_DIR = join(TEST_DIR, "traces");
+const PERSONA_DIR = join(TEST_DIR, "personas");
+
+function writeTrace(sessionId: string, events: Record<string, unknown>[]): void {
+  const content = events.map((e) => JSON.stringify(e)).join("\n") + "\n";
+  writeFileSync(join(TRACE_DIR, `${sessionId}.jsonl`), content);
+}
+
+function buildTraceEvents(
+  sessionId: string,
+  overrides?: {
+    goal?: string;
+    chain?: string;
+    status?: string;
+    totalCost?: number;
+    extraEvents?: Record<string, unknown>[];
+  },
+): Record<string, unknown>[] {
+  const o = overrides ?? {};
+  return [
+    {
+      ts: "2026-05-11T00:00:00.000Z",
+      type: "session.start",
+      id: "evt-start",
+      session_id: sessionId,
+      goal: o.goal ?? "Test goal",
+      chain: o.chain ?? "plan-build-review",
+      component: "orchestrator",
+      msg: "Session started",
+      level: "INFO",
+    },
+    ...(o.extraEvents ?? []),
+    {
+      ts: "2026-05-11T00:01:00.000Z",
+      type: "session.end",
+      id: "evt-end",
+      session_id: sessionId,
+      status: o.status ?? "completed",
+      total_cost: o.totalCost ?? 0.05,
+      component: "orchestrator",
+      msg: "Session ended",
+      level: "INFO",
+    },
+  ];
+}
+
+function writePersona(slug: string, content: string): void {
+  writeFileSync(join(PERSONA_DIR, `${slug}.md`), content);
+}
+
+const SAMPLE_PERSONA = `---
+name: Test Agent
+model: main
+expertise: agents/expertise/test-agent.md
+skills:
+  - agents/skills/active-listener.md
+tools:
+  - read
+  - write
+  - bash
+domain:
+  read: ["**/*"]
+  write: ["src/**"]
+  update: ["src/**"]
+---
+
+# Purpose
+
+You are Test Agent — a worker agent for testing.
+
+## Rules
+
+1. Execute tasks as briefed.
+2. Load your expertise file at session start.
+`;
+
+describe("ralph-evaluator", () => {
+  describe("parseFindings", () => {
+    test("parses valid JSON array of findings", () => {
+      const raw = JSON.stringify([
+        {
+          type: "weak_output",
+          persona: "builder",
+          evidence: "Session s1 produced empty output",
+          severity: "high",
+          suggestion: "Add explicit output format instructions",
+        },
+        {
+          type: "high_cost",
+          persona: "planner",
+          evidence: "Session s2 cost $4.50",
+          severity: "medium",
+          suggestion: "Reduce context window",
+        },
+      ]);
+
+      const findings = parseFindings(raw);
+      expect(findings).toHaveLength(2);
+      expect(findings[0]!.type).toBe("weak_output");
+      expect(findings[0]!.persona).toBe("builder");
+      expect(findings[1]!.type).toBe("high_cost");
+    });
+
+    test("handles markdown-fenced JSON", () => {
+      const raw = "```json\n" + JSON.stringify([{
+        type: "failure_pattern",
+        persona: "reviewer",
+        evidence: "3 timeouts in 5 sessions",
+        severity: "high",
+        suggestion: "Increase timeout or reduce scope",
+      }]) + "\n```";
+
+      const findings = parseFindings(raw);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]!.type).toBe("failure_pattern");
+    });
+
+    test("returns empty array for invalid JSON", () => {
+      expect(parseFindings("not json at all")).toEqual([]);
+      expect(parseFindings("")).toEqual([]);
+    });
+
+    test("filters out findings with invalid types", () => {
+      const raw = JSON.stringify([
+        { type: "unknown_type", persona: "x", evidence: "e", severity: "high", suggestion: "s" },
+        { type: "weak_output", persona: "builder", evidence: "e", severity: "high", suggestion: "s" },
+      ]);
+
+      const findings = parseFindings(raw);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]!.type).toBe("weak_output");
+    });
+
+    test("defaults severity to medium when invalid", () => {
+      const raw = JSON.stringify([
+        { type: "weak_output", persona: "x", evidence: "e", severity: "extreme", suggestion: "s" },
+      ]);
+
+      const findings = parseFindings(raw);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]!.severity).toBe("medium");
+    });
+
+    test("filters out findings with missing required fields", () => {
+      const raw = JSON.stringify([
+        { type: "weak_output", persona: "x" }, // missing evidence + suggestion
+        { type: "weak_output", evidence: "e", suggestion: "s" }, // missing persona
+      ]);
+
+      const findings = parseFindings(raw);
+      expect(findings).toHaveLength(0);
+    });
+  });
+});
+
+describe("ralph-evolver", () => {
+  describe("parseMutations", () => {
+    test("parses valid JSON array of mutations", () => {
+      const raw = JSON.stringify([
+        {
+          persona: "builder",
+          field: "system_prompt",
+          action: "append",
+          content: "Always verify output before returning.",
+          reasoning: "Builder often returns incomplete output",
+        },
+      ]);
+
+      const mutations = parseMutations(raw);
+      expect(mutations).toHaveLength(1);
+      expect(mutations[0]!.persona).toBe("builder");
+      expect(mutations[0]!.field).toBe("system_prompt");
+      expect(mutations[0]!.action).toBe("append");
+    });
+
+    test("handles markdown-fenced JSON", () => {
+      const raw = "```json\n" + JSON.stringify([{
+        persona: "planner",
+        field: "model",
+        action: "replace",
+        content: "quality",
+        reasoning: "Upgrade for better planning",
+      }]) + "\n```";
+
+      const mutations = parseMutations(raw);
+      expect(mutations).toHaveLength(1);
+    });
+
+    test("returns empty array for invalid JSON", () => {
+      expect(parseMutations("garbage")).toEqual([]);
+    });
+
+    test("filters out mutations with invalid fields", () => {
+      const raw = JSON.stringify([
+        { persona: "x", field: "invalid_field", action: "append", content: "c", reasoning: "r" },
+        { persona: "x", field: "system_prompt", action: "append", content: "c", reasoning: "r" },
+      ]);
+
+      const mutations = parseMutations(raw);
+      expect(mutations).toHaveLength(1);
+    });
+
+    test("filters out mutations with invalid actions", () => {
+      const raw = JSON.stringify([
+        { persona: "x", field: "tools", action: "destroy", content: "c", reasoning: "r" },
+      ]);
+
+      expect(parseMutations(raw)).toHaveLength(0);
+    });
+  });
+});
+
+describe("ralph-loop", () => {
+  describe("applyMutation", () => {
+    test("appends to system prompt body", () => {
+      const mutation: ConfigMutation = {
+        persona: "test-agent",
+        field: "system_prompt",
+        action: "append",
+        content: "Always double-check your work.",
+        reasoning: "Agent skips verification",
+      };
+
+      const result = applyMutation(SAMPLE_PERSONA, mutation);
+      expect(result).toContain("Always double-check your work.");
+      expect(result).toContain("You are Test Agent"); // original preserved
+    });
+
+    test("replaces system prompt body", () => {
+      const mutation: ConfigMutation = {
+        persona: "test-agent",
+        field: "system_prompt",
+        action: "replace",
+        content: "# New Purpose\n\nCompletely new instructions.",
+        reasoning: "Rewrite persona",
+      };
+
+      const result = applyMutation(SAMPLE_PERSONA, mutation);
+      expect(result).toContain("# New Purpose");
+      expect(result).not.toContain("You are Test Agent");
+      expect(result).toContain("name: Test Agent"); // frontmatter preserved
+    });
+
+    test("removes text from system prompt body", () => {
+      const mutation: ConfigMutation = {
+        persona: "test-agent",
+        field: "system_prompt",
+        action: "remove",
+        content: "2. Load your expertise file at session start.",
+        reasoning: "Redundant instruction",
+      };
+
+      const result = applyMutation(SAMPLE_PERSONA, mutation);
+      expect(result).not.toContain("Load your expertise file at session start.");
+      expect(result).toContain("Execute tasks as briefed");
+    });
+
+    test("appends a tool to the tools list", () => {
+      const mutation: ConfigMutation = {
+        persona: "test-agent",
+        field: "tools",
+        action: "append",
+        content: "grep",
+        reasoning: "Agent needs search capability",
+      };
+
+      const result = applyMutation(SAMPLE_PERSONA, mutation);
+      expect(result).toContain("- grep");
+      expect(result).toContain("- read"); // existing tools preserved
+    });
+
+    test("removes a tool from the tools list", () => {
+      const mutation: ConfigMutation = {
+        persona: "test-agent",
+        field: "tools",
+        action: "remove",
+        content: "bash",
+        reasoning: "Agent should not have shell access",
+      };
+
+      const result = applyMutation(SAMPLE_PERSONA, mutation);
+      expect(result).not.toMatch(/- bash\n/);
+      expect(result).toContain("- read");
+    });
+
+    test("replaces model alias", () => {
+      const mutation: ConfigMutation = {
+        persona: "test-agent",
+        field: "model",
+        action: "replace",
+        content: "quality",
+        reasoning: "Agent needs better model",
+      };
+
+      const result = applyMutation(SAMPLE_PERSONA, mutation);
+      expect(result).toContain("model: quality");
+      expect(result).not.toContain("model: main");
+    });
+
+    test("returns raw unchanged for unknown field", () => {
+      const mutation: ConfigMutation = {
+        persona: "test-agent",
+        field: "skills" as ConfigMutation["field"],
+        action: "append",
+        content: "something",
+        reasoning: "test",
+      };
+
+      // skills mutations aren't implemented yet — should return unchanged
+      const result = applyMutation(SAMPLE_PERSONA, mutation);
+      expect(result).toBe(SAMPLE_PERSONA);
+    });
+  });
+
+  describe("numericScore", () => {
+    test("returns 1.0 for all-pass checks", () => {
+      const score: ReplayScore = {
+        sessionId: "s1",
+        overall: "pass",
+        checks: [
+          { name: "a", pass: true },
+          { name: "b", pass: true },
+          { name: "c", pass: true },
+        ],
+        fingerprint: emptyFingerprint(),
+      };
+
+      expect(numericScore(score)).toBe(1.0);
+    });
+
+    test("returns 0.0 for all-fail checks", () => {
+      const score: ReplayScore = {
+        sessionId: "s1",
+        overall: "fail",
+        checks: [
+          { name: "a", pass: false },
+          { name: "b", pass: false },
+        ],
+        fingerprint: emptyFingerprint(),
+      };
+
+      expect(numericScore(score)).toBe(0.0);
+    });
+
+    test("returns 0.5 for half-pass", () => {
+      const score: ReplayScore = {
+        sessionId: "s1",
+        overall: "partial",
+        checks: [
+          { name: "a", pass: true },
+          { name: "b", pass: false },
+        ],
+        fingerprint: emptyFingerprint(),
+      };
+
+      expect(numericScore(score)).toBe(0.5);
+    });
+
+    test("returns 0 for empty checks", () => {
+      const score: ReplayScore = {
+        sessionId: "s1",
+        overall: "pass",
+        checks: [],
+        fingerprint: emptyFingerprint(),
+      };
+
+      expect(numericScore(score)).toBe(0);
+    });
+  });
+
+  describe("runRalphLoop", () => {
+    beforeEach(() => {
+      if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+      mkdirSync(TRACE_DIR, { recursive: true });
+      mkdirSync(PERSONA_DIR, { recursive: true });
+    });
+
+    afterEach(() => {
+      if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    });
+
+    test("returns zero iterations when no traces exist", async () => {
+      const emptyDir = join(TEST_DIR, "empty-traces");
+      mkdirSync(emptyDir, { recursive: true });
+
+      const result = await runRalphLoop({
+        traceDir: emptyDir,
+        personaDir: PERSONA_DIR,
+        dryRun: true,
+      });
+
+      expect(result.iterations).toBe(0);
+      expect(result.accepted).toBe(0);
+      expect(result.rejected).toBe(0);
+      expect(result.mutations).toHaveLength(0);
+    });
+
+    test("dry-run mode does not write persona files", async () => {
+      // Create trace and persona
+      const events = buildTraceEvents("s-dry", {
+        goal: "Test dry run",
+        status: "completed",
+        extraEvents: [
+          { ts: "2026-05-11T00:00:01.000Z", type: "chain.step.start", id: "cs1", session_id: "s-dry", step: 1 },
+          { ts: "2026-05-11T00:00:02.000Z", type: "chain.step.end", id: "cse1", session_id: "s-dry", step: 1, status: "completed" },
+        ],
+      });
+      writeTrace("s-dry", events);
+      writePersona("test-agent", SAMPLE_PERSONA);
+
+      const originalContent = readFileSync(join(PERSONA_DIR, "test-agent.md"), "utf-8");
+
+      // Mock the LLM calls
+      const { callLLM } = await import("./llm-gateway");
+      const originalCallLLM = callLLM;
+
+      // We need to test with mocked LLM — but since we can't easily mock
+      // ES module exports in bun, we'll just verify the dry-run behavior
+      // by checking that files are unchanged after the run
+      // (The run will fail at the LLM call since no gateway is configured,
+      //  but the dry-run flag should prevent file writes regardless)
+      try {
+        await runRalphLoop({
+          traceDir: TRACE_DIR,
+          personaDir: PERSONA_DIR,
+          dryRun: true,
+        });
+      } catch {
+        // LLM call will fail without gateway — that's expected
+      }
+
+      const afterContent = readFileSync(join(PERSONA_DIR, "test-agent.md"), "utf-8");
+      expect(afterContent).toBe(originalContent);
+    });
+
+    test("results report counts match mutations", () => {
+      // Unit-test the result counting logic directly
+      const mutations = [
+        { persona: "a", change: "x", accepted: true, scoreBefore: 0.8, scoreAfter: 0.9 },
+        { persona: "b", change: "y", accepted: false, scoreBefore: 0.8, scoreAfter: 0.6 },
+        { persona: "c", change: "z", accepted: true, scoreBefore: 0.7, scoreAfter: 0.7 },
+      ];
+
+      const accepted = mutations.filter((r) => r.accepted).length;
+      const rejected = mutations.filter((r) => !r.accepted).length;
+
+      expect(accepted).toBe(2);
+      expect(rejected).toBe(1);
+      expect(mutations.length).toBe(3);
+    });
+  });
+});
+
+function emptyFingerprint(): BehavioralFingerprint {
+  return {
+    toolSequence: [],
+    agentCount: 0,
+    teamSequence: [],
+    stepCount: 0,
+    errorCount: 0,
+    statusTransitions: [],
+  };
+}

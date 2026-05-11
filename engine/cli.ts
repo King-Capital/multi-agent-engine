@@ -17,6 +17,7 @@ import { startDesignGallery } from "./design-gallery";
 import { loadFileReferences, loadUrlReferences, scanProjectDesign } from "./reference-loader";
 import { TRACE_DIR } from "./trace-recorder";
 import { loadTrace, scoreSession, extractFingerprint, compareFingerprints, addGoldenTrace, getGoldenTraces } from "./replay";
+import { runRalphLoop } from "./ralph-loop";
 
 const args = process.argv.slice(2);
 
@@ -41,6 +42,7 @@ Commands:
   compare       Compare two fingerprints        mae compare <id1> <id2>
   replay        Re-run a past session's goal    mae replay <session_id>
   golden        Manage golden traces            mae golden --help
+  ralph         Self-improvement loop           mae ralph --help
   discover      Discover A2A agents            mae discover <url>
   info          System overview                mae info
   version       Version info                   mae version
@@ -951,9 +953,55 @@ Mark good runs as "pass" and bad runs as "fail" to build a test corpus.
     break;
   }
 
+  case "ralph": {
+    if (subHelp) showSubHelp(`
+mae ralph — Self-improvement loop (evaluator + evolver + git-ratchet)
+
+Usage:
+  mae ralph                    Run the improvement loop (default: 5 iterations)
+  mae ralph --iterations 10    Run 10 iterations
+  mae ralph --dry-run          Analyze and propose but don't write changes
+  mae ralph --model quality    Use specific model for evaluator/evolver
+
+Analyzes recent traces, identifies weak patterns, proposes persona
+mutations, and accepts only changes that don't regress scores.
+Accepted mutations are git-committed for easy rollback.
+`);
+    const iterations = parseInt(getFlag(args, "--iterations") ?? "5", 10);
+    const ralphModel = getFlag(args, "--model") ?? "quality";
+
+    try {
+      const result = await runRalphLoop({
+        maxIterations: iterations,
+        model: ralphModel,
+        dryRun,
+      });
+
+      console.log(`\nRalph loop complete:`);
+      console.log(`  Iterations: ${result.iterations}`);
+      console.log(`  Accepted:   ${result.accepted}`);
+      console.log(`  Rejected:   ${result.rejected}`);
+
+      if (result.mutations.length > 0) {
+        console.log(`\nMutations:`);
+        for (const m of result.mutations) {
+          const icon = m.accepted ? "+" : "-";
+          console.log(`  [${icon}] ${m.persona}: ${m.change}`);
+          console.log(`      Score: ${m.scoreBefore.toFixed(2)} → ${m.scoreAfter.toFixed(2)}`);
+        }
+      } else {
+        console.log(`\nNo mutations proposed — traces look healthy.`);
+      }
+    } catch (err: unknown) {
+      console.error(`Ralph loop failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+    break;
+  }
+
   default:
     console.error(`Unknown command: ${command}`);
-    console.error(`Valid commands: run, chain, task, design, session, config, new-team, new-agent, learn, expert, validate-agent, discover, traces, score, compare, replay, golden, info, version, adapters, tui`);
+    console.error(`Valid commands: run, chain, task, design, session, config, new-team, new-agent, learn, expert, validate-agent, discover, traces, score, compare, replay, golden, ralph, info, version, adapters, tui`);
     process.exit(1);
 }
 
