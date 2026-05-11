@@ -29,10 +29,25 @@ interface NodeLayout {
 	height: number;
 }
 
+const TEAM_GROUP_GAP = 24; // extra horizontal gap between team groups
+const TEAM_LABEL_H = 18; // height reserved for team label above group
+const TEAM_PAD = 10; // padding inside team group rect
+
+interface TeamGroup {
+	team_name: string;
+	team_color: string;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
 // ─── Tree layout algorithm ────────────────────────────────────────────────────
 
-function layoutTree(agents: LiveAgent[]): NodeLayout[] {
-	if (agents.length === 0) return [];
+function layoutTree(
+	agents: LiveAgent[],
+): { nodes: NodeLayout[]; teamGroups: TeamGroup[] } {
+	if (agents.length === 0) return { nodes: [], teamGroups: [] };
 
 	const children = new Map<string, string[]>();
 	const byId = new Map<string, LiveAgent>();
@@ -44,6 +59,15 @@ function layoutTree(agents: LiveAgent[]): NodeLayout[] {
 		children.get(pId)!.push(a.id);
 	}
 
+	// Sort children of each parent by team_name so same-team nodes cluster
+	for (const [, kids] of children) {
+		kids.sort((a, b) => {
+			const ta = byId.get(a)?.team_name ?? "";
+			const tb = byId.get(b)?.team_name ?? "";
+			return ta.localeCompare(tb);
+		});
+	}
+
 	const roots = agents
 		.filter((a) => !a.parent_id || !byId.has(a.parent_id))
 		.map((a) => a.id);
@@ -53,10 +77,17 @@ function layoutTree(agents: LiveAgent[]): NodeLayout[] {
 	function subtreeWidth(id: string): number {
 		const kids = children.get(id) ?? [];
 		if (kids.length === 0) return NODE_W;
-		const w = kids.reduce(
-			(sum, kid) => sum + subtreeWidth(kid) + H_GAP,
-			-H_GAP,
-		);
+		// Add extra gap between team boundaries
+		let w = 0;
+		let prevTeam: string | null = null;
+		for (let i = 0; i < kids.length; i++) {
+			const kidTeam = byId.get(kids[i])?.team_name ?? "";
+			if (i > 0) {
+				w += kidTeam !== prevTeam ? H_GAP + TEAM_GROUP_GAP : H_GAP;
+			}
+			w += subtreeWidth(kids[i]);
+			prevTeam = kidTeam;
+		}
 		return Math.max(NODE_W, w);
 	}
 
@@ -68,9 +99,15 @@ function layoutTree(agents: LiveAgent[]): NodeLayout[] {
 			y: depth * (NODE_H + V_GAP) + V_GAP,
 		});
 		let childLeft = left;
-		for (const kid of kids) {
-			place(kid, childLeft, depth + 1);
-			childLeft += subtreeWidth(kid) + H_GAP;
+		let prevTeam: string | null = null;
+		for (let i = 0; i < kids.length; i++) {
+			const kidTeam = byId.get(kids[i])?.team_name ?? "";
+			if (i > 0) {
+				childLeft += kidTeam !== prevTeam ? H_GAP + TEAM_GROUP_GAP : H_GAP;
+			}
+			place(kids[i], childLeft, depth + 1);
+			childLeft += subtreeWidth(kids[i]);
+			prevTeam = kidTeam;
 		}
 	}
 
@@ -80,10 +117,48 @@ function layoutTree(agents: LiveAgent[]): NodeLayout[] {
 		left += subtreeWidth(r) + H_GAP * 2;
 	}
 
-	return agents.map((a) => {
+	const nodes = agents.map((a) => {
 		const pos = positions.get(a.id) ?? { x: 0, y: 0 };
 		return { id: a.id, x: pos.x, y: pos.y, width: NODE_W, height: NODE_H };
 	});
+
+	// Build team group bounding rects from direct children of each parent
+	const teamGroups: TeamGroup[] = [];
+	const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+
+	for (const [, kids] of children) {
+		// Group kids by team_name
+		const teams = new Map<string, string[]>();
+		for (const kid of kids) {
+			const team = byId.get(kid)?.team_name ?? "";
+			if (!team) continue;
+			if (!teams.has(team)) teams.set(team, []);
+			teams.get(team)!.push(kid);
+		}
+		// Only draw group rects when there are 2+ teams (grouping adds value)
+		if (teams.size < 2) continue;
+		for (const [teamName, memberIds] of teams) {
+			const memberLayouts = memberIds
+				.map((id) => nodeMap.get(id))
+				.filter(Boolean) as NodeLayout[];
+			if (memberLayouts.length === 0) continue;
+			const minX = Math.min(...memberLayouts.map((l) => l.x));
+			const minY = Math.min(...memberLayouts.map((l) => l.y));
+			const maxX = Math.max(...memberLayouts.map((l) => l.x + l.width));
+			const maxY = Math.max(...memberLayouts.map((l) => l.y + l.height));
+			const color = byId.get(memberIds[0])?.team_color ?? "#22d3ee";
+			teamGroups.push({
+				team_name: teamName,
+				team_color: validColor(color),
+				x: minX - TEAM_PAD,
+				y: minY - TEAM_PAD - TEAM_LABEL_H,
+				width: maxX - minX + TEAM_PAD * 2,
+				height: maxY - minY + TEAM_PAD * 2 + TEAM_LABEL_H,
+			});
+		}
+	}
+
+	return { nodes, teamGroups };
 }
 
 // ─── Status styling ───────────────────────────────────────────────────────────
@@ -124,15 +199,39 @@ interface NodeProps {
 	onClick: () => void;
 }
 
-function AgentNode({ agent, layout, selected, onClick }: NodeProps) {
+function AgentNode({
+	agent,
+	layout,
+	selected,
+	onClick,
+	dimmed,
+}: NodeProps & { dimmed?: boolean }) {
 	const { x, y, width, height } = layout;
 	const rx = 10;
 	const teamColor = validColor(agent.team_color);
 	const stroke = selected ? "#22d3ee" : ringStroke(agent.status);
 
 	return (
-		<g onClick={onClick} style={{ cursor: "pointer" }}>
-			{agent.status === "running" && (
+		<g
+			onClick={onClick}
+			style={{ cursor: "pointer", opacity: dimmed ? 0.2 : 1 }}
+		>
+			{/* Selected glow */}
+			{selected && (
+				<rect
+					x={x - 5}
+					y={y - 5}
+					width={width + 10}
+					height={height + 10}
+					rx={rx + 5}
+					fill="none"
+					stroke="#22d3ee"
+					strokeWidth={2}
+					strokeOpacity={0.5}
+					filter="url(#glow)"
+				/>
+			)}
+			{agent.status === "running" && !selected && (
 				<rect
 					x={x - 4}
 					y={y - 4}
@@ -278,6 +377,9 @@ export function AgentGraph({
 	const [selected, setSelected] = React.useState<string | null>(
 		selectedAgentId ?? null,
 	);
+	const [activeFilters, setActiveFilters] = React.useState<Set<string>>(
+		new Set(),
+	);
 
 	// Load agents by reconstructing from events (PG agents table is often
 	// incomplete because the circuit breaker drops agent_create writes under
@@ -376,7 +478,10 @@ export function AgentGraph({
 		if (selectedAgentId !== undefined) setSelected(selectedAgentId ?? null);
 	}, [selectedAgentId]);
 
-	const layouts = React.useMemo(() => layoutTree(agents), [agents]);
+	const { nodes: layouts, teamGroups } = React.useMemo(
+		() => layoutTree(agents),
+		[agents],
+	);
 	const agentById = React.useMemo(
 		() => new Map(agents.map((a) => [a.id, a])),
 		[agents],
@@ -420,6 +525,28 @@ export function AgentGraph({
 
 	const selectedAgent = selected ? (agentById.get(selected) ?? null) : null;
 
+	const toggleFilter = (status: string) => {
+		setActiveFilters((prev) => {
+			const next = new Set(prev);
+			if (next.has(status)) next.delete(status);
+			else next.add(status);
+			return next;
+		});
+	};
+
+	const countByStatus = (status: string) =>
+		agents.filter((a) => a.status === status).length;
+
+	const dotColorClass = (status: string) => {
+		if (status === "running") return "bg-cyan-400";
+		if (status === "done") return "bg-emerald-500";
+		if (status === "error") return "bg-red-500";
+		if (status === "blocked") return "bg-amber-500";
+		return "bg-zinc-500";
+	};
+
+	const isFiltered = activeFilters.size > 0;
+
 	if (loading)
 		return (
 			<div className="flex h-64 items-center justify-center text-zinc-500 text-sm">
@@ -444,6 +571,36 @@ export function AgentGraph({
 	return (
 		<div className="flex gap-4 w-full">
 			<div className="flex-1 overflow-auto rounded-lg border border-zinc-800 bg-zinc-950 min-h-64">
+				{/* Status filter bar */}
+				<div className="flex flex-wrap items-center gap-2 px-4 py-2.5 border-b border-white/5">
+					{(["running", "done", "error", "blocked"] as const).map((status) => (
+						<button
+							key={status}
+							onClick={() => toggleFilter(status)}
+							className={`px-2 py-1 rounded text-xs flex items-center gap-1.5 border transition-all ${
+								activeFilters.has(status)
+									? "opacity-100 border-white/20 bg-white/5"
+									: "opacity-50 border-transparent hover:opacity-75"
+							}`}
+						>
+							<span
+								className={`w-2 h-2 rounded-full ${dotColorClass(status)}`}
+							/>
+							<span className="text-zinc-300">
+								{status} ({countByStatus(status)})
+							</span>
+						</button>
+					))}
+					{isFiltered && (
+						<button
+							onClick={() => setActiveFilters(new Set())}
+							className="px-2 py-1 rounded text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+						>
+							clear
+						</button>
+					)}
+				</div>
+
 				<svg viewBox={viewBox} className="w-full" style={{ minHeight: 200 }}>
 					<defs>
 						<marker
@@ -457,6 +614,13 @@ export function AgentGraph({
 						>
 							<path d="M 0 0 L 10 5 L 0 10 z" fill="#3f3f46" />
 						</marker>
+						<filter id="glow">
+							<feGaussianBlur stdDeviation="3" result="blur" />
+							<feMerge>
+								<feMergeNode in="blur" />
+								<feMergeNode in="SourceGraphic" />
+							</feMerge>
+						</filter>
 						<style>{`
               @keyframes pulse-ring {
                 0%,100% { opacity: 0.15; }
@@ -464,12 +628,42 @@ export function AgentGraph({
               }
             `}</style>
 					</defs>
+
+					{/* Team group backgrounds */}
+					{teamGroups.map((tg) => (
+						<g key={`team-${tg.team_name}`}>
+							<rect
+								x={tg.x}
+								y={tg.y}
+								width={tg.width}
+								height={tg.height}
+								rx={8}
+								fill={`${tg.team_color}14`}
+								stroke={`${tg.team_color}26`}
+								strokeWidth={1}
+							/>
+							<text
+								x={tg.x + TEAM_PAD}
+								y={tg.y + 13}
+								fill={`${tg.team_color}99`}
+								fontSize={9}
+								fontWeight={600}
+								fontFamily="ui-sans-serif,system-ui,sans-serif"
+								letterSpacing="0.04em"
+							>
+								{tg.team_name.toUpperCase()}
+							</text>
+						</g>
+					))}
+
 					{edges.map(({ from, to, color }, i) => (
 						<Edge key={i} from={from} to={to} color={color} />
 					))}
 					{agents.map((agent) => {
 						const layout = layoutById.get(agent.id);
 						if (!layout) return null;
+						const dimmed =
+							isFiltered && !activeFilters.has(agent.status);
 						return (
 							<AgentNode
 								key={agent.id}
@@ -477,6 +671,7 @@ export function AgentGraph({
 								layout={layout}
 								selected={selected === agent.id}
 								onClick={() => handleNodeClick(agent)}
+								dimmed={dimmed}
 							/>
 						);
 					})}
@@ -484,19 +679,6 @@ export function AgentGraph({
 
 				{/* Legend */}
 				<div className="flex flex-wrap items-center gap-4 border-t border-zinc-800 px-4 py-2.5 text-xs text-zinc-500">
-					{(
-						[
-							["running", "bg-cyan-400 animate-pulse"],
-							["done", "bg-emerald-500"],
-							["error", "bg-red-500"],
-							["blocked", "bg-amber-500"],
-						] as const
-					).map(([label, dot]) => (
-						<span key={label} className="flex items-center gap-1.5">
-							<span className={`w-2 h-2 rounded-full inline-block ${dot}`} />
-							{label}
-						</span>
-					))}
 					<span className="ml-auto flex gap-3">
 						<span>{agents.length} agents</span>
 						<span className="text-cyan-400">
