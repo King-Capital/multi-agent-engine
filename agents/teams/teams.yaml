@@ -229,6 +229,19 @@ teams:
 
   # --- Standard Swarm Teams (5 specialist squads) ---
 
+  - team-name: Architecture Coordination
+    team-color: "#a855f7"
+    consult-when: >
+      Standard swarm kickoff: map the task into review domains, identify
+      files/components for each SME squad, define coverage expectations,
+      and produce the coordination brief used by downstream squad leads.
+    lead:
+      name: Arch Coordinator
+      path: agents/personas/planner.md
+      model: quality
+      color: "#a855f7"
+    members: []
+
   - team-name: Correctness Squad
     team-color: "#22d3ee"
     consult-when: >

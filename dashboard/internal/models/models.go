@@ -13,11 +13,11 @@ const (
 type AgentStatus string
 
 const (
-	StatusIdle     AgentStatus = "idle"
-	StatusRunning  AgentStatus = "running"
-	StatusDone     AgentStatus = "done"
-	StatusError    AgentStatus = "error"
-	StatusBlocked  AgentStatus = "blocked"
+	StatusIdle    AgentStatus = "idle"
+	StatusRunning AgentStatus = "running"
+	StatusDone    AgentStatus = "done"
+	StatusError   AgentStatus = "error"
+	StatusBlocked AgentStatus = "blocked"
 )
 
 type EventType string
@@ -71,15 +71,15 @@ type TillDoneState struct {
 }
 
 type Event struct {
-	SessionID     string      `json:"session_id"`
-	AgentID       string      `json:"agent_id"`
-	ParentID      string      `json:"parent_id,omitempty"`
-	EventType     EventType   `json:"event_type"`
-	Timestamp     time.Time   `json:"timestamp"`
-	TokensUsed    int64       `json:"tokens_used,omitempty"`
-	CostUSD       float64     `json:"cost_usd,omitempty"`
-	ContextTokens int64       `json:"context_tokens,omitempty"`
-	Data          EventData   `json:"data"`
+	SessionID     string    `json:"session_id"`
+	AgentID       string    `json:"agent_id"`
+	ParentID      string    `json:"parent_id,omitempty"`
+	EventType     EventType `json:"event_type"`
+	Timestamp     time.Time `json:"timestamp"`
+	TokensUsed    int64     `json:"tokens_used,omitempty"`
+	CostUSD       float64   `json:"cost_usd,omitempty"`
+	ContextTokens int64     `json:"context_tokens,omitempty"`
+	Data          EventData `json:"data"`
 }
 
 type EventData struct {
@@ -89,17 +89,19 @@ type EventData struct {
 	TaskPrompt  string `json:"task_prompt,omitempty"`
 
 	// agent_spawn
-	AgentName  string    `json:"agent_name,omitempty"`
-	AgentRole  AgentRole `json:"agent_role,omitempty"`
-	Model      string    `json:"model,omitempty"`
-	TeamName   string    `json:"team_name,omitempty"`
-	TeamColor  string    `json:"team_color,omitempty"`
-	PersonaPath string  `json:"persona_path,omitempty"`
+	AgentName   string    `json:"agent_name,omitempty"`
+	AgentRole   AgentRole `json:"agent_role,omitempty"`
+	Model       string    `json:"model,omitempty"`
+	TeamName    string    `json:"team_name,omitempty"`
+	TeamColor   string    `json:"team_color,omitempty"`
+	PersonaPath string    `json:"persona_path,omitempty"`
 
 	// message
-	From    string `json:"from,omitempty"`
-	To      string `json:"to,omitempty"`
-	Content string `json:"content,omitempty"`
+	From      string `json:"from,omitempty"`
+	To        string `json:"to,omitempty"`
+	Content   string `json:"content,omitempty"`
+	MessageID string `json:"message_id,omitempty"`
+	AckFor    string `json:"ack_for,omitempty"`
 
 	// tool_call
 	Tool       string `json:"tool,omitempty"`
@@ -131,18 +133,18 @@ type EventData struct {
 }
 
 type Session struct {
-	ID          string             `json:"id"`
-	Name        string             `json:"name"`
-	TeamConfig  string             `json:"team_config"`
-	TaskPrompt  string             `json:"task_prompt"`
-	ChainType   string             `json:"chain_type"`
-	Tags        []string           `json:"tags,omitempty"`
-	Status      string             `json:"status"`
-	StartedAt   time.Time          `json:"started_at"`
-	ElapsedMs   int64              `json:"elapsed_ms"`
-	TotalCost   float64            `json:"total_cost"`
-	TotalTokens int64              `json:"total_tokens"`
-	Agents      map[string]*Agent  `json:"agents"`
-	TillDone    *TillDoneState     `json:"tilldone,omitempty"`
-	Events      []Event            `json:"events"`
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	TeamConfig  string            `json:"team_config"`
+	TaskPrompt  string            `json:"task_prompt"`
+	ChainType   string            `json:"chain_type"`
+	Tags        []string          `json:"tags,omitempty"`
+	Status      string            `json:"status"`
+	StartedAt   time.Time         `json:"started_at"`
+	ElapsedMs   int64             `json:"elapsed_ms"`
+	TotalCost   float64           `json:"total_cost"`
+	TotalTokens int64             `json:"total_tokens"`
+	Agents      map[string]*Agent `json:"agents"`
+	TillDone    *TillDoneState    `json:"tilldone,omitempty"`
+	Events      []Event           `json:"events"`
 }

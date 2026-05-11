@@ -151,33 +151,49 @@ chains:
   standard-swarm:
     description: "5-squad parallel review swarm: orchestrator assigns paths, leads spin out full workforce immediately"
     steps:
+      - team: Architecture Coordination
+        system_prompt_append: |
+          ARCH COORDINATOR MODE: Produce the swarm coordination brief before any SME squad begins.
+          Identify the files, components, and risk areas each SME squad must cover.
+          Assign coverage for Correctness, Adversarial, Quality, Security, and Domain squads.
+          Call out expected worker roles, any required deterministic checks, and gaps that need follow-up.
+          End with "SWARM_COORDINATION_READY" once the squad plan is complete.
+        till_done:
+          - type: output_match
+            text: "Arch coordinator produced the SME squad coverage plan"
+            verify: "SWARM_COORDINATION_READY"
       - parallel:
           - team: Correctness Squad
             system_prompt_append: |
+              Use the Arch Coordinator brief in the previous context as the coverage contract.
               SWARM MODE: Brief ALL workers immediately with specific file assignments.
               Stream progress: after briefing, report "Briefed N workers on [files]" so the dashboard shows activity.
               As workers report back, summarize each finding to the conversation — keep the user informed in real-time.
               Synthesize all findings into a graded P0-P3 report. Track which files were covered.
           - team: Adversarial Squad
             system_prompt_append: |
+              Use the Arch Coordinator brief in the previous context as the coverage contract.
               SWARM MODE: Brief ALL workers immediately — each attacks different files from different angles.
               Stream progress: report who's working on what as you brief them.
               As workers find issues, relay findings immediately — don't wait for all to finish.
               Synthesize into prioritized attack report with P0-P3 severity.
           - team: Quality Squad
             system_prompt_append: |
+              Use the Arch Coordinator brief in the previous context as the coverage contract.
               SWARM MODE: Brief ALL workers immediately — each reviews a different quality dimension.
               Stream progress: report assignments and worker status as they complete.
               Relay findings as they come in so the dashboard shows real-time quality assessment.
               Synthesize into actionable quality report with P0-P3 severity.
           - team: Security Squad
             system_prompt_append: |
+              Use the Arch Coordinator brief in the previous context as the coverage contract.
               SWARM MODE: Brief ALL workers immediately — each checks different OWASP categories on specific files.
               Stream progress: report who's auditing what. Any file with user input, URLs, or file paths must be covered.
               Relay security findings immediately as workers report — don't batch.
               Synthesize into security audit with P0-P3 + CWE codes. End with verification checklist.
           - team: Domain Squad
             system_prompt_append: |
+              Use the Arch Coordinator brief in the previous context as the coverage contract.
               SWARM MODE: Brief ALL workers immediately — backend, frontend, data, integration, infra, security-domain.
               Stream progress: report assignments and relay findings as workers complete.
               Cross-reference across workers — if two workers disagree, note the conflict.

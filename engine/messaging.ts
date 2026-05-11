@@ -56,7 +56,7 @@ export function sendUserMessage(
 export function listenForUserMessages(
   dashboardUrl: string,
   sessionId: string,
-  onMessage: (sessionId: string, content: string) => void,
+  onMessage: (sessionId: string, content: string, messageId?: string) => void,
 ): AbortController {
   const abort = new AbortController();
   const url = `${dashboardUrl}/api/sessions/${sessionId}/stream`;
@@ -90,7 +90,7 @@ export function listenForUserMessages(
               const evt = JSON.parse(line.slice(5));
               if (evt.data?.from === "user" && evt.data?.content) {
                 log.info("User message received", { session_id: sessionId, preview: evt.data.content.slice(0, 80) });
-                onMessage(sessionId, evt.data.content);
+                onMessage(sessionId, evt.data.content, evt.data.message_id);
               }
             } catch { /* not JSON */ }
           } else if (line === "") {

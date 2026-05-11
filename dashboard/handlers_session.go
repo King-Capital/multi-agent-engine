@@ -2,13 +2,13 @@ package main
 
 import (
 	"bytes"
-	"sort"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -177,6 +177,10 @@ func handleUserMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "empty message", http.StatusBadRequest)
 		return
 	}
+	messageID := r.FormValue("message_id")
+	if messageID == "" {
+		messageID = fmt.Sprintf("msg-%d", time.Now().UnixNano())
+	}
 
 	// Sanitize: strip control characters (keep newline, carriage return, tab)
 	content = strings.Map(func(r rune) rune {
@@ -194,13 +198,16 @@ func handleUserMessage(w http.ResponseWriter, r *http.Request) {
 		AgentID:   "user",
 		EventType: models.EventMessage,
 		Data: models.EventData{
-			From:    "user",
-			To:      "orchestrator",
-			Content: content,
+			From:      "user",
+			To:        "orchestrator",
+			Content:   content,
+			MessageID: messageID,
 		},
 	}
 	store.Append(evt)
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"message_id": messageID})
 }
 
 // --- SSE Streaming ---

@@ -54,7 +54,8 @@ export async function retryWorker(
 ): Promise<DelegateResult> {
   const { emitter, messageSenders, trackToolCall, checkBudget, orchestratorLoop, pausedSessions } = deps;
   const workerPersona = loadPersona(member.path);
-  const workerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  const baseWorkerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  const workerId = `${baseWorkerId}-retry-${attempt}`;
 
   log.info("Retrying worker with reworked prompt", { worker: member.name, attempt, session_id: session.id });
 

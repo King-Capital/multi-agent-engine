@@ -94,6 +94,8 @@ export interface EventData {
   from?: string;
   to?: string;
   content?: string;
+  message_id?: string;
+  ack_for?: string;
 
   // tool_call
   tool?: string;

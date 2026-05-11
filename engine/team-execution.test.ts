@@ -1,6 +1,9 @@
 import { describe, test, expect } from "bun:test";
 import {
   buildTeamResult,
+  buildParallelTeamStep,
+  buildFailedWorkerReviews,
+  buildFailedTeamResults,
   accumulateWorkerCosts,
   delegateToLead,
 } from "./team-execution";
@@ -133,6 +136,95 @@ function makeMockAdapter(
     )),
   };
 }
+
+// ---------------------------------------------------------------------------
+// buildParallelTeamStep
+// ---------------------------------------------------------------------------
+
+describe("buildParallelTeamStep", () => {
+  test("preserves per-squad overrides for parallel swarm teams", () => {
+    const step = makeStep({
+      parallel: [
+        {
+          team: "Security Squad",
+          tools_override: ["read", "grep"],
+          system_prompt_append: "Act as the security SME lead.",
+        },
+      ],
+      system_prompt_append: "Global swarm coordination rules.",
+      till_done: ["Every squad reports evidence."],
+      max_worker_retries: 2,
+    });
+
+    const built = buildParallelTeamStep(step, step.parallel![0]!);
+
+    expect(built.team).toBe("Security Squad");
+    expect(built.parallel).toBeUndefined();
+    expect(built.tools_override).toEqual(["read", "grep"]);
+    expect(built.system_prompt_append).toContain("Global swarm coordination rules.");
+    expect(built.system_prompt_append).toContain("Act as the security SME lead.");
+    expect(built.till_done).toEqual(["Every squad reports evidence."]);
+    expect(built.max_worker_retries).toBe(2);
+  });
+
+  test("inherits parent parallel settings when a squad does not override them", () => {
+    const step = makeStep({
+      parallel: [{ team: "Architecture Squad" }],
+      tools_override: ["read"],
+      system_prompt_append: "Parent instructions.",
+    });
+
+    const built = buildParallelTeamStep(step, step.parallel![0]!);
+
+    expect(built.team).toBe("Architecture Squad");
+    expect(built.tools_override).toEqual(["read"]);
+    expect(built.system_prompt_append).toBe("Parent instructions.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildFailedWorkerReviews
+// ---------------------------------------------------------------------------
+
+describe("buildFailedWorkerReviews", () => {
+  test("turns missing workers into retryable lead reviews", () => {
+    const step = makeStep({ team: "Security Squad" });
+    const teamConfig = makeTeamConfig({
+      "team-name": "Security Squad",
+      members: [
+        { name: "Input Auditor", path: "agents/personas/reviewer.md", model: "sonnet", color: "#00ff00" },
+      ],
+    });
+    const assignments = new Map([
+      ["Security Squad-input-auditor", "Audit input handling in API routes."],
+    ]);
+
+    const reviews = buildFailedWorkerReviews(step, teamConfig, [
+      { name: "Input Auditor", error: "timeout" },
+    ], assignments);
+
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0]!.workerId).toBe("Security Squad-input-auditor");
+    expect(reviews[0]!.workerName).toBe("Input Auditor");
+    expect(reviews[0]!.grade).toBe("NEEDS_WORK");
+    expect(reviews[0]!.feedback).toContain("timeout");
+    expect(reviews[0]!.reworkedPrompt).toContain("Audit input handling in API routes.");
+  });
+});
+
+describe("buildFailedTeamResults", () => {
+  test("preserves failed parallel squads as failed delegate results", () => {
+    const results = buildFailedTeamResults([
+      { name: "Security Squad", error: "lead crashed" },
+    ]);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]!.agentName).toBe("Security Squad");
+    expect(results[0]!.agentId).toBe("security-squad-lead");
+    expect(results[0]!.grade).toBe("FAILED");
+    expect(results[0]!.findings).toEqual(["Security Squad: lead crashed"]);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // buildTeamResult

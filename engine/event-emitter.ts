@@ -159,13 +159,20 @@ export class EventEmitter {
     });
   }
 
-  message(sessionId: string, agentId: string, from: string, to: string, content: string) {
+  message(
+    sessionId: string,
+    agentId: string,
+    from: string,
+    to: string,
+    content: string,
+    metadata: Record<string, unknown> = {},
+  ) {
     return this.emit({
       session_id: sessionId,
       agent_id: agentId,
       event_type: "message",
       timestamp: new Date().toISOString(),
-      data: { from, to, content },
+      data: { from, to, content, ...metadata },
     });
   }
 
