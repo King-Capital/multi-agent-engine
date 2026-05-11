@@ -58,6 +58,16 @@ export function removeSink(sink: LogSink): void {
   globalSinks = globalSinks.filter((s) => s !== sink);
 }
 
+export async function flushSinks(): Promise<void> {
+  for (const sink of globalSinks) {
+    try {
+      await sink.flush?.();
+    } catch (_) {
+      // Best-effort flush
+    }
+  }
+}
+
 export function clearSinks(): void {
   globalSinks = [];
 }

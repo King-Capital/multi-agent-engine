@@ -9,15 +9,9 @@ interface LangfuseSinkConfig {
 }
 
 export function createLangfuseSink(config: LangfuseSinkConfig): LogSink {
-  const {
-    publicKey,
-    secretKey,
-    host,
-    flushIntervalMs = 5000,
-    maxBatchSize = 50,
-  } = config;
+  const { publicKey, secretKey, host, flushIntervalMs = 3000, maxBatchSize = 100 } = config;
 
-  const buffer: Array<{ id: string; type: string; timestamp: string; body: Record<string, unknown> }> = [];
+  const buffer: Array<Record<string, unknown>> = [];
   let flushTimer: ReturnType<typeof setInterval> | null = null;
   let currentTraceId: string | null = null;
   const auth = btoa(`${publicKey}:${secretKey}`);
@@ -31,98 +25,173 @@ export function createLangfuseSink(config: LangfuseSinkConfig): LogSink {
   async function doFlush(): Promise<void> {
     if (buffer.length === 0) return;
     const batch = buffer.splice(0, maxBatchSize);
-
     try {
       const res = await fetch(`${host}/api/public/ingestion`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Basic ${auth}`,
-        },
+        headers: { "Content-Type": "application/json", Authorization: `Basic ${auth}` },
         body: JSON.stringify({ batch }),
       });
       if (!res.ok) {
         const body = await res.text().catch(() => "");
-        process.stderr.write(`[langfuse-sink] Flush failed: ${res.status} ${body.slice(0, 200)}\n`);
+        process.stderr.write(`[langfuse-sink] Flush failed: ${res.status} ${body.slice(0, 300)}\n`);
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`[langfuse-sink] Flush error: ${msg}\n`);
+      process.stderr.write(`[langfuse-sink] Flush error: ${err instanceof Error ? err.message : String(err)}\n`);
     }
   }
 
-  function genId(): string {
-    return crypto.randomUUID();
-  }
+  function uid(): string { return crypto.randomUUID(); }
 
   const sink: LogSink = {
     write(entry: LogEntry): void {
       const sessionId = entry.session_id as string | undefined;
 
-      if (entry.msg === "Session started" || (!currentTraceId && sessionId)) {
-        currentTraceId = sessionId ?? genId();
+      // Session start → Langfuse trace
+      if (entry.msg === "Session started") {
+        currentTraceId = sessionId ?? uid();
         buffer.push({
-          id: genId(),
-          type: "trace-create",
-          timestamp: entry.ts,
+          id: uid(), type: "trace-create", timestamp: entry.ts,
           body: {
             id: currentTraceId,
-            name: (entry.goal as string) ?? entry.msg,
-            metadata: {
-              chain: entry.chain,
-              component: entry.component,
-              config_hash: entry.config_hash,
-            },
+            name: (entry.name as string) ?? (entry.task_preview as string) ?? "MAE Session",
             sessionId,
+            input: entry.task_preview ?? entry.goal,
+            metadata: { chain: entry.chain, dashboard: entry.dashboard },
           },
         });
+        ensureTimer();
+        return;
       }
 
-      if (entry.level === "ERROR" || entry.level === "CRITICAL") {
+      // Session end → update trace
+      if (entry.msg === "Session ended" && currentTraceId) {
         buffer.push({
-          id: genId(),
-          type: "event-create",
-          timestamp: entry.ts,
+          id: uid(), type: "trace-create", timestamp: entry.ts,
           body: {
+            id: currentTraceId,
+            output: `Status: ${entry.status}, Cost: $${entry.cost_usd ?? entry.total_cost ?? 0}`,
+            metadata: { status: entry.status, cost_usd: entry.cost_usd ?? entry.total_cost },
+          },
+        });
+        ensureTimer();
+        return;
+      }
+
+      if (!currentTraceId) return;
+
+      // Agent delegation → Langfuse span (represents agent work)
+      if (entry.msg === "Delegating to echo agent" || entry.msg?.toString().startsWith("Delegating")) {
+        const spanId = uid();
+        buffer.push({
+          id: spanId, type: "span-create", timestamp: entry.ts,
+          body: {
+            id: spanId,
             traceId: currentTraceId,
-            name: entry.msg,
-            level: entry.level === "CRITICAL" ? "ERROR" : "WARNING",
-            metadata: { ...entry, ts: undefined, level: undefined, msg: undefined },
+            name: (entry.agent as string) ?? "Agent",
+            input: (entry.prompt_preview as string)?.slice(0, 500),
+            metadata: {
+              model: entry.model,
+              team: entry.team,
+              domain_write: entry.domain_write,
+              system_prompt_length: entry.system_prompt_length,
+            },
           },
         });
+        ensureTimer();
+        return;
       }
 
-      if (entry.component && (entry.agent_id || entry.level === "INFO")) {
+      // Team delegation → Langfuse span
+      if (entry.msg === "Delegating to team") {
+        const spanId = uid();
         buffer.push({
-          id: genId(),
-          type: "event-create",
-          timestamp: entry.ts,
+          id: spanId, type: "span-create", timestamp: entry.ts,
           body: {
+            id: spanId,
+            traceId: currentTraceId,
+            name: `Team: ${entry.team ?? "unknown"}`,
+            metadata: { team: entry.team },
+          },
+        });
+        ensureTimer();
+        return;
+      }
+
+      // Worker spawn → Langfuse span
+      if (entry.msg === "Lead briefed, spawning workers") {
+        const spanId = uid();
+        buffer.push({
+          id: spanId, type: "span-create", timestamp: entry.ts,
+          body: {
+            id: spanId,
+            traceId: currentTraceId,
+            name: `Workers: ${(entry.workers as string[])?.join(", ") ?? "unknown"}`,
+            metadata: { team: entry.team, worker_count: entry.worker_count, workers: entry.workers },
+          },
+        });
+        ensureTimer();
+        return;
+      }
+
+      // Lead review → Langfuse span
+      if (entry.msg === "Lead reviewing workers") {
+        const spanId = uid();
+        buffer.push({
+          id: spanId, type: "span-create", timestamp: entry.ts,
+          body: {
+            id: spanId,
+            traceId: currentTraceId,
+            name: `Review: ${entry.lead ?? "Lead"}`,
+            metadata: { lead: entry.lead, worker_count: entry.worker_count },
+          },
+        });
+        ensureTimer();
+        return;
+      }
+
+      // Status transition → Langfuse event
+      if (entry.msg === "Status transition") {
+        const evtId = uid();
+        buffer.push({
+          id: evtId, type: "event-create", timestamp: entry.ts,
+          body: {
+            id: evtId,
+            traceId: currentTraceId,
+            name: `Status: ${entry.from} → ${entry.to}`,
+            level: entry.to === "error" ? "ERROR" : entry.to === "paused" ? "WARNING" : "DEFAULT",
+            metadata: { from: entry.from, to: entry.to, source: entry.source },
+          },
+        });
+        ensureTimer();
+        return;
+      }
+
+      // Errors → Langfuse event with ERROR level
+      if (entry.level === "ERROR" || entry.level === "CRITICAL") {
+        const evtId = uid();
+        buffer.push({
+          id: evtId, type: "event-create", timestamp: entry.ts,
+          body: {
+            id: evtId,
             traceId: currentTraceId,
             name: `[${entry.component}] ${entry.msg}`,
-            level: entry.level === "WARN" ? "WARNING" : entry.level === "ERROR" ? "ERROR" : "DEFAULT",
-            metadata: { agent_id: entry.agent_id, ...entry },
+            level: "ERROR",
+            metadata: { error: entry.error, agent_id: entry.agent_id, component: entry.component },
           },
         });
+        ensureTimer();
+        return;
       }
 
-      if (buffer.length >= maxBatchSize) {
-        void doFlush();
-      }
-      ensureTimer();
+      if (buffer.length >= maxBatchSize) void doFlush();
     },
 
     async flush(): Promise<void> {
-      while (buffer.length > 0) {
-        await doFlush();
-      }
+      while (buffer.length > 0) await doFlush();
     },
 
     async close(): Promise<void> {
-      if (flushTimer) {
-        clearInterval(flushTimer);
-        flushTimer = null;
-      }
+      if (flushTimer) { clearInterval(flushTimer); flushTimer = null; }
       await this.flush!();
       currentTraceId = null;
     },

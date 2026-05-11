@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { join } from "path";
 import { getChain, loadPrompt, loadTeams, loadPersona, resolveModelForRole, loadModelRouting } from "./config";
 import { EventEmitter } from "./event-emitter";
-import { createLogger, addSink } from "./logger";
+import { createLogger, addSink, flushSinks } from "./logger";
 import { createLangfuseSink } from "./langfuse-sink";
 import { createTraceRecorder, TRACE_DIR } from "./trace-recorder";
 import { sanitizeAgentInput } from "./security";
@@ -281,6 +281,7 @@ export class Orchestrator {
       if (key.startsWith(prefix)) this.messageSenders.delete(key);
     }
     log.info("Session ended", { session_id: sessionId, status: session.status, cost_usd: session.totalCost });
+    await flushSinks();
     return session;
   }
 
