@@ -11,6 +11,7 @@ on:
       - 'configs/**'
       - 'prompts/**'
       - 'library.yaml'
+      - 'VERSION'
 
 permissions:
   contents: read
