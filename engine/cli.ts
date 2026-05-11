@@ -12,9 +12,11 @@ import { expertSession } from "./expert-session";
 import { readFileSync as readFile, writeFileSync, existsSync, readdirSync } from "fs";
 import { join, resolve } from "path";
 import { getFlag, stripFlags, slugify } from "./cli-utils";
+import { classifyGoal } from "./goal-classifier";
 import { startDesignGallery } from "./design-gallery";
 import { loadFileReferences, loadUrlReferences, scanProjectDesign } from "./reference-loader";
 import { TRACE_DIR } from "./trace-recorder";
+import { loadTrace, scoreSession, extractFingerprint, compareFingerprints, addGoldenTrace, getGoldenTraces } from "./replay";
 
 const args = process.argv.slice(2);
 
@@ -35,6 +37,10 @@ Commands:
   validate-agent  Test expertise quality        mae validate-agent --help
   design    ◆   Design session or review        mae design --help
   traces        List/inspect JSONL traces       mae traces --help
+  score         Score a session trace           mae score <session_id>
+  compare       Compare two fingerprints        mae compare <id1> <id2>
+  replay        Re-run a past session's goal    mae replay <session_id>
+  golden        Manage golden traces            mae golden --help
   discover      Discover A2A agents            mae discover <url>
   info          System overview                mae info
   version       Version info                   mae version
@@ -192,13 +198,14 @@ Examples:
 
   case "task": {
     if (subHelp) showSubHelp(`
-mae task — Quick task using plan-build-review chain
+mae task — Quick task with auto-classified or explicit chain
 
 Usage: mae task <task-description>
 
-Runs the default plan-build-review chain: plan → build → typecheck → validate.
+Auto-selects the best chain for the task, or use --chain to override.
 
 Options:
+  --chain <name>       Use a specific chain (skip auto-classification)
   --adapter <name>     Use specific adapter
   --dry-run            Use echo adapter for testing
   --cwd <path>         Working directory for agents
@@ -206,14 +213,31 @@ Options:
 Examples:
   mae task "Add rate limiting to API endpoints"
   mae task "Fix the auth bug in login.ts"
+  mae task "Review auth module for security" --chain review-only
   mae task "Add unit tests for budget module" --dry-run
 `);
+    const explicitChain = getFlag(args, "--chain");
     const task = stripFlags(args.slice(1)).join(" ");
     if (!task) {
       console.error("Usage: mae task <task-description>\nRun 'mae task --help' for details.");
       process.exit(1);
     }
+
+    let chainName: string | undefined = explicitChain;
+    if (!chainName) {
+      const result = await classifyGoal(task);
+      if (result.confidence >= 0.8) {
+        console.log(`[cli] Auto-selected chain: ${result.chain} (confidence: ${result.confidence.toFixed(2)}) — ${result.reasoning}`);
+        chainName = result.chain;
+      } else {
+        console.log(`[cli] Suggested chain: ${result.chain} (confidence: ${result.confidence.toFixed(2)}) — ${result.reasoning}`);
+        console.log(`[cli] Low confidence — using default: plan-build-review. Override with --chain <name>`);
+        chainName = "plan-build-review";
+      }
+    }
+
     const session = await orch.run({
+      chain: chainName,
       task,
       adapter: dryRun ? "echo" : adapterName,
       workingDir,
@@ -711,9 +735,225 @@ following the trace schema (specs/trace-schema.md).
     break;
   }
 
+  case "score": {
+    if (subHelp) showSubHelp(`
+mae score — Score a session trace with deterministic checks
+
+Usage: mae score <session_id>
+
+Runs deterministic checks against a trace:
+  - Did the session complete?
+  - Were all chain steps executed?
+  - Did any agents fail?
+  - Were there ERROR/CRITICAL log events?
+  - Was cost reasonable?
+
+Prints a results table and behavioral fingerprint summary.
+`);
+    const scoreId = args[1];
+    if (!scoreId) {
+      console.error("Usage: mae score <session_id>");
+      process.exit(1);
+    }
+    try {
+      const trace = loadTrace(scoreId);
+      const result = scoreSession(trace);
+
+      console.log(`\nSession: ${result.sessionId}`);
+      if (trace.goal) console.log(`Goal: ${trace.goal}`);
+      console.log(`Overall: ${result.overall.toUpperCase()}\n`);
+
+      console.log(`${"Check".padEnd(24)} ${"Result".padEnd(8)} Details`);
+      console.log("─".repeat(70));
+      for (const check of result.checks) {
+        const icon = check.pass ? "PASS" : "FAIL";
+        console.log(`${check.name.padEnd(24)} ${icon.padEnd(8)} ${check.details ?? ""}`);
+      }
+
+      const fp = result.fingerprint;
+      console.log(`\nFingerprint:`);
+      console.log(`  Tools:   ${fp.toolSequence.length > 0 ? fp.toolSequence.join(" → ") : "(none)"}`);
+      console.log(`  Agents:  ${fp.agentCount}`);
+      console.log(`  Teams:   ${fp.teamSequence.join(" → ") || "(none)"}`);
+      console.log(`  Steps:   ${fp.stepCount}`);
+      console.log(`  Errors:  ${fp.errorCount}`);
+    } catch (err: unknown) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+    break;
+  }
+
+  case "compare": {
+    if (subHelp) showSubHelp(`
+mae compare — Compare two session fingerprints
+
+Usage: mae compare <session_id_1> <session_id_2>
+
+Loads both traces, extracts behavioral fingerprints, and shows
+similarity score (0-1) plus a list of differences.
+`);
+    const id1 = args[1];
+    const id2 = args[2];
+    if (!id1 || !id2) {
+      console.error("Usage: mae compare <session_id_1> <session_id_2>");
+      process.exit(1);
+    }
+    try {
+      const trace1 = loadTrace(id1);
+      const trace2 = loadTrace(id2);
+      const fp1 = extractFingerprint(trace1);
+      const fp2 = extractFingerprint(trace2);
+      const result = compareFingerprints(fp1, fp2);
+
+      console.log(`\nComparing:`);
+      console.log(`  A: ${id1} — ${trace1.goal || "(no goal)"}`);
+      console.log(`  B: ${id2} — ${trace2.goal || "(no goal)"}`);
+      console.log(`\nSimilarity: ${(result.similarity * 100).toFixed(1)}%`);
+
+      if (result.diffs.length > 0) {
+        console.log(`\nDifferences:`);
+        for (const diff of result.diffs) {
+          console.log(`  - ${diff}`);
+        }
+      } else {
+        console.log(`\nNo differences found — fingerprints are identical.`);
+      }
+    } catch (err: unknown) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+    break;
+  }
+
+  case "replay": {
+    if (subHelp) showSubHelp(`
+mae replay — Re-run a past session's goal and compare traces
+
+Usage: mae replay <session_id>
+
+Loads the old trace, extracts the goal and chain, re-runs
+through the engine, then compares the new trace's fingerprint
+to the old one. Prints similarity score and diffs.
+
+Options:
+  --adapter <name>     Use specific adapter (default: current)
+  --dry-run            Use echo adapter for replay
+`);
+    const replayId = args[1];
+    if (!replayId) {
+      console.error("Usage: mae replay <session_id>");
+      process.exit(1);
+    }
+    try {
+      const oldTrace = loadTrace(replayId);
+      if (!oldTrace.goal) {
+        console.error("Cannot replay: trace has no goal recorded.");
+        process.exit(1);
+      }
+
+      console.log(`\nReplaying session ${replayId}`);
+      console.log(`Goal: ${oldTrace.goal}`);
+      console.log(`Chain: ${oldTrace.chain || "plan-build-review"}`);
+      console.log(`Running...\n`);
+
+      const newSession = await orch.run({
+        chain: oldTrace.chain || undefined,
+        task: oldTrace.goal,
+        adapter: dryRun ? "echo" : adapterName,
+        workingDir,
+        sessionName: `replay:${replayId.slice(0, 8)}`,
+      });
+
+      console.log(`\nNew session: ${newSession.id} (${newSession.status})`);
+      console.log(`Cost: $${newSession.totalCost.toFixed(3)}`);
+
+      // Compare fingerprints
+      try {
+        const newTrace = loadTrace(newSession.id);
+        const oldFp = extractFingerprint(oldTrace);
+        const newFp = extractFingerprint(newTrace);
+        const comparison = compareFingerprints(oldFp, newFp);
+
+        console.log(`\nFingerprint similarity: ${(comparison.similarity * 100).toFixed(1)}%`);
+        if (comparison.diffs.length > 0) {
+          console.log(`Differences:`);
+          for (const diff of comparison.diffs) {
+            console.log(`  - ${diff}`);
+          }
+        } else {
+          console.log(`No behavioral differences detected.`);
+        }
+      } catch {
+        console.log(`\n(Could not load new trace for comparison — trace may not have been written yet)`);
+      }
+    } catch (err: unknown) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+    break;
+  }
+
+  case "golden": {
+    if (subHelp) showSubHelp(`
+mae golden — Manage golden trace references
+
+Usage:
+  mae golden add <session_id> [--verdict pass|fail] [--notes "..."]
+  mae golden list
+
+Golden traces are reference sessions used for regression detection.
+Mark good runs as "pass" and bad runs as "fail" to build a test corpus.
+`);
+    const goldenSub = args[1];
+
+    if (goldenSub === "add") {
+      const goldenId = args[2];
+      if (!goldenId) {
+        console.error("Usage: mae golden add <session_id> [--verdict pass|fail] [--notes \"...\"]");
+        process.exit(1);
+      }
+      const verdict = (getFlag(args, "--verdict") ?? "pass") as "pass" | "fail";
+      if (verdict !== "pass" && verdict !== "fail") {
+        console.error("--verdict must be 'pass' or 'fail'");
+        process.exit(1);
+      }
+      const notes = getFlag(args, "--notes");
+      try {
+        addGoldenTrace(goldenId, verdict, notes);
+        console.log(`Added golden trace: ${goldenId} (${verdict})${notes ? ` — ${notes}` : ""}`);
+      } catch (err: unknown) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+    } else if (goldenSub === "list") {
+      const entries = getGoldenTraces();
+      if (entries.length === 0) {
+        console.log("No golden traces registered.");
+        break;
+      }
+
+      console.log(`\n${"Session ID".padEnd(40)} ${"Verdict".padEnd(8)} ${"Date".padEnd(12)} Goal`);
+      console.log("─".repeat(90));
+      for (const entry of entries) {
+        console.log(`${entry.sessionId.slice(0, 38).padEnd(40)} ${entry.verdict.padEnd(8)} ${entry.addedAt.padEnd(12)} ${(entry.goal ?? "").slice(0, 40)}`);
+      }
+      if (entries.some((e) => e.notes)) {
+        console.log(`\nNotes:`);
+        for (const entry of entries.filter((e) => e.notes)) {
+          console.log(`  ${entry.sessionId.slice(0, 12)}: ${entry.notes}`);
+        }
+      }
+    } else {
+      console.error("Usage: mae golden <add|list>");
+      process.exit(1);
+    }
+    break;
+  }
+
   default:
     console.error(`Unknown command: ${command}`);
-    console.error(`Valid commands: run, chain, task, design, session, config, new-team, new-agent, learn, expert, validate-agent, discover, traces, info, version, adapters, tui`);
+    console.error(`Valid commands: run, chain, task, design, session, config, new-team, new-agent, learn, expert, validate-agent, discover, traces, score, compare, replay, golden, info, version, adapters, tui`);
     process.exit(1);
 }
 
