@@ -53,6 +53,12 @@ jobs:
         id: version
         run: |
           CURRENT=$(cat VERSION | tr -d '[:space:]')
+          if ! echo "$CURRENT" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping auto-version for non-stable VERSION: $CURRENT"
+            exit 0
+          fi
+
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
 
           BUMP="${{ steps.bump.outputs.type }}"
@@ -65,10 +71,11 @@ jobs:
           NEW="${MAJOR}.${MINOR}.${PATCH}"
           echo "$NEW" > VERSION
           echo "version=$NEW" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "Bumped $CURRENT → $NEW ($BUMP)"
 
       - name: Commit, tag, and push
-        if: steps.check.outputs.skip == 'false'
+        if: steps.check.outputs.skip == 'false' && steps.version.outputs.skip != 'true'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           git add VERSION
