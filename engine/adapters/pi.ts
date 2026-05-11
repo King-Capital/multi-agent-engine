@@ -129,22 +129,33 @@ export class PiAdapter implements PlatformAdapter {
         stdout: "pipe",
         stderr: "pipe",
         cwd: opts.workingDir,
-        env: (() => {
-          const { MAE_API_TOKEN: _, ...safeEnv } = process.env;
-          return {
-            ...safeEnv,
-            MAE_SESSION_ID: opts.sessionDir?.split("/").pop() ?? "",
-            MAE_AGENT_ID: opts.persona.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-            MAE_PARENT_ID: opts.parentId ?? "",
-            MAE_DASHBOARD_URL: process.env.MAE_DASHBOARD_URL ?? "",
-          };
-        })(),
+        env: {
+          HOME: process.env.HOME,
+          PATH: process.env.PATH,
+          SHELL: process.env.SHELL,
+          TERM: process.env.TERM,
+          LANG: process.env.LANG,
+          USER: process.env.USER,
+          TMPDIR: process.env.TMPDIR,
+          XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+          LITELLM_API_BASE: process.env.LITELLM_API_BASE,
+          LITELLM_API_KEY: process.env.LITELLM_API_KEY,
+          ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+          MAE_SESSION_ID: opts.sessionDir?.split("/").pop() ?? "",
+          MAE_AGENT_ID: agentId,
+          MAE_PARENT_ID: opts.parentId ?? "",
+          MAE_DASHBOARD_URL: process.env.MAE_DASHBOARD_URL ?? "",
+        },
       });
+
+      // Buffer stderr once — ReadableStream can only be consumed once
+      let stderrText = "";
+      const stderrPromise = new Response(proc.stderr).text().then(t => { stderrText = t; }).catch(() => {});
 
       const timer = setTimeout(async () => {
         console.error(`[pi-rpc] ${opts.persona.name} timed out after ${timeout}ms`);
         // Step 1: send abort RPC + cancel reader
-        this.sendCmd(proc, { type: "abort" });
+        this.sendCmd(proc, { type: "abort" }, agentId);
         try { reader.cancel(); } catch {}
         try { const stdin = proc.stdin; if (stdin && "end" in stdin) (stdin as any).end(); } catch {}
         // Step 2: wait 5s, then SIGTERM
@@ -170,12 +181,12 @@ export class PiAdapter implements PlatformAdapter {
       // Register message sender so orchestrator/dashboard can inject messages
       if (opts.sendMessage) {
         opts.sendMessage((msg: string) => {
-          this.sendCmd(proc, { type: "follow_up", message: msg });
+          this.sendCmd(proc, { type: "follow_up", message: msg }, agentId);
         });
       }
 
       // Send the initial prompt
-      this.sendCmd(proc, { type: "prompt", message: opts.userPrompt });
+      this.sendCmd(proc, { type: "prompt", message: opts.userPrompt }, agentId);
 
       // Stream stdout JSONL
       const reader = proc.stdout.getReader();
@@ -258,18 +269,19 @@ export class PiAdapter implements PlatformAdapter {
                   });
                   return;
                 }
-              } catch {
-                // not valid JSON
+              } catch (e) {
+                console.error(`[pi-adapter:${agentId}] Failed to parse RPC line:`, (typeof line === 'string' ? line.slice(0, 200) : ''), e);
               }
             }
           }
-        } catch {
-          // stream closed
+        } catch (e) {
+          console.error(`[pi-adapter:${agentId}] Stream processing error:`, e);
         }
 
         // Stream ended without agent_end — race with proc.exited
         const exitCode = await proc.exited;
-        const stderr = await new Response(proc.stderr).text();
+        await stderrPromise;
+        const stderr = stderrText;
 
         if (resolved) return; // already resolved by timeout or agent_end
 
@@ -321,7 +333,7 @@ export class PiAdapter implements PlatformAdapter {
         console.error(`[pi-rpc] ${opts.persona.name} exited (code ${exitCode}) but stream still open, force-resolving`);
         try { reader.cancel(); } catch {}
 
-        const stderr = await new Response(proc.stderr).text().catch(() => "");
+        const stderr = stderrText;
 
         if (exitCode !== 0 && !finalText) {
           safeResolve({
@@ -352,14 +364,14 @@ export class PiAdapter implements PlatformAdapter {
     });
   }
 
-  private sendCmd(proc: ReturnType<typeof Bun.spawn>, cmd: Record<string, unknown>): void {
+  private sendCmd(proc: ReturnType<typeof Bun.spawn>, cmd: Record<string, unknown>, agentId = "unknown"): void {
     try {
       const stdin = proc.stdin;
       if (stdin && typeof stdin === "object" && "write" in stdin) {
         (stdin as { write(data: string | Uint8Array): void }).write(JSON.stringify(cmd) + "\n");
       }
-    } catch {
-      // process may have exited
+    } catch (e) {
+      console.error(`[pi-adapter:${agentId}] sendCmd failed — agent may not have received the message:`, e);
     }
   }
 
