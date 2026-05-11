@@ -10,7 +10,9 @@ import { logPerformance } from "./perf-log";
 import { delegateWithHealing } from "./self-healing";
 import { summarizeOutput } from "./output-parsing";
 import { parseReviews } from "./output-parsing";
+import { buildStreamHandler, buildSendMessage } from "./stream-handler";
 import type { EventEmitter } from "./event-emitter";
+import type { OrchestratorLoop } from "./orchestrator-loop";
 import type {
   PlatformAdapter,
   DelegateOptions,
@@ -28,6 +30,8 @@ export interface WorkerLifecycleDeps {
   messageSenders: Map<string, (msg: string) => void>;
   trackToolCall: (agentId: string, tool: string) => void;
   checkBudget: (session: SessionState, agentId: string, agentCost: number, agentTokens: number) => void;
+  orchestratorLoop?: OrchestratorLoop | null;
+  pausedSessions?: Set<string>;
 }
 
 /**
@@ -45,7 +49,7 @@ export async function retryWorker(
   attempt: number,
   step: ChainStep,
 ): Promise<DelegateResult> {
-  const { emitter, messageSenders, trackToolCall, checkBudget } = deps;
+  const { emitter, messageSenders, trackToolCall, checkBudget, orchestratorLoop, pausedSessions } = deps;
   const workerPersona = loadPersona(member.path);
   const workerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 
@@ -81,17 +85,11 @@ export async function retryWorker(
     parentId: leadId,
     teamName: teamConfig["team-name"],
     teamColor: member.color ?? teamConfig["team-color"],
-    onStreamEvent: (streamEvt) => {
-      if (streamEvt.type === "tool_call") {
-        trackToolCall(workerId, streamEvt.tool ?? "");
-        emitter.toolCall(session.id, workerId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
-      } else if (streamEvt.type === "cost") {
-        emitter.costUpdate(session.id, workerId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
-      }
-    },
-    sendMessage: (fn) => {
-      messageSenders.set(`${session.id}:${workerId}`, fn);
-    },
+    onStreamEvent: buildStreamHandler({
+      emitter, sessionId: session.id, agentId: workerId,
+      trackToolCall, messageSenders, orchestratorLoop, pausedSessions, session,
+    }),
+    sendMessage: buildSendMessage(messageSenders, session.id, workerId),
   };
 
   const retryStartTime = Date.now();
@@ -143,7 +141,7 @@ export async function spawnSenior(
   leadId: string,
   step: ChainStep,
 ): Promise<DelegateResult> {
-  const { emitter, messageSenders, trackToolCall, checkBudget } = deps;
+  const { emitter, messageSenders, trackToolCall, checkBudget, orchestratorLoop, pausedSessions } = deps;
   const domainNames = failedReview.srDomains ?? [];
   const srId = `${step.team}-sr-${domainNames.join("-").toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 
@@ -230,17 +228,11 @@ export async function spawnSenior(
     parentId: leadId,
     teamName: teamConfig["team-name"],
     teamColor: "#ffaa00",
-    onStreamEvent: (streamEvt) => {
-      if (streamEvt.type === "tool_call") {
-        trackToolCall(srId, streamEvt.tool ?? "");
-        emitter.toolCall(session.id, srId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
-      } else if (streamEvt.type === "cost") {
-        emitter.costUpdate(session.id, srId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
-      }
-    },
-    sendMessage: (fn) => {
-      messageSenders.set(`${session.id}:${srId}`, fn);
-    },
+    onStreamEvent: buildStreamHandler({
+      emitter, sessionId: session.id, agentId: srId,
+      trackToolCall, messageSenders, orchestratorLoop, pausedSessions, session,
+    }),
+    sendMessage: buildSendMessage(messageSenders, session.id, srId),
   };
 
   const srStartTime = Date.now();
@@ -290,7 +282,7 @@ export async function leadReviewWorkers(
   step: ChainStep,
   leadId: string,
 ): Promise<WorkerReview[]> {
-  const { emitter, messageSenders, trackToolCall } = deps;
+  const { emitter, messageSenders, trackToolCall, orchestratorLoop, pausedSessions } = deps;
 
   console.log(`[orchestrator] ${teamConfig.lead.name} reviewing ${workerResults.length} workers`);
 
@@ -353,17 +345,11 @@ export async function leadReviewWorkers(
     parentId: "orch-1",
     teamName: teamConfig["team-name"],
     teamColor: teamConfig["team-color"],
-    onStreamEvent: (streamEvt) => {
-      if (streamEvt.type === "tool_call") {
-        trackToolCall(leadId, streamEvt.tool ?? "");
-        emitter.toolCall(session.id, leadId, streamEvt.tool ?? "", streamEvt.filePath ?? "", streamEvt.status ?? "running", streamEvt.toolArgs, streamEvt.toolResult);
-      } else if (streamEvt.type === "cost") {
-        emitter.costUpdate(session.id, leadId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
-      }
-    },
-    sendMessage: (fn) => {
-      messageSenders.set(`${session.id}:${leadId}`, fn);
-    },
+    onStreamEvent: buildStreamHandler({
+      emitter, sessionId: session.id, agentId: leadId,
+      trackToolCall, messageSenders, orchestratorLoop, pausedSessions, session,
+    }),
+    sendMessage: buildSendMessage(messageSenders, session.id, leadId),
   };
 
   const reviewResult = await adapter.delegate(reviewOpts);

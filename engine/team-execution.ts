@@ -33,6 +33,7 @@ export interface TeamExecutionDeps {
   checkBudget: (session: SessionState, agentId: string, agentCost: number, agentTokens: number) => void;
   getAdapter: (name?: string) => PlatformAdapter;
   orchestratorLoop?: OrchestratorLoop | null;
+  pausedSessions?: Set<string>;
   /** Global limiter across all teams in a session */
   sessionLimiter?: ConcurrencyLimiter;
   /** Per-team limiter (created per runTeamStep call) */
@@ -350,6 +351,8 @@ export async function runTeamStep(
     messageSenders,
     trackToolCall,
     checkBudget,
+    orchestratorLoop: deps.orchestratorLoop,
+    pausedSessions: deps.pausedSessions,
   };
 
   // Lead reviews worker output (include failure notice so lead knows about missing workers)
