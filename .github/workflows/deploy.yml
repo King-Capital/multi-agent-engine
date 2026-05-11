@@ -55,6 +55,7 @@ jobs:
           rsync -a --delete configs/ /opt/mae/configs/
           rsync -a prompts/ /opt/mae/prompts/ 2>/dev/null || true
           cp -f library.yaml /opt/mae/library.yaml 2>/dev/null || true
+          cp -f VERSION /opt/mae/VERSION 2>/dev/null || true
 
       - name: Install engine dependencies
         run: cd /opt/mae/engine && bun install
