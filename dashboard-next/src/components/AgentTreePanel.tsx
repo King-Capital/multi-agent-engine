@@ -289,7 +289,7 @@ export function AgentTreePanel({
 	const tree = React.useMemo(() => buildTree(agents), [agents]);
 	const flat = React.useMemo(() => flattenTree(tree), [tree]);
 	const agentCostSum = agents.reduce((s, a) => s + a.cost_usd, 0);
-	const totalCost = Math.max(sessionCost ?? 0, eventsCost, agentCostSum);
+	const totalCost = agentCostSum > 0 ? agentCostSum : Math.max(sessionCost ?? 0, eventsCost);
 	const totalTokens = agents.reduce((s, a) => s + a.tokens_used, 0);
 
 	return (

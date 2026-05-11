@@ -364,10 +364,10 @@ func handleAPISessionHistory(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.QueryContext(r.Context(), `
 		SELECT
 			s.id, s.name, s.chain, s.status, s.created_at, s.completed_at,
-			GREATEST(
-				COALESCE(SUM(a.cost_usd), 0),
-				COALESCE((SELECT SUM((e.payload->>'cost_usd')::numeric) FROM events e WHERE e.session_id = s.id AND e.event_type = 'cost_update' AND e.payload->>'cost_usd' IS NOT NULL), 0)
-			) as total_cost,
+			CASE
+				WHEN COALESCE(SUM(a.cost_usd), 0) > 0 THEN SUM(a.cost_usd)
+				ELSE COALESCE((SELECT SUM(max_cost) FROM (SELECT MAX((e.payload->>'cost_usd')::numeric) as max_cost FROM events e WHERE e.session_id = s.id AND e.event_type = 'cost_update' AND e.payload->>'cost_usd' IS NOT NULL GROUP BY e.agent_id) sub), 0)
+			END as total_cost,
 			COALESCE((SELECT SUM((e.payload->>'tokens')::bigint) FROM events e WHERE e.session_id = s.id AND e.event_type = 'cost_update' AND e.payload->>'tokens' IS NOT NULL), 0) as total_tokens,
 			COUNT(DISTINCT a.id) as agent_count,
 			EXTRACT(EPOCH FROM COALESCE(s.completed_at, NOW()) - s.created_at) as duration_secs
@@ -538,7 +538,7 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# HELP mae_total_cost_usd Total cost in USD across all agents\n")
 	fmt.Fprintf(w, "# TYPE mae_total_cost_usd gauge\n")
 	var totalCost float64
-	if err := db.QueryRowContext(ctx, `SELECT GREATEST(COALESCE(SUM(cost_usd), 0), COALESCE((SELECT SUM((payload->>'cost_usd')::numeric) FROM events WHERE event_type = 'cost_update' AND payload->>'cost_usd' IS NOT NULL), 0)) FROM agents`).Scan(&totalCost); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT CASE WHEN COALESCE(SUM(cost_usd), 0) > 0 THEN SUM(cost_usd) ELSE COALESCE((SELECT SUM(max_cost) FROM (SELECT MAX((payload->>'cost_usd')::numeric) as max_cost FROM events WHERE event_type = 'cost_update' AND payload->>'cost_usd' IS NOT NULL GROUP BY agent_id, session_id) sub), 0) END FROM agents`).Scan(&totalCost); err != nil {
 		totalCost = 0
 	}
 	fmt.Fprintf(w, "mae_total_cost_usd %.6f\n\n", totalCost)
@@ -591,11 +591,11 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 		resp.TotalAgents = 0
 	}
 
-	// Total cost — use GREATEST of agent costs vs event costs (events are more reliable historically)
-	if err := db.QueryRowContext(ctx, `SELECT GREATEST(
-		COALESCE((SELECT SUM(cost_usd) FROM agents), 0),
-		COALESCE((SELECT SUM((payload->>'cost_usd')::numeric) FROM events WHERE event_type = 'cost_update' AND payload->>'cost_usd' IS NOT NULL), 0)
-	)`).Scan(&resp.TotalCost); err != nil {
+	// Total cost — prefer agents sum; fall back to MAX per-agent from events for old sessions
+	if err := db.QueryRowContext(ctx, `SELECT CASE
+		WHEN COALESCE((SELECT SUM(cost_usd) FROM agents), 0) > 0 THEN (SELECT SUM(cost_usd) FROM agents)
+		ELSE COALESCE((SELECT SUM(max_cost) FROM (SELECT MAX((payload->>'cost_usd')::numeric) as max_cost FROM events WHERE event_type = 'cost_update' AND payload->>'cost_usd' IS NOT NULL GROUP BY agent_id, session_id) sub), 0)
+	END`).Scan(&resp.TotalCost); err != nil {
 		resp.TotalCost = 0
 	}
 
@@ -604,12 +604,15 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 		resp.TotalEvents = 0
 	}
 
-	// Cost per day (last 30 days) — use events for cost since agents table has gaps
+	// Cost per day (last 30 days) — use MAX per agent per session to avoid double-counting incremental updates
 	rows, err := db.QueryContext(ctx, `
-		SELECT DATE(e.created_at) as day, COALESCE(SUM((e.payload->>'cost_usd')::numeric), 0) as cost
-		FROM events e
-		WHERE e.event_type = 'cost_update' AND e.payload->>'cost_usd' IS NOT NULL
-		AND e.created_at > NOW() - INTERVAL '30 days'
+		SELECT day, SUM(max_cost) as cost FROM (
+			SELECT DATE(e.created_at) as day, e.session_id, e.agent_id, MAX((e.payload->>'cost_usd')::numeric) as max_cost
+			FROM events e
+			WHERE e.event_type = 'cost_update' AND e.payload->>'cost_usd' IS NOT NULL
+			AND e.created_at > NOW() - INTERVAL '30 days'
+			GROUP BY day, e.session_id, e.agent_id
+		) sub
 		GROUP BY day
 		ORDER BY day`)
 	if err == nil {
