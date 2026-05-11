@@ -8,7 +8,7 @@
 
 import * as React from "react";
 import { api } from "@/lib/api";
-import { buildAgentsFromEvents, mergeAgents } from "@/lib/agents-from-events";
+import { buildAgentsFromEvents } from "@/lib/agents-from-events";
 import { useSessionSSE } from "@/hooks/useSessionSSE";
 import type { LiveAgent, DBEvent, LiveEvent } from "@/lib/types";
 import { formatCurrency, formatNumber } from "@/lib/utils";
