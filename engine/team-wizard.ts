@@ -4,6 +4,9 @@ import { join, dirname } from "path";
 import { loadTemplate, listTemplates, loadTeams, writeTeams, loadChains, writeChains, BASE_DIR } from "./config";
 import { slugify } from "./cli-utils";
 import type { TeamTemplate, TeamConfig, TeamMember, Chain } from "./types";
+import { createLogger } from "./logger";
+
+const log = createLogger("team-wizard");
 
 const COLOR_PALETTE = [
   { value: "#00ff88", label: "Green",   hint: "#00ff88" },

@@ -3,6 +3,9 @@ import { readFileSync } from "fs";
 import { loadModelRouting, writeModelRouting } from "./config";
 import { loadPerformance, buildScorecard } from "./perf-log";
 import type { ModelRoutingConfig, ThinkingLevel } from "./types";
+import { createLogger } from "./logger";
+
+const log = createLogger("config-cli");
 
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 const DEFAULT_BUDGETS = { max_per_session_usd: 50, warn_at_usd: 25, max_per_agent_usd: 15, max_total_tokens: 10_000_000 };
@@ -67,7 +70,7 @@ export function configExport(): void {
 export async function configImport(fileOrStdin?: string): Promise<void> {
   const json = readFileSync(!fileOrStdin || fileOrStdin === "-" ? "/dev/stdin" : fileOrStdin, "utf-8");
   let partial: Partial<ModelRoutingConfig>;
-  try { partial = JSON.parse(json); } catch { console.error("Error: Invalid JSON"); process.exit(1); }
+  try { partial = JSON.parse(json); } catch { log.error("Invalid JSON input"); process.exit(1); }
 
   const current = loadModelRouting();
   const merged: ModelRoutingConfig = {

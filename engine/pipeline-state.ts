@@ -8,6 +8,9 @@
 
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
+import { createLogger } from "./logger";
+
+const log = createLogger("pipeline-state");
 
 export type StageStatus = "pending" | "running" | "completed" | "failed" | "skipped";
 
@@ -71,7 +74,7 @@ export class PipelineTracker {
 
   static resume(sessionId: string): PipelineTracker | null {
     if (!/^[0-9a-f-]{36}$/i.test(sessionId)) {
-      console.error(`[pipeline] Invalid session ID format: ${sessionId}`);
+      log.error(`Invalid session ID format: ${sessionId}`);
       return null;
     }
     const path = join(STATE_DIR, `${sessionId}.json`);
@@ -172,7 +175,7 @@ export class PipelineTracker {
     try {
       writeFileSync(this.statePath, JSON.stringify(this.state, null, 2));
     } catch (err) {
-      console.error(`[pipeline] Failed to save state: ${err}`);
+      log.error(`Failed to save state`, { error: String(err) });
     }
   }
 }

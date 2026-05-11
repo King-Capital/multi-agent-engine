@@ -6,6 +6,9 @@ import { callLLM } from "./llm-gateway";
 import type { ChatMessage } from "./llm-gateway";
 import { getFlag, stripFlags, slugify } from "./cli-utils";
 import { BASE_DIR } from "./config";
+import { createLogger } from "./logger";
+
+const log = createLogger("expert-session");
 
 /** Try to read a file, returning null if it doesn't exist or can't be read. */
 function tryReadFile(path: string): string | null {

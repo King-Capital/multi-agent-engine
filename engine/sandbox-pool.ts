@@ -6,6 +6,9 @@
  */
 
 import type { DelegateOptions } from "./types";
+import { createLogger } from "./logger";
+
+const log = createLogger("sandbox-pool");
 
 export interface SandboxInfo {
   id: number;       // 1-4
@@ -26,20 +29,20 @@ export class SandboxPool {
     this.pveToken = opts?.pveToken ?? process.env.PVE_TOKEN ?? "";
 
     if (this.pveApi && !this.pveApi.startsWith("https://")) {
-      console.warn("[sandbox] WARNING: PVE_API is not HTTPS — credentials may be transmitted in cleartext");
+      log.warn("PVE_API is not HTTPS — credentials may be transmitted in cleartext");
     }
 
     const poolSize = opts?.poolSize ?? 4;
 
     const rawSubnet = process.env.MAE_SANDBOX_SUBNET ?? "10.0.0";
     const sandboxSubnet = /^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(rawSubnet) ? rawSubnet : (() => {
-      console.error(`[sandbox] Invalid MAE_SANDBOX_SUBNET "${rawSubnet}", using default "10.0.0"`);
+      log.error(`Invalid MAE_SANDBOX_SUBNET "${rawSubnet}", using default "10.0.0"`);
       return "10.0.0";
     })();
 
     const rawOffset = process.env.MAE_SANDBOX_HOST_OFFSET ?? "81";
     const sandboxHostOffset = /^\d+$/.test(rawOffset) ? parseInt(rawOffset) : (() => {
-      console.error(`[sandbox] Invalid MAE_SANDBOX_HOST_OFFSET "${rawOffset}", using default 81`);
+      log.error(`Invalid MAE_SANDBOX_HOST_OFFSET "${rawOffset}", using default 81`);
       return 81;
     })();
 
@@ -68,12 +71,12 @@ export class SandboxPool {
         // Scale up RAM
         await this.setMemory(sb, 4096);
         
-        console.log(`[sandbox-pool] Assigned sandbox ${sb.id} (${sb.ip}) to ${agentId}`);
+        log.info(`Assigned sandbox ${sb.id} (${sb.ip}) to ${agentId}`);
         return { ...sb };
       }
     }
 
-    console.warn(`[sandbox-pool] No free sandboxes available for ${agentId}`);
+    log.warn(`No free sandboxes available for ${agentId}`);
     return null;
   }
 
@@ -89,7 +92,7 @@ export class SandboxPool {
         // Scale down RAM
         await this.setMemory(sb, 512);
 
-        console.log(`[sandbox-pool] Released sandbox ${sb.id} (${sb.ip}) from ${agentId}`);
+        log.info(`Released sandbox ${sb.id} (${sb.ip}) from ${agentId}`);
         return;
       }
     }
@@ -120,7 +123,7 @@ export class SandboxPool {
 
   private async setMemory(sb: SandboxInfo, memoryMb: number): Promise<void> {
     if (!this.pveToken) {
-      console.log(`[sandbox-pool] No PVE token -- skipping memory change for ${sb.hostname}`);
+      log.info(`No PVE token -- skipping memory change for ${sb.hostname}`);
       return;
     }
 
@@ -135,10 +138,10 @@ export class SandboxPool {
         body: `memory=${memoryMb}`,
       });
       if (!res.ok) {
-        console.error(`[sandbox-pool] Failed to set memory on ${sb.hostname}: ${res.status}`);
+        log.error(`Failed to set memory on ${sb.hostname}: ${res.status}`);
       }
     } catch (err) {
-      console.error(`[sandbox-pool] Error setting memory on ${sb.hostname}:`, err);
+      log.error(`Error setting memory on ${sb.hostname}`, { error: String(err) });
     }
   }
 }

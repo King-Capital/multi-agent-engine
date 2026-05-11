@@ -1,6 +1,9 @@
 import { readFileSync, readdirSync, existsSync, statSync } from "fs";
 import { join, extname, basename } from "path";
 import { isInternalUrl } from "./security";
+import { createLogger } from "./logger";
+
+const log = createLogger("reference-loader");
 
 export interface DesignReference {
   source: "file" | "url" | "project";
@@ -12,7 +15,7 @@ export function loadFileReferences(paths: string[]): DesignReference[] {
   const refs: DesignReference[] = [];
   for (const p of paths) {
     if (!existsSync(p)) {
-      console.warn(`[reference-loader] File not found: ${p}`);
+      log.warn(`File not found: ${p}`);
       continue;
     }
     const ext = extname(p).toLowerCase();
@@ -43,11 +46,11 @@ export async function loadUrlReferences(urls: string[]): Promise<DesignReference
     try {
       const parsed = new URL(url);
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        console.warn(`[reference-loader] Blocked non-HTTP URL: ${url}`);
+        log.warn(`Blocked non-HTTP URL: ${url}`);
         continue;
       }
       if (isInternalUrl(url)) {
-        console.warn(`[reference-loader] Blocked internal URL: ${url}`);
+        log.warn(`Blocked internal URL: ${url}`);
         continue;
       }
       const resp = await fetch(url, {
@@ -55,12 +58,12 @@ export async function loadUrlReferences(urls: string[]): Promise<DesignReference
         signal: AbortSignal.timeout(10_000),
       });
       if (!resp.ok) {
-        console.warn(`[reference-loader] Failed to fetch ${url}: ${resp.status}`);
+        log.warn(`Failed to fetch ${url}: ${resp.status}`);
         continue;
       }
       const contentLength = parseInt(resp.headers.get("content-length") ?? "0", 10);
       if (contentLength > 5_000_000) {
-        console.warn(`[reference-loader] Response too large (${contentLength} bytes): ${url}`);
+        log.warn(`Response too large (${contentLength} bytes): ${url}`);
         continue;
       }
       const contentType = resp.headers.get("content-type") ?? "";
@@ -84,10 +87,10 @@ export async function loadUrlReferences(urls: string[]): Promise<DesignReference
         const css = await resp.text();
         refs.push({ source: "url", name: url, content: css.slice(0, 10_000) });
       } else {
-        console.warn(`[reference-loader] Unsupported content type for ${url}: ${contentType}`);
+        log.warn(`Unsupported content type for ${url}: ${contentType}`);
       }
     } catch (err: any) {
-      console.warn(`[reference-loader] Error fetching ${url}: ${err.message}`);
+      log.warn(`Error fetching ${url}: ${err.message}`);
     }
   }
   return refs;
