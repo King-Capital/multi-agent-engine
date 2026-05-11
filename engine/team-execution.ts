@@ -13,6 +13,7 @@ import { isGitRepo, createWorktree, mergeWorktree, cleanupWorktree } from "./wor
 import { parseAssignment, summarizeOutput } from "./output-parsing";
 import { collectIncrementally } from "./incremental-synthesis";
 import { retryWorker, spawnSenior, leadReviewWorkers } from "./worker-lifecycle";
+import type { WorkerLifecycleDeps } from "./worker-lifecycle";
 import type { EventEmitter } from "./event-emitter";
 import { logPerformance } from "./perf-log";
 import type {
@@ -21,11 +22,18 @@ import type {
   DelegateResult,
   SessionState,
   ChainStep,
+  TeamConfig,
+  PersonaConfig,
   GradeLevel,
+  WorkerReview,
 } from "./types";
 import { buildStreamHandler, buildSendMessage } from "./stream-handler";
 import type { OrchestratorLoop } from "./orchestrator-loop";
 import type { ConcurrencyLimiter } from "./concurrency";
+
+// ---------------------------------------------------------------------------
+// Deps interfaces
+// ---------------------------------------------------------------------------
 
 export interface TeamExecutionDeps {
   emitter: EventEmitter;
@@ -43,20 +51,110 @@ export interface TeamExecutionDeps {
   teamLimiterMax?: number;
 }
 
-/**
- * Run a single team step: delegate to lead, spawn workers, review, retry loop.
- */
-export async function runTeamStep(
-  deps: TeamExecutionDeps,
+// ---------------------------------------------------------------------------
+// Intermediate result interfaces
+// ---------------------------------------------------------------------------
+
+export interface PreparedTeamStep {
+  teamConfig: TeamConfig;
+  leadPersona: PersonaConfig;
+  leadId: string;
+  leadOpts: DelegateOptions;
+  leadResolved: { model: string; thinking: import("./types").ThinkingLevel };
+}
+
+export interface LeadDelegationResult {
+  leadResult: DelegateResult;
+  leadCost: number;
+  leadTokens: number;
+  earlyReturn?: DelegateResult;
+}
+
+export interface WorkerExecutionResult {
+  workerResults: DelegateResult[];
+  failedWorkers: { name: string; error: string }[];
+  workerAssignments: Map<string, string>;
+  workerWtIds: string[];
+}
+
+export interface WorktreeMergeResult {
+  mergedOk: boolean;
+  mergeErrors: string[];
+}
+
+export interface AccumulatedCosts {
+  workerResults: DelegateResult[];
+  failedWorkers: { name: string; error: string }[];
+  failureNotice: string;
+}
+
+export interface ReviewRetryResult {
+  reviews: WorkerReview[];
+  workerResults: DelegateResult[];
+  workerAssignments: Map<string, string>;
+}
+
+// ---------------------------------------------------------------------------
+// Sub-function deps (each takes only what it needs)
+// ---------------------------------------------------------------------------
+
+interface PrepareDeps {
+  emitter: EventEmitter;
+  messageSenders: Map<string, (msg: string) => void>;
+  trackActivity: (agentId: string, name: string, role: string) => void;
+  trackToolCall: (agentId: string, tool: string) => void;
+  orchestratorLoop?: OrchestratorLoop | null;
+}
+
+interface LeadDelegateDeps {
+  emitter: EventEmitter;
+  checkBudget: (session: SessionState, agentId: string, agentCost: number, agentTokens: number) => void;
+  untrackActivity: (agentId: string) => void;
+}
+
+interface WorkerExecDeps {
+  emitter: EventEmitter;
+  messageSenders: Map<string, (msg: string) => void>;
+  trackActivity: (agentId: string, name: string, role: string) => void;
+  untrackActivity: (agentId: string) => void;
+  trackToolCall: (agentId: string, tool: string) => void;
+  orchestratorLoop?: OrchestratorLoop | null;
+  sessionLimiter?: ConcurrencyLimiter;
+  teamLimiterMax?: number;
+}
+
+interface WorktreeMergeDeps {
+  emitter: EventEmitter;
+}
+
+interface AccumulateCostsDeps {
+  emitter: EventEmitter;
+  checkBudget: (session: SessionState, agentId: string, agentCost: number, agentTokens: number) => void;
+}
+
+interface ReviewRetryDeps {
+  emitter: EventEmitter;
+  messageSenders: Map<string, (msg: string) => void>;
+  trackToolCall: (agentId: string, tool: string) => void;
+  checkBudget: (session: SessionState, agentId: string, agentCost: number, agentTokens: number) => void;
+  orchestratorLoop?: OrchestratorLoop | null;
+  pausedSessions?: Set<string>;
+}
+
+// ---------------------------------------------------------------------------
+// 1. prepareTeamStep
+// ---------------------------------------------------------------------------
+
+export async function prepareTeamStep(
+  deps: PrepareDeps,
   session: SessionState,
   step: ChainStep,
   task: string,
   previousOutput: string,
-  adapterName?: string,
-): Promise<DelegateResult> {
-  const { emitter, messageSenders, trackActivity, untrackActivity, trackToolCall, checkBudget, getAdapter } = deps;
+  _adapter: PlatformAdapter,
+): Promise<PreparedTeamStep> {
+  const { emitter, messageSenders, trackActivity, trackToolCall } = deps;
   const teamConfig = getTeam(step.team!);
-  const adapter = getAdapter(adapterName);
   const leadPersona = loadPersona(teamConfig.lead.path);
   const leadId = `${step.team}-lead`;
 
@@ -115,6 +213,22 @@ export async function runTeamStep(
     sendMessage: buildSendMessage(messageSenders, session.id, leadId),
   };
 
+  return { teamConfig, leadPersona, leadId, leadOpts, leadResolved };
+}
+
+// ---------------------------------------------------------------------------
+// 2. delegateToLead
+// ---------------------------------------------------------------------------
+
+export async function delegateToLead(
+  deps: LeadDelegateDeps,
+  session: SessionState,
+  prepared: PreparedTeamStep,
+  adapter: PlatformAdapter,
+): Promise<LeadDelegationResult> {
+  const { emitter, checkBudget, untrackActivity } = deps;
+  const { teamConfig, leadId, leadOpts, leadResolved } = prepared;
+
   const leadStartTime = Date.now();
   const leadResult = await adapter.delegate(leadOpts);
   await emitter.costUpdate(session.id, leadId, leadResult.costUsd, leadResult.tokensUsed, 0);
@@ -138,6 +252,7 @@ export async function runTeamStep(
   const leadSummary = summarizeOutput(leadResult.output, 2000);
   await emitter.message(session.id, leadId, teamConfig.lead.name, "user", leadSummary);
 
+  // Early return if lead failed or no workers
   if (leadResult.grade === "FAILED" || !teamConfig.members.length) {
     await emitter.agentDone(session.id, leadId, leadResult.grade);
     untrackActivity(leadId);
@@ -145,18 +260,40 @@ export async function runTeamStep(
       ? `${teamConfig["team-name"]} lead could not complete the task.`
       : `${teamConfig["team-name"]} complete (lead only).`;
     await emitter.message(session.id, "orch-1", "Orchestrator", "user", msg);
-    return leadResult;
+    return { leadResult, leadCost: leadResult.costUsd, leadTokens: leadResult.tokensUsed, earlyReturn: leadResult };
   }
 
-  // Spawn workers in parallel -- each gets their assignment from the lead's brief
+  return { leadResult, leadCost: leadResult.costUsd, leadTokens: leadResult.tokensUsed };
+}
+
+// ---------------------------------------------------------------------------
+// 3. executeWorkers
+// ---------------------------------------------------------------------------
+
+export async function executeWorkers(
+  deps: WorkerExecDeps,
+  session: SessionState,
+  step: ChainStep,
+  task: string,
+  teamConfig: TeamConfig,
+  leadResult: DelegateResult,
+  leadId: string,
+  adapter: PlatformAdapter,
+): Promise<WorkerExecutionResult> {
+  const { emitter, messageSenders, trackActivity, untrackActivity, trackToolCall } = deps;
+
   const useWorktrees = teamConfig.members.length > 1 && await isGitRepo(session.workingDir);
   const workerWtIds: string[] = [];
+  const workerAssignments = new Map<string, string>();
 
-  log.info("Lead briefed, spawning workers", { team: teamConfig["team-name"], worker_count: teamConfig.members.length, workers: teamConfig.members.map((m) => m.name), session_id: session.id });
+  log.info("Lead briefed, spawning workers", {
+    team: teamConfig["team-name"],
+    worker_count: teamConfig.members.length,
+    workers: teamConfig.members.map((m) => m.name),
+    session_id: session.id,
+  });
   await emitter.message(session.id, "orch-1", "Orchestrator", "user",
     `${teamConfig["team-name"]} lead assigned ${teamConfig.members.length} workers: ${teamConfig.members.map((m) => m.name).join(", ")}.`);
-
-  const workerAssignments = new Map<string, string>();
 
   // Create per-team concurrency limiter if configured
   const { ConcurrencyLimiter: LimiterClass } = await import("./concurrency");
@@ -165,95 +302,94 @@ export async function runTeamStep(
     : null;
 
   const workerPromises = teamConfig.members.map(async (member) => {
-    // Wrap entire worker in concurrency limiters (session-global + per-team)
     const runWorker = async () => {
-    const workerPersona = loadPersona(member.path);
-    const workerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+      const workerPersona = loadPersona(member.path);
+      const workerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 
-    trackActivity(workerId, member.name, "worker");
+      trackActivity(workerId, member.name, "worker");
 
-    let workerDir = session.workingDir;
+      let workerDir = session.workingDir;
 
-    if (useWorktrees) {
-      const wtId = `${session.id.slice(0, 8)}-${workerId}`;
-      workerDir = await createWorktree(session.workingDir, wtId);
-      workerWtIds.push(wtId);
-    }
+      if (useWorktrees) {
+        const wtId = `${session.id.slice(0, 8)}-${workerId}`;
+        workerDir = await createWorktree(session.workingDir, wtId);
+        workerWtIds.push(wtId);
+      }
 
-    const workerResolved = resolveModelForRole("worker", member.model);
+      const workerResolved = resolveModelForRole("worker", member.model);
 
-    await emitter.agentSpawn(session.id, workerId, leadId, member.name, "worker",
-      workerResolved.model, teamConfig["team-name"], member.color ?? teamConfig["team-color"]);
+      await emitter.agentSpawn(session.id, workerId, leadId, member.name, "worker",
+        workerResolved.model, teamConfig["team-name"], member.color ?? teamConfig["team-color"]);
 
-    // Extract this worker's assignment from the lead brief, or give full brief
-    const assignment = parseAssignment(leadResult.output, member.name);
-    const workerPrompt = assignment
-      ? `Your assignment from ${teamConfig.lead.name}:\n${assignment}\n\nOriginal task: ${task}`
-      : `Brief from ${teamConfig.lead.name}:\n${leadResult.output}\n\nOriginal task: ${task}`;
-    workerAssignments.set(workerId, assignment ?? leadResult.output);
+      // Extract this worker's assignment from the lead brief, or give full brief
+      const assignment = parseAssignment(leadResult.output, member.name);
+      const workerPrompt = assignment
+        ? `Your assignment from ${teamConfig.lead.name}:\n${assignment}\n\nOriginal task: ${task}`
+        : `Brief from ${teamConfig.lead.name}:\n${leadResult.output}\n\nOriginal task: ${task}`;
+      workerAssignments.set(workerId, assignment ?? leadResult.output);
 
-    // Emit the prompt being sent to the worker
-    await emitter.message(session.id, workerId, teamConfig.lead.name, "user",
-      "📋 **Assignment to " + member.name + ":**\n\n" + workerPrompt.slice(0, 3000));
+      // Emit the prompt being sent to the worker
+      await emitter.message(session.id, workerId, teamConfig.lead.name, "user",
+        "📋 **Assignment to " + member.name + ":**\n\n" + workerPrompt.slice(0, 3000));
 
-    const workerOpts: DelegateOptions = {
-      persona: workerPersona,
-      systemPrompt: buildSystemPrompt(workerPersona, "worker"),
-      userPrompt: workerPrompt,
-      model: workerResolved.model,
-      thinking: workerResolved.thinking,
-      tools: workerPersona.tools,
-      domain: workerPersona.domain,
-      workingDir: workerDir,
-      sessionDir: `data/sessions/${session.id}`,
-      parentId: leadId,
-      teamName: teamConfig["team-name"],
-      teamColor: member.color ?? teamConfig["team-color"],
-      onStreamEvent: buildStreamHandler({
-        emitter, sessionId: session.id, agentId: workerId,
-        trackToolCall, messageSenders, orchestratorLoop: deps.orchestratorLoop,
-      }),
-      sendMessage: buildSendMessage(messageSenders, session.id, workerId),
-    };
-
-    try {
-      const workerStartTime = Date.now();
-      const result = await delegateWithHealing({
-        adapter,
-        opts: workerOpts,
-        sessionId: session.id,
-        agentRole: "worker",
-        onEvent: async (_type, data) => {
-          await emitter.selfHeal(session.id, workerId, data.failed_worker as string, data.heal_action as string);
-        },
-      });
-
-      await emitter.costUpdate(session.id, workerId, result.costUsd, result.tokensUsed, 0);
-
-      logPerformance({
+      const workerOpts: DelegateOptions = {
+        persona: workerPersona,
+        systemPrompt: buildSystemPrompt(workerPersona, "worker"),
+        userPrompt: workerPrompt,
         model: workerResolved.model,
-        role: "worker",
-        grade: result.grade ?? "UNGRADED",
-        cost_usd: result.costUsd,
-        latency_ms: Date.now() - workerStartTime,
-        findings_count: result.findings?.length ?? 0,
-        agent_name: member.name,
-        session_id: session.id,
-        timestamp: new Date().toISOString(),
-      });
+        thinking: workerResolved.thinking,
+        tools: workerPersona.tools,
+        domain: workerPersona.domain,
+        workingDir: workerDir,
+        sessionDir: `data/sessions/${session.id}`,
+        parentId: leadId,
+        teamName: teamConfig["team-name"],
+        teamColor: member.color ?? teamConfig["team-color"],
+        onStreamEvent: buildStreamHandler({
+          emitter, sessionId: session.id, agentId: workerId,
+          trackToolCall, messageSenders, orchestratorLoop: deps.orchestratorLoop,
+        }),
+        sendMessage: buildSendMessage(messageSenders, session.id, workerId),
+      };
 
-      const workerSummary = summarizeOutput(result.output, 1500);
-      await emitter.message(session.id, workerId, member.name, "user", workerSummary);
-      await emitter.agentDone(session.id, workerId, result.grade);
-      untrackActivity(workerId);
+      try {
+        const workerStartTime = Date.now();
+        const result = await delegateWithHealing({
+          adapter,
+          opts: workerOpts,
+          sessionId: session.id,
+          agentRole: "worker",
+          onEvent: async (_type, data) => {
+            await emitter.selfHeal(session.id, workerId, data.failed_worker as string, data.heal_action as string);
+          },
+        });
 
-      return result;
-    } catch (err) {
-      log.error("Worker threw", { worker: member.name, worker_id: workerId, error: String(err), session_id: session.id });
-      await emitter.agentDone(session.id, workerId, "FAILED");
-      untrackActivity(workerId);
-      throw err;
-    }
+        await emitter.costUpdate(session.id, workerId, result.costUsd, result.tokensUsed, 0);
+
+        logPerformance({
+          model: workerResolved.model,
+          role: "worker",
+          grade: result.grade ?? "UNGRADED",
+          cost_usd: result.costUsd,
+          latency_ms: Date.now() - workerStartTime,
+          findings_count: result.findings?.length ?? 0,
+          agent_name: member.name,
+          session_id: session.id,
+          timestamp: new Date().toISOString(),
+        });
+
+        const workerSummary = summarizeOutput(result.output, 1500);
+        await emitter.message(session.id, workerId, member.name, "user", workerSummary);
+        await emitter.agentDone(session.id, workerId, result.grade);
+        untrackActivity(workerId);
+
+        return result;
+      } catch (err) {
+        log.error("Worker threw", { worker: member.name, worker_id: workerId, error: String(err), session_id: session.id });
+        await emitter.agentDone(session.id, workerId, "FAILED");
+        untrackActivity(workerId);
+        throw err;
+      }
     }; // end runWorker
 
     // Apply concurrency limiters: session-global wraps per-team
@@ -289,7 +425,34 @@ export async function runTeamStep(
     partialThreshold: 0.5,
   });
 
-  // Worktree cleanup always runs, even if workers threw
+  // Partition settled results into fulfilled/rejected
+  const workerResults: DelegateResult[] = [];
+  const failedWorkers: { name: string; error: string }[] = [];
+  for (const [i, outcome] of settled.entries()) {
+    if (outcome.status === "fulfilled") {
+      workerResults.push(outcome.value);
+    } else {
+      const workerName = teamConfig.members[i]?.name ?? `Worker ${i + 1}`;
+      const errorMsg = outcome.reason?.message ?? String(outcome.reason) ?? "unknown error";
+      failedWorkers.push({ name: workerName, error: errorMsg });
+      log.error("Worker failed", { worker: workerName, error: errorMsg, team: teamConfig["team-name"], session_id: session.id });
+    }
+  }
+
+  return { workerResults, failedWorkers, workerAssignments, workerWtIds };
+}
+
+// ---------------------------------------------------------------------------
+// 4. mergeWorkerWorktrees
+// ---------------------------------------------------------------------------
+
+export async function mergeWorkerWorktrees(
+  deps: WorktreeMergeDeps,
+  session: SessionState,
+  workerWtIds: string[],
+): Promise<WorktreeMergeResult> {
+  const mergeErrors: string[] = [];
+
   for (const wtId of workerWtIds) {
     try {
       const { merged, hadChanges } = await mergeWorktree(session.workingDir, wtId);
@@ -297,44 +460,55 @@ export async function runTeamStep(
         if (merged) {
           log.info("Merged worktree", { worktree_id: wtId, session_id: session.id });
         } else {
+          const errMsg = `Worktree merge failed for ${wtId} — worker changes LOST.`;
           log.critical("Worktree merge failed -- worker changes LOST", { worktree_id: wtId, recovery: ".git/worktrees/", session_id: session.id });
-          await emitter.message(session.id, "orch-1", "Orchestrator", "user",
-            `ERROR: Worktree merge failed for ${wtId} — worker changes were lost. Check .git/worktrees/ for manual recovery.`);
+          await deps.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+            `ERROR: ${errMsg} Check .git/worktrees/ for manual recovery.`);
+          mergeErrors.push(errMsg);
         }
       }
       await cleanupWorktree(session.workingDir, wtId);
     } catch (e) {
       log.error("Worktree cleanup failed", { worktree_id: wtId, error: String(e), session_id: session.id });
+      mergeErrors.push(`Cleanup failed for ${wtId}: ${e}`);
     }
   }
 
-  // Accumulate costs sequentially after all workers complete — no parallel race
-  const workerResults: DelegateResult[] = [];
-  const failedWorkers: { name: string; error: string }[] = [];
-  for (const [i, outcome] of settled.entries()) {
-    if (outcome.status === "fulfilled") {
-      const result = outcome.value;
-      // Task 3 fix: checkBudget BEFORE accumulating cost to avoid double-counting
-      // (projectedCost = session.totalCost + agentCost — if we already added agentCost, it double-counts)
-      checkBudget(session, result.agentId, result.costUsd, result.tokensUsed);
-      session.totalCost += result.costUsd;
-      session.totalTokens += result.tokensUsed;
-      workerResults.push(result);
-    } else {
-      const workerName = teamConfig.members[i]?.name ?? `Worker ${i + 1}`;
-      const errorMsg = outcome.reason?.message ?? String(outcome.reason) ?? "unknown error";
-      failedWorkers.push({ name: workerName, error: errorMsg });
-      log.error("Worker failed", { worker: workerName, error: errorMsg, team: teamConfig["team-name"], session_id: session.id });
+  return { mergedOk: mergeErrors.length === 0, mergeErrors };
+}
 
-      // Emit worker_failed event to dashboard
-      await emitter.emit({
-        session_id: session.id,
-        agent_id: `${step.team}-${workerName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
-        event_type: "worker_failed",
-        timestamp: new Date().toISOString(),
-        data: { worker_name: workerName, error: errorMsg, team: teamConfig["team-name"] },
-      });
-    }
+// ---------------------------------------------------------------------------
+// 5. accumulateWorkerCosts
+// ---------------------------------------------------------------------------
+
+export async function accumulateWorkerCosts(
+  deps: AccumulateCostsDeps,
+  session: SessionState,
+  step: ChainStep,
+  teamConfig: TeamConfig,
+  execution: WorkerExecutionResult,
+): Promise<AccumulatedCosts> {
+  const { emitter, checkBudget } = deps;
+  const { workerResults, failedWorkers } = execution;
+
+  // Accumulate costs sequentially after all workers complete — no parallel race
+  for (const result of workerResults) {
+    // Task 3 fix: checkBudget BEFORE accumulating cost to avoid double-counting
+    // (projectedCost = session.totalCost + agentCost — if we already added agentCost, it double-counts)
+    checkBudget(session, result.agentId, result.costUsd, result.tokensUsed);
+    session.totalCost += result.costUsd;
+    session.totalTokens += result.tokensUsed;
+  }
+
+  // Emit worker_failed events for failed workers
+  for (const failed of failedWorkers) {
+    await emitter.emit({
+      session_id: session.id,
+      agent_id: `${step.team}-${failed.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+      event_type: "worker_failed",
+      timestamp: new Date().toISOString(),
+      data: { worker_name: failed.name, error: failed.error, team: teamConfig["team-name"] },
+    });
   }
 
   // Build failure notice for lead review context
@@ -348,12 +522,31 @@ export async function runTeamStep(
       `⚠️ ${failedWorkers.length} worker(s) failed: ${failedWorkers.map(f => f.name).join(", ")}. Lead will review ${workerResults.length} of ${teamConfig.members.length} expected results.`);
   }
 
-  // Build worker lifecycle deps for review/retry
-  const lifecycleDeps = {
-    emitter,
-    messageSenders,
-    trackToolCall,
-    checkBudget,
+  return { workerResults, failedWorkers, failureNotice };
+}
+
+// ---------------------------------------------------------------------------
+// 6. leadReviewAndRetry
+// ---------------------------------------------------------------------------
+
+export async function leadReviewAndRetry(
+  deps: ReviewRetryDeps,
+  session: SessionState,
+  step: ChainStep,
+  task: string,
+  teamConfig: TeamConfig,
+  leadPersona: PersonaConfig,
+  leadId: string,
+  adapter: PlatformAdapter,
+  workerResults: DelegateResult[],
+  workerAssignments: Map<string, string>,
+  failureNotice: string,
+): Promise<ReviewRetryResult> {
+  const lifecycleDeps: WorkerLifecycleDeps = {
+    emitter: deps.emitter,
+    messageSenders: deps.messageSenders,
+    trackToolCall: deps.trackToolCall,
+    checkBudget: deps.checkBudget,
     orchestratorLoop: deps.orchestratorLoop,
     pausedSessions: deps.pausedSessions,
   };
@@ -371,13 +564,13 @@ export async function runTeamStep(
     if (needsWork.length === 0) break;
 
     log.info("Retry cycle", { attempt, max_retries: maxRetries, workers_needing_rework: needsWork.length, session_id: session.id });
-    await emitter.message(session.id, leadId, "Orchestrator", "user",
+    await deps.emitter.message(session.id, leadId, "Orchestrator", "user",
       `Retry cycle ${attempt}/${maxRetries}: ${needsWork.map(r => r.workerName).join(", ")} need rework.`);
 
     for (const review of needsWork) {
       if (review.directFix) {
         log.info("Lead applying direct fix", { worker: review.workerName, session_id: session.id });
-        await emitter.message(session.id, leadId, teamConfig.lead.name, "user",
+        await deps.emitter.message(session.id, leadId, teamConfig.lead.name, "user",
           `Applying direct fix for ${review.workerName}:\n${review.directFix.slice(0, 500)}`);
         review.grade = "PASS";
         const idx = workerResults.findIndex(r => r.agentId === review.workerId);
@@ -434,17 +627,28 @@ export async function runTeamStep(
     }
   }
 
+  return { reviews, workerResults, workerAssignments };
+}
+
+// ---------------------------------------------------------------------------
+// 7. buildTeamResult
+// ---------------------------------------------------------------------------
+
+export function buildTeamResult(
+  leadResult: DelegateResult,
+  leadId: string,
+  leadName: string,
+  workerResults: DelegateResult[],
+  reviews: WorkerReview[],
+): DelegateResult {
   const allPass = reviews.every(r => r.grade === "PASS");
   const reviewGrade: GradeLevel = allPass ? "VERIFIED" : "FAILED";
   const combinedOutput = workerResults.map((r) => `[${r.agentName}]:\n${r.output}`).join("\n\n---\n\n");
   const totalCost = leadResult.costUsd + workerResults.reduce((s, r) => s + r.costUsd, 0);
 
-  await emitter.message(session.id, "orch-1", "Orchestrator", "user",
-    `${teamConfig["team-name"]} complete. Lead reviewed ${reviews.length} workers: ${reviews.map(r => `${r.workerName}=${r.grade}`).join(", ")}. Grade: ${reviewGrade}. Cost: $${totalCost.toFixed(3)}.`);
-
   return {
     agentId: leadId,
-    agentName: teamConfig.lead.name,
+    agentName: leadName,
     output: combinedOutput,
     grade: reviewGrade,
     findings: [
@@ -457,6 +661,67 @@ export async function runTeamStep(
     tokensUsed: leadResult.tokensUsed + workerResults.reduce((s, r) => s + r.tokensUsed, 0),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Coordinator: runTeamStep
+// ---------------------------------------------------------------------------
+
+/**
+ * Run a single team step: delegate to lead, spawn workers, review, retry loop.
+ */
+export async function runTeamStep(
+  deps: TeamExecutionDeps,
+  session: SessionState,
+  step: ChainStep,
+  task: string,
+  previousOutput: string,
+  adapterName?: string,
+): Promise<DelegateResult> {
+  const adapter = deps.getAdapter(adapterName);
+
+  // 1. Prepare lead prompt, config, delegate options
+  const prepared = await prepareTeamStep(deps, session, step, task, previousOutput, adapter);
+
+  // 2. Delegate to lead, get result (may early-return if lead fails or no workers)
+  const leadDelegation = await delegateToLead(deps, session, prepared, adapter);
+  if (leadDelegation.earlyReturn) return leadDelegation.earlyReturn;
+
+  // 3. Spawn workers in parallel, collect results
+  const execution = await executeWorkers(
+    deps, session, step, task,
+    prepared.teamConfig, leadDelegation.leadResult, prepared.leadId, adapter,
+  );
+
+  // 4. Merge worker worktrees (always runs, even if workers threw)
+  await mergeWorkerWorktrees(deps, session, execution.workerWtIds);
+
+  // 5. Accumulate costs, build failure notice
+  const accumulated = await accumulateWorkerCosts(
+    deps, session, step, prepared.teamConfig, execution,
+  );
+
+  // 6. Lead review + retry loop
+  const reviewed = await leadReviewAndRetry(
+    deps, session, step, task,
+    prepared.teamConfig, prepared.leadPersona, prepared.leadId, adapter,
+    accumulated.workerResults, execution.workerAssignments, accumulated.failureNotice,
+  );
+
+  // 7. Build final result
+  const result = buildTeamResult(
+    leadDelegation.leadResult, prepared.leadId, prepared.teamConfig.lead.name,
+    reviewed.workerResults, reviewed.reviews,
+  );
+
+  await deps.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+    `${prepared.teamConfig["team-name"]} complete. Lead reviewed ${reviewed.reviews.length} workers: ${reviewed.reviews.map(r => `${r.workerName}=${r.grade}`).join(", ")}. Grade: ${result.grade}. Cost: $${result.costUsd.toFixed(3)}.`);
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// runParallelStep (unchanged)
+// ---------------------------------------------------------------------------
 
 /**
  * Run multiple teams in parallel, each in their own worktree if applicable.
