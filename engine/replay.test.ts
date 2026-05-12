@@ -8,6 +8,7 @@ import {
   scoreSession,
   addGoldenTrace,
   getGoldenTraces,
+  listGoldenCandidates,
 } from "./replay";
 import type { SessionTrace, BehavioralFingerprint } from "./replay";
 
@@ -361,6 +362,28 @@ describe("replay", () => {
 
       const entries = getGoldenTraces(TEST_DIR);
       expect(entries).toHaveLength(2);
+    });
+
+    test("listGoldenCandidates ranks bigger traces and shows existing verdicts", () => {
+      writeTrace("small", buildTraceEvents("small", { goal: "Smoke test" }));
+      writeTrace("large", buildTraceEvents("large", {
+        goal: "Standard swarm run",
+        totalCost: 2,
+        extraEvents: [
+          { ts: "2026-05-11T00:00:05.000Z", type: "chain.step.start", id: "cs1", session_id: "large" },
+          { ts: "2026-05-11T00:00:06.000Z", type: "agent.start", id: "a1", session_id: "large", agent_id: "lead", team: "Architecture" },
+          { ts: "2026-05-11T00:00:07.000Z", type: "agent.start", id: "a2", session_id: "large", agent_id: "worker", team: "Architecture" },
+          { ts: "2026-05-11T00:00:08.000Z", type: "chain.step.end", id: "ce1", session_id: "large", status: "completed" },
+        ],
+      }));
+      addGoldenTrace("large", "pass", "known good", TEST_DIR);
+
+      const candidates = listGoldenCandidates(TEST_DIR, 10);
+
+      expect(candidates[0]!.sessionId).toBe("large");
+      expect(candidates[0]!.goldenVerdict).toBe("pass");
+      expect(candidates[0]!.agentCount).toBe(2);
+      expect(candidates[0]!.stepCount).toBe(1);
     });
   });
 });

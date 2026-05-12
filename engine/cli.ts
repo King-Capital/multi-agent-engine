@@ -16,8 +16,10 @@ import { classifyGoal } from "./goal-classifier";
 import { startDesignGallery } from "./design-gallery";
 import { loadFileReferences, loadUrlReferences, scanProjectDesign } from "./reference-loader";
 import { TRACE_DIR } from "./trace-recorder";
-import { loadTrace, scoreSession, extractFingerprint, compareFingerprints, addGoldenTrace, getGoldenTraces } from "./replay";
+import { loadTrace, scoreSession, extractFingerprint, compareFingerprints, getGoldenTraces } from "./replay";
 import { runRalphLoop } from "./ralph-loop";
+import { handleGoldenCommand } from "./cli-commands-golden";
+import { handleLangfuseCommand, handleRalphCommand } from "./cli-commands-ralph";
 import { runHealthCheck, formatHealthReport } from "./health";
 import { buildChainValidationReport, formatChainValidationReport, resolveValidateChainInput } from "./chain-validator";
 import * as p from "@clack/prompts";
@@ -232,6 +234,7 @@ Commands:
   config    Configure models, aliases, roles, and budgets
   tui       Full interactive launcher
   health    Probe adapters, traces, dashboard, and Langfuse
+  langfuse  Configure Langfuse scores and LiteLLM judge models
   info      Full system overview
   adapters  List adapter availability
   discover  Discover an A2A agent card
@@ -244,6 +247,7 @@ Examples:
   mae tui
   mae health
   mae health --json
+  mae langfuse setup --dry-run
   mae info
   mae adapters
   mae discover http://localhost:9000
@@ -253,6 +257,7 @@ Examples:
 More:
   mae config --help
   mae health --help
+  mae langfuse --help
 `,
   };
 
@@ -1204,105 +1209,17 @@ Options:
   }
 
   case "golden": {
-    if (subHelp) showSubHelp(`
-mae golden — Manage golden trace references
-
-Usage:
-  mae golden add <session_id> [--verdict pass|fail] [--notes "..."]
-  mae golden list
-
-Golden traces are reference sessions used for regression detection.
-Mark good runs as "pass" and bad runs as "fail" to build a test corpus.
-`);
-    const goldenSub = args[1];
-
-    if (goldenSub === "add") {
-      const goldenId = args[2];
-      if (!goldenId) {
-        console.error("Usage: mae golden add <session_id> [--verdict pass|fail] [--notes \"...\"]");
-        process.exit(1);
-      }
-      const verdict = (getFlag(args, "--verdict") ?? "pass") as "pass" | "fail";
-      if (verdict !== "pass" && verdict !== "fail") {
-        console.error("--verdict must be 'pass' or 'fail'");
-        process.exit(1);
-      }
-      const notes = getFlag(args, "--notes");
-      try {
-        addGoldenTrace(goldenId, verdict, notes);
-        console.log(`Added golden trace: ${goldenId} (${verdict})${notes ? ` — ${notes}` : ""}`);
-      } catch (err: unknown) {
-        console.error(err instanceof Error ? err.message : String(err));
-        process.exit(1);
-      }
-    } else if (goldenSub === "list") {
-      const entries = getGoldenTraces();
-      if (entries.length === 0) {
-        console.log("No golden traces registered.");
-        break;
-      }
-
-      console.log(`\n${"Session ID".padEnd(40)} ${"Verdict".padEnd(8)} ${"Date".padEnd(12)} Goal`);
-      console.log("─".repeat(90));
-      for (const entry of entries) {
-        console.log(`${entry.sessionId.slice(0, 38).padEnd(40)} ${entry.verdict.padEnd(8)} ${entry.addedAt.padEnd(12)} ${(entry.goal ?? "").slice(0, 40)}`);
-      }
-      if (entries.some((e) => e.notes)) {
-        console.log(`\nNotes:`);
-        for (const entry of entries.filter((e) => e.notes)) {
-          console.log(`  ${entry.sessionId.slice(0, 12)}: ${entry.notes}`);
-        }
-      }
-    } else {
-      console.error("Usage: mae golden <add|list>");
-      process.exit(1);
-    }
+    await handleGoldenCommand(args, subHelp);
     break;
   }
 
   case "ralph": {
-    if (subHelp) showSubHelp(`
-mae ralph — Self-improvement loop (evaluator + evolver + git-ratchet)
+    await handleRalphCommand(args, subHelp, dryRun);
+    break;
+  }
 
-Usage:
-  mae ralph                    Run the improvement loop (default: 5 iterations)
-  mae ralph --iterations 10    Run 10 iterations
-  mae ralph --dry-run          Analyze and propose but don't write changes
-  mae ralph --model quality    Use specific model for evaluator/evolver
-
-Analyzes recent traces, identifies weak patterns, proposes persona
-mutations, and accepts only changes that don't regress scores.
-Accepted mutations are git-committed for easy rollback.
-`);
-    const iterations = parseInt(getFlag(args, "--iterations") ?? "5", 10);
-    const ralphModel = getFlag(args, "--model") ?? "quality";
-
-    try {
-      const result = await runRalphLoop({
-        maxIterations: iterations,
-        model: ralphModel,
-        dryRun,
-      });
-
-      console.log(`\nRalph loop complete:`);
-      console.log(`  Iterations: ${result.iterations}`);
-      console.log(`  Accepted:   ${result.accepted}`);
-      console.log(`  Rejected:   ${result.rejected}`);
-
-      if (result.mutations.length > 0) {
-        console.log(`\nMutations:`);
-        for (const m of result.mutations) {
-          const icon = m.accepted ? "+" : "-";
-          console.log(`  [${icon}] ${m.persona}: ${m.change}`);
-          console.log(`      Score: ${m.scoreBefore.toFixed(2)} → ${m.scoreAfter.toFixed(2)}`);
-        }
-      } else {
-        console.log(`\nNo mutations proposed — traces look healthy.`);
-      }
-    } catch (err: unknown) {
-      console.error(`Ralph loop failed: ${err instanceof Error ? err.message : String(err)}`);
-      process.exit(1);
-    }
+  case "langfuse": {
+    await handleLangfuseCommand(args, subHelp, dryRun);
     break;
   }
 
