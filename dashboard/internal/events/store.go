@@ -2,12 +2,12 @@ package events
 
 import (
 	"bufio"
-	"sort"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"sync"
 	"time"
 
@@ -162,16 +162,16 @@ func (s *Store) applyEvent(evt models.Event) {
 
 	case models.EventAgentSpawn:
 		agent := &models.Agent{
-			ID:        evt.AgentID,
-			Name:      evt.Data.AgentName,
-			Role:      evt.Data.AgentRole,
-			Model:     evt.Data.Model,
-			TeamName:  evt.Data.TeamName,
-			TeamColor: evt.Data.TeamColor,
-			ParentID:  evt.ParentID,
-			Status:    models.StatusRunning,
+			ID:          evt.AgentID,
+			Name:        evt.Data.AgentName,
+			Role:        evt.Data.AgentRole,
+			Model:       evt.Data.Model,
+			TeamName:    evt.Data.TeamName,
+			TeamColor:   evt.Data.TeamColor,
+			ParentID:    evt.ParentID,
+			Status:      models.StatusRunning,
 			PersonaPath: evt.Data.PersonaPath,
-			StartedAt: evt.Timestamp,
+			StartedAt:   evt.Timestamp,
 		}
 		sess.Agents[evt.AgentID] = agent
 
@@ -241,11 +241,11 @@ func (s *Store) CloseStale() int {
 	closed := 0
 	for _, sess := range s.sessions {
 		if sess.Status == "active" || sess.Status == "waiting" || sess.Status == "paused" {
-			sess.Status = "error"
+			sess.Status = "completed"
 			sess.ElapsedMs = time.Since(sess.StartedAt).Milliseconds()
 			for _, a := range sess.Agents {
 				if a.Status == models.StatusRunning || a.Status == models.StatusIdle {
-					a.Status = models.StatusError
+					a.Status = models.StatusDone
 					a.ElapsedMs = time.Since(a.StartedAt).Milliseconds()
 				}
 			}
@@ -282,20 +282,22 @@ func (s *Store) ReapInactiveSessions(timeout time.Duration) int {
 			}
 		}
 		if lastActivity.Before(cutoff) {
-			sess.Status = "error"
+			sess.Status = "completed"
 			sess.ElapsedMs = time.Since(sess.StartedAt).Milliseconds()
 			for _, a := range sess.Agents {
 				if a.Status == models.StatusRunning || a.Status == models.StatusIdle {
-					a.Status = models.StatusError
+					a.Status = models.StatusDone
 					a.ElapsedMs = time.Since(a.StartedAt).Milliseconds()
 				}
 			}
 			evt := models.Event{
 				SessionID: sess.ID,
-				EventType: models.EventError,
+				AgentID:   "orchestrator",
+				EventType: models.EventSessionEnd,
 				Timestamp: time.Now(),
 				Data: models.EventData{
-					ErrorMsg: fmt.Sprintf("Session timed out after %v of inactivity", timeout),
+					Status:   models.AgentStatus("completed"),
+					ErrorMsg: fmt.Sprintf("Session auto-closed after %v of inactivity", timeout),
 				},
 			}
 			sess.Events = append(sess.Events, evt)
@@ -321,7 +323,7 @@ func (s *Store) StartReaper(interval, timeout time.Duration) {
 		defer ticker.Stop()
 		for range ticker.C {
 			if n := s.ReapInactiveSessions(timeout); n > 0 {
-				fmt.Fprintf(os.Stderr, "[reaper] Marked %d stale sessions as error\n", n)
+				fmt.Fprintf(os.Stderr, "[reaper] Marked %d stale sessions as completed\n", n)
 			}
 		}
 	}()

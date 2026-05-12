@@ -348,24 +348,37 @@ func HydrateRecentSessions(ctx context.Context, limit int) ([]DBSession, map[str
 	return sessions, eventsBySession, nil
 }
 
-// MarkStaleSessions marks active sessions with no recent events as error.
+// MarkStaleSessions marks open sessions with no recent events as completed.
 func MarkStaleSessions(ctx context.Context, maxIdleMinutes int) (int, error) {
-	// Mark active sessions as error if no events received within the idle window.
+	// Mark open sessions as completed if no events received within the idle window.
 	// Uses COALESCE: last event time → session updated_at → session created_at.
-	result, err := db.ExecContext(ctx, `
-		UPDATE sessions s SET status = 'error', updated_at = NOW()
-		WHERE s.status = 'active'
-		  AND COALESCE(
-			(SELECT MAX(e.created_at) FROM events e WHERE e.session_id = s.id),
-			s.updated_at,
-			s.created_at
-		  ) < NOW() - make_interval(mins := $1)
-	`, maxIdleMinutes)
-	if err != nil {
-		return 0, err
-	}
-	n, _ := result.RowsAffected()
-	return int(n), nil
+	var n int
+	err := db.QueryRowContext(ctx, `
+		WITH stale AS (
+			UPDATE sessions s
+			SET status = 'completed',
+				updated_at = NOW(),
+				completed_at = COALESCE(completed_at, NOW())
+			WHERE s.status IN ('active', 'waiting', 'paused')
+			  AND COALESCE(
+				(SELECT MAX(e.created_at) FROM events e WHERE e.session_id = s.id),
+				s.updated_at,
+				s.created_at
+			  ) < NOW() - make_interval(mins := $1)
+			RETURNING s.id
+		), updated_agents AS (
+			UPDATE agents a
+			SET status = 'completed',
+				updated_at = NOW(),
+				completed_at = COALESCE(completed_at, NOW())
+			FROM stale
+			WHERE a.session_id = stale.id
+			  AND a.status IN ('running', 'idle')
+			RETURNING a.id
+		)
+		SELECT COUNT(*) FROM stale
+	`, maxIdleMinutes).Scan(&n)
+	return n, err
 }
 
 // --- Auth Tokens ---
