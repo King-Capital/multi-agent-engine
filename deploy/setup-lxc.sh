@@ -77,6 +77,7 @@ cp -R dashboard-next/dist dashboard-next-dist
 
 # Build dashboard API
 cd dashboard
+templ generate
 go build -o dashboard-bin .
 cd ..
 

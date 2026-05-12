@@ -167,7 +167,7 @@ run_step 3 "Engine: bun test (unit tests)" "bun test" "${REPO_ROOT}/engine"
 run_step 4 "Dashboard: React SPA build" "bun install && bun run build" "${REPO_ROOT}/dashboard-next"
 
 # --- Step 5: go build ---
-run_step 5 "Dashboard: go build" "go build -o /dev/null ." "${REPO_ROOT}/dashboard"
+run_step 5 "Dashboard: generate templates + go build" "go run github.com/a-h/templ/cmd/templ@v0.3.1001 generate && go build -o /dev/null ." "${REPO_ROOT}/dashboard"
 
 # --- Step 6: go vet ---
 run_step 6 "Dashboard: go vet ./..." "go vet ./..." "${REPO_ROOT}/dashboard"

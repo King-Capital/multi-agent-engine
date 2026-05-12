@@ -42,6 +42,10 @@ jobs:
           languages: javascript-typescript, go
           queries: security-extended
 
+      - name: Generate Go templates
+        working-directory: dashboard
+        run: go run github.com/a-h/templ/cmd/templ@v0.3.1001 generate
+
       - name: Build Go
         working-directory: dashboard
         run: go build ./...

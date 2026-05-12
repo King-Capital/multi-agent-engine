@@ -85,6 +85,7 @@ dashboard-build:
     cd dashboard-next && bun run build
     rm -rf dashboard-next-dist
     cp -R dashboard-next/dist dashboard-next-dist
+    cd dashboard && go run github.com/a-h/templ/cmd/templ@v0.3.1001 generate
     cd dashboard && go build -o dashboard-bin .
 
 # Seed test data into the dashboard

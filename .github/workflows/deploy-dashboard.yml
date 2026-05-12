@@ -29,6 +29,10 @@ jobs:
           bun install
           ./node_modules/.bin/vite build
 
+      - name: Generate Go templates
+        working-directory: dashboard
+        run: go run github.com/a-h/templ/cmd/templ@v0.3.1001 generate
+
       - name: Build Go binary
         working-directory: dashboard
         run: go build -o mae-dashboard .

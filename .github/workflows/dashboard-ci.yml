@@ -24,6 +24,10 @@ jobs:
           bun install
           bun run build
 
+      - name: Generate Go templates
+        working-directory: dashboard
+        run: go run github.com/a-h/templ/cmd/templ@v0.3.1001 generate
+
       - name: Build Go API
         working-directory: dashboard
         run: go build -o mae-dashboard .
