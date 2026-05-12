@@ -16,14 +16,14 @@ concurrency:
   group: security-scan-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  GOPATH: /tmp/go
-  GOMODCACHE: /tmp/go/pkg/mod
-
 jobs:
   codeql:
     name: CodeQL
     runs-on: [self-hosted, mae]
+    env:
+      GOPATH: ${{ runner.temp }}/go
+      GOMODCACHE: ${{ runner.temp }}/go/pkg/mod
+      GOCACHE: ${{ runner.temp }}/go-build
     permissions:
       actions: read
       contents: read
@@ -34,6 +34,8 @@ jobs:
       - name: Setup Go env
         run: |
           mkdir -p $GOPATH/pkg/mod
+          mkdir -p $GOPATH/pkg/sumdb
+          mkdir -p $GOCACHE
           cd dashboard && go mod download
 
       - name: Initialize CodeQL
