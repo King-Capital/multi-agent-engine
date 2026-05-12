@@ -13,7 +13,7 @@ MAE_UPDATE_REF="${MAE_UPDATE_REF:-main}"
 MAE_REQUIRE_PI="${MAE_REQUIRE_PI:-1}"
 MAE_INSTALL_DIR="${MAE_HOME:-$HOME/.mae}"
 MAE_CONFIG="$MAE_INSTALL_DIR/config"
-MAE_BIN="${HOME}/.local/bin/mae"
+MAE_BIN="${MAE_BIN:-${HOME}/.local/bin/mae}"
 
 # ── Load config (created during install, user-editable) ─────────────
 if [[ -f "$MAE_CONFIG" ]]; then
@@ -655,6 +655,7 @@ Environment (override config):
   MAE_UPDATE_REF      Branch used by update from a tag install (default: main)
   MAE_GIT_URL         Git URL used by install (default: https://github.com/${MAE_REPO}.git)
   MAE_REQUIRE_PI      Require 'pi' during install (default: 1; set 0 for echo/A2A-only)
+  MAE_BIN             CLI install path (default: \$HOME/.local/bin/mae)
   MAE_API_TOKEN       API auth token
   MAE_A2A_DEFAULT_HOST Standard A2A host (default: 10.71.20.120)
   MAE_A2A_DEFAULT_PORT Standard A2A port (default: 3210)
