@@ -5,6 +5,15 @@ export function getFlag(args: string[], flag: string): string | undefined {
   return undefined;
 }
 
+/** Extract every value following a repeatable named flag from an args array. */
+export function getFlags(args: string[], flag: string): string[] {
+  const values: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === flag && i + 1 < args.length) values.push(args[i + 1]!);
+  }
+  return values;
+}
+
 /** Return only positional args, stripping all --flag pairs. */
 export function stripFlags(args: string[]): string[] {
   const result: string[] = [];

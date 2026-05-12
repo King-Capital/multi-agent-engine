@@ -170,18 +170,47 @@ describe("ralph-evolver", () => {
       const raw = JSON.stringify([
         {
           persona: "builder",
+          targetType: "persona",
+          target: "builder",
           field: "system_prompt",
           action: "append",
           content: "Always verify output before returning.",
           reasoning: "Builder often returns incomplete output",
+          verification: "mae replay <golden-id> --dry-run",
         },
       ]);
 
       const mutations = parseMutations(raw);
       expect(mutations).toHaveLength(1);
       expect(mutations[0]!.persona).toBe("builder");
+      expect(mutations[0]!.targetType).toBe("persona");
       expect(mutations[0]!.field).toBe("system_prompt");
       expect(mutations[0]!.action).toBe("append");
+      expect(mutations[0]!.verification).toContain("mae replay");
+    });
+
+    test("parses advisory chain suggestions", () => {
+      const raw = JSON.stringify([
+        {
+          targetType: "chain",
+          target: "standard-swarm",
+          file: "agents/teams/chains.yaml",
+          field: "chain",
+          action: "investigate",
+          content: "Verify lead-to-worker spawning is represented as explicit chain steps.",
+          reasoning: "Fail goldens show agents started with zero chain steps.",
+          verification: "mae replay <fail-golden> --dry-run",
+        },
+      ]);
+
+      const suggestions = parseMutations(raw);
+
+      expect(suggestions).toHaveLength(1);
+      expect(suggestions[0]!.persona).toBe("orchestrator");
+      expect(suggestions[0]!.targetType).toBe("chain");
+      expect(suggestions[0]!.target).toBe("standard-swarm");
+      expect(suggestions[0]!.field).toBe("chain");
+      expect(suggestions[0]!.action).toBe("investigate");
     });
 
     test("handles markdown-fenced JSON", () => {
@@ -308,18 +337,18 @@ describe("ralph-loop", () => {
       expect(result).not.toContain("model: main");
     });
 
-    test("returns raw unchanged for unknown field", () => {
+    test("appends a skill to the skills list", () => {
       const mutation: ConfigMutation = {
         persona: "test-agent",
-        field: "skills" as ConfigMutation["field"],
+        field: "skills",
         action: "append",
-        content: "something",
+        content: "agents/skills/till-done.md",
         reasoning: "test",
       };
 
-      // skills mutations aren't implemented yet — should return unchanged
       const result = applyMutation(SAMPLE_PERSONA, mutation);
-      expect(result).toBe(SAMPLE_PERSONA);
+      expect(result).toContain("- agents/skills/till-done.md");
+      expect(result).toContain("agents/skills/active-listener.md");
     });
   });
 
@@ -404,6 +433,133 @@ describe("ralph-loop", () => {
       expect(result.accepted).toBe(0);
       expect(result.rejected).toBe(0);
       expect(result.mutations).toHaveLength(0);
+    });
+
+    test("defaults to high-signal traces instead of latest traces", async () => {
+      writeTrace("s-small", buildTraceEvents("s-small", {
+        goal: "Tiny smoke run",
+        totalCost: 0.01,
+      }));
+      writeTrace("s-large", buildTraceEvents("s-large", {
+        goal: "Large swarm run",
+        totalCost: 2.5,
+        extraEvents: [
+          { ts: "2026-05-11T00:00:10.000Z", type: "chain.step.start", id: "step-1", session_id: "s-large", step: 1, team: "Planning" },
+          { ts: "2026-05-11T00:00:11.000Z", type: "agent.start", id: "agent-1", session_id: "s-large", agent_id: "lead", persona: "test-agent", team: "Planning" },
+          { ts: "2026-05-11T00:00:12.000Z", type: "agent.error", id: "err-1", session_id: "s-large", agent_id: "worker", error: "failed" },
+          { ts: "2026-05-11T00:00:13.000Z", type: "chain.step.end", id: "step-1-end", session_id: "s-large", step: 1, status: "failed" },
+        ],
+      }));
+
+      let seenIds: string[] = [];
+      const result = await runRalphLoop({
+        traceDir: TRACE_DIR,
+        personaDir: PERSONA_DIR,
+        traceLimit: 1,
+        dryRun: true,
+        evaluator: async (traces) => {
+          seenIds = traces.map((trace) => trace.sessionId);
+          return [];
+        },
+      });
+
+      expect(result.traces).toHaveLength(1);
+      expect(seenIds).toEqual(["s-large"]);
+    });
+
+    test("explicit trace selection overrides high-signal selection", async () => {
+      writeTrace("s-small", buildTraceEvents("s-small", { goal: "Selected small run", totalCost: 0.01 }));
+      writeTrace("s-large", buildTraceEvents("s-large", {
+        goal: "Large unselected run",
+        totalCost: 2.5,
+        extraEvents: [
+          { ts: "2026-05-11T00:00:10.000Z", type: "agent.error", id: "err-1", session_id: "s-large", agent_id: "worker", error: "failed" },
+        ],
+      }));
+
+      let seenIds: string[] = [];
+      await runRalphLoop({
+        traceDir: TRACE_DIR,
+        personaDir: PERSONA_DIR,
+        traceIds: ["s-small"],
+        dryRun: true,
+        evaluator: async (traces) => {
+          seenIds = traces.map((trace) => trace.sessionId);
+          return [];
+        },
+      });
+
+      expect(seenIds).toEqual(["s-small"]);
+    });
+
+    test("ralph emits suggestions only and does not write files", async () => {
+      writeTrace("s-mutate", buildTraceEvents("s-mutate", {
+        goal: "Mutation gate run",
+        status: "completed",
+        extraEvents: [
+          { ts: "2026-05-11T00:00:01.000Z", type: "chain.step.start", id: "cs1", session_id: "s-mutate", step: 1 },
+          { ts: "2026-05-11T00:00:02.000Z", type: "chain.step.end", id: "cse1", session_id: "s-mutate", step: 1, status: "completed" },
+        ],
+      }));
+      writePersona("test-agent", SAMPLE_PERSONA);
+      const originalContent = readFileSync(join(PERSONA_DIR, "test-agent.md"), "utf-8");
+
+      const finding: EvaluatorFinding = {
+        type: "weak_output",
+        persona: "test-agent",
+        evidence: "s-mutate missed details",
+        severity: "medium",
+        suggestion: "Add verification instruction",
+      };
+      const mutation: ConfigMutation = {
+        persona: "test-agent",
+        field: "system_prompt",
+        action: "append",
+        content: "Always include replay evidence before claiming success.",
+        reasoning: "Require evidence-backed output",
+      };
+
+      const result = await runRalphLoop({
+        traceDir: TRACE_DIR,
+        personaDir: PERSONA_DIR,
+        dryRun: false,
+        evaluator: async () => [finding],
+        evolver: async () => [mutation],
+      });
+
+      expect(result.suggestions[0]!.status).toBe("suggested");
+      expect(result.suggestions[0]!.targetType).toBe("persona");
+      expect(result.accepted).toBe(0);
+      expect(result.rejected).toBe(0);
+      expect(readFileSync(join(PERSONA_DIR, "test-agent.md"), "utf-8")).toBe(originalContent);
+    });
+
+    test("falls back to advisory suggestions when evolver returns none", async () => {
+      writeTrace("s-fallback", buildTraceEvents("s-fallback", { goal: "Fallback suggestion run" }));
+
+      const finding: EvaluatorFinding = {
+        type: "skip_pattern",
+        persona: "orchestrator",
+        targetType: "chain",
+        target: "standard-swarm",
+        evidence: "s-fallback had agents but no chain steps",
+        severity: "high",
+        suggestion: "Inspect standard-swarm chain step definitions.",
+      };
+
+      const result = await runRalphLoop({
+        traceDir: TRACE_DIR,
+        personaDir: PERSONA_DIR,
+        evaluator: async () => [finding],
+        evolver: async () => [],
+      });
+
+      expect(result.suggestions).toHaveLength(1);
+      expect(result.suggestions[0]!.targetType).toBe("chain");
+      expect(result.suggestions[0]!.target).toBe("standard-swarm");
+      expect(result.suggestions[0]!.field).toBe("chain");
+      expect(result.suggestions[0]!.action).toBe("investigate");
+      expect(result.suggestions[0]!.file).toBe("agents/teams/chains.yaml");
     });
 
     test("dry-run mode does not write persona files", async () => {

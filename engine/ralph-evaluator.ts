@@ -13,6 +13,8 @@ import { callLLM } from "./llm-gateway";
 export interface EvaluatorFinding {
   type: "weak_output" | "high_cost" | "stall_pattern" | "skip_pattern" | "failure_pattern";
   persona: string;
+  targetType?: "persona" | "chain" | "team" | "routing" | "engine" | "dashboard";
+  target?: string;
   evidence: string;
   severity: "low" | "medium" | "high";
   suggestion: string;
@@ -59,10 +61,12 @@ You receive summaries of multiple session traces. Your job is to find:
 
 Return ONLY valid JSON — an array of finding objects with these fields:
 - type: one of "weak_output", "high_cost", "stall_pattern", "skip_pattern", "failure_pattern"
-- persona: the persona name most affected (use the exact name from the trace)
+- persona: the persona name most affected, or "orchestrator" when the issue is systemic
+- targetType: one of "persona", "chain", "team", "routing", "engine", "dashboard"
+- target: the specific persona/chain/team/file/area affected
 - evidence: what you observed in the traces (be specific, cite session IDs)
 - severity: "low", "medium", or "high"
-- suggestion: a specific, actionable change to improve the persona
+- suggestion: a specific, actionable change to improve the target
 
 If no problems are found, return an empty array: []`;
 
@@ -121,6 +125,10 @@ export function parseFindings(raw: string): EvaluatorFinding[] {
     .map((f: Record<string, unknown>) => ({
       type: f.type as EvaluatorFinding["type"],
       persona: f.persona as string,
+      targetType: ["persona", "chain", "team", "routing", "engine", "dashboard"].includes(f.targetType as string)
+        ? (f.targetType as EvaluatorFinding["targetType"])
+        : "persona",
+      target: typeof f.target === "string" ? f.target : (f.persona as string),
       evidence: f.evidence as string,
       severity: validSeverities.has(f.severity as string)
         ? (f.severity as EvaluatorFinding["severity"])

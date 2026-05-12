@@ -49,6 +49,24 @@ export interface GoldenEntry {
   notes?: string;
 }
 
+export interface GoldenCandidate {
+  sessionId: string;
+  goal: string;
+  chain: string;
+  status: string;
+  overall: ReplayScore["overall"];
+  signalScore: number;
+  replayScore: number;
+  totalCost?: number;
+  duration_ms?: number;
+  agentCount: number;
+  stepCount: number;
+  errorCount: number;
+  eventCount: number;
+  goldenVerdict?: GoldenEntry["verdict"];
+  suggestedVerdict: "pass" | "fail" | "review";
+}
+
 export interface FingerprintComparison {
   similarity: number;
   diffs: string[];
@@ -243,4 +261,72 @@ export function getGoldenTraces(traceDirOverride?: string): GoldenEntry[] {
   const filePath = goldenPath(traceDirOverride);
   if (!existsSync(filePath)) return [];
   try { return JSON.parse(readFileSync(filePath, "utf-8")) as GoldenEntry[]; } catch { return []; }
+}
+
+function numericReplayScore(score: ReplayScore): number {
+  if (score.checks.length === 0) return 0;
+  return score.checks.filter((check) => check.pass).length / score.checks.length;
+}
+
+function goldenSignalScore(trace: SessionTrace, score: ReplayScore): number {
+  const fp = score.fingerprint;
+  const eventCount = trace.events.length;
+  const cost = trace.totalCost ?? 0;
+  const durationMinutes = (trace.duration_ms ?? 0) / 60_000;
+  const failedOrPartial = trace.status === "completed" ? 0 : 8;
+
+  return (
+    failedOrPartial +
+    fp.agentCount * 3 +
+    fp.stepCount * 4 +
+    fp.errorCount * 5 +
+    Math.min(cost, 10) * 2 +
+    Math.min(durationMinutes, 60) * 0.4 +
+    Math.min(eventCount, 500) * 0.02
+  );
+}
+
+/** Rank traces that are good candidates for golden promotion. */
+export function listGoldenCandidates(traceDirOverride?: string, limit = 20): GoldenCandidate[] {
+  const { readdirSync, existsSync } = require("fs") as typeof import("fs");
+  const traceDir = traceDirOverride ?? TRACE_DIR;
+  if (!existsSync(traceDir)) return [];
+
+  const goldenVerdicts = new Map(getGoldenTraces(traceDir).map((entry) => [entry.sessionId, entry.verdict]));
+  const candidates: GoldenCandidate[] = [];
+
+  for (const file of readdirSync(traceDir).filter((f: string) => f.endsWith(".jsonl"))) {
+    const sessionId = file.replace(".jsonl", "");
+    try {
+      const trace = loadTrace(sessionId, traceDir);
+      const score = scoreSession(trace);
+      candidates.push({
+        sessionId,
+        goal: trace.goal,
+        chain: trace.chain,
+        status: trace.status,
+        overall: score.overall,
+        signalScore: goldenSignalScore(trace, score),
+        replayScore: numericReplayScore(score),
+        totalCost: trace.totalCost,
+        duration_ms: trace.duration_ms,
+        agentCount: score.fingerprint.agentCount,
+        stepCount: score.fingerprint.stepCount,
+        errorCount: score.fingerprint.errorCount,
+        eventCount: trace.events.length,
+        goldenVerdict: goldenVerdicts.get(sessionId),
+        suggestedVerdict: score.overall === "pass" ? "pass" : score.overall === "fail" ? "fail" : "review",
+      });
+    } catch {
+      // Skip malformed traces; candidate listing should be best-effort.
+    }
+  }
+
+  return candidates
+    .sort((a, b) =>
+      b.signalScore - a.signalScore ||
+      b.replayScore - a.replayScore ||
+      a.sessionId.localeCompare(b.sessionId),
+    )
+    .slice(0, limit);
 }
