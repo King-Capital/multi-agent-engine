@@ -23,11 +23,11 @@
 
 ## Release Status
 
-Current release candidate: **v1.0.0_RC1**.
+Current stable release: **v1.0.0**.
 
-The `VERSION` file intentionally stays on `1.0.0_RC1` for the RC line. The auto-version workflow only bumps stable SemVer values like `1.0.0`; while the project is on an RC version, release bumps are manual.
+The `VERSION` file uses standard stable SemVer. The auto-version workflow resumes from this value and applies normal patch/minor/major bumps after merged PRs.
 
-This RC ships the Pi adapter, the A2A adapter, and the echo dry-run adapter. Claude Code and Codex adapters are planned work and should not be documented as shipped until they have end-to-end smoke coverage.
+This release ships the Pi adapter, the A2A adapter, and the echo dry-run adapter. Claude Code and Codex adapters are planned work and should not be documented as shipped until they have end-to-end smoke coverage.
 
 ## ✨ Features
 

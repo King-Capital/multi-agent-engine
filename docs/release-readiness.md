@@ -1,8 +1,8 @@
 # Release Readiness
 
-This project is on the `1.0.0_RC1` line. Use this gate before publishing a public RC tag or promoting to `v1.0.0`.
+This project is on the stable `1.0.x` line. Use this gate before publishing a public tag.
 
-## RC Scope
+## Release Scope
 
 Shipped adapters:
 
@@ -10,16 +10,16 @@ Shipped adapters:
 - `a2a`
 - `echo`
 
-Not shipped in this RC:
+Not shipped in this release:
 
 - `claude-code`
 - `codex`
 
 Do not advertise unshipped adapters in the README, deployment guide, release notes, or examples until they have an adapter implementation and an end-to-end smoke test.
 
-## Public RC Gate
+## Public Release Gate
 
-Run these checks before tagging a new RC:
+Run these checks before tagging a release:
 
 ```bash
 bun test
@@ -46,11 +46,10 @@ Before a public tag:
 
 ## Tagging
 
-The `VERSION` file stays at `1.0.0_RC1` while this RC line is active. Tag public RC builds manually after the release gate passes:
+`VERSION` is the source of truth for stable releases. The auto-version workflow bumps normal SemVer values after merged PRs. When cutting a manual public release, tag the exact `VERSION` value:
 
 ```bash
-git tag -a v1.0.0_RC1.1 -m "v1.0.0_RC1.1"
-git push origin v1.0.0_RC1.1
+VERSION=$(cat VERSION)
+git tag -a "v${VERSION}" -m "v${VERSION}"
+git push origin "v${VERSION}"
 ```
-
-Use the next patch-style RC tag for later release-candidate builds, for example `v1.0.0_RC1.2`.

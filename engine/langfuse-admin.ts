@@ -86,9 +86,9 @@ const MAE_SCORE_CONFIGS: LangfuseScoreConfigSpec[] = [
     maxValue: 1,
   },
   {
-    name: "judge_rc1_readiness",
+    name: "judge_release_readiness",
     dataType: "CATEGORICAL",
-    description: "LLM-as-judge RC1 readiness verdict.",
+    description: "LLM-as-judge release readiness verdict.",
     categories: [
       { label: "pass", value: 1 },
       { label: "partial", value: 0.5 },
@@ -163,8 +163,8 @@ export function buildLangfuseProvisionPlan(): LangfuseProvisionPlan {
         prompt: JUDGE_PROMPT,
       },
       {
-        name: "MAE RC1 Readiness Judge",
-        scoreName: "judge_rc1_readiness",
+        name: "MAE Release Readiness Judge",
+        scoreName: "judge_release_readiness",
         model: defaultJudgeModel,
         scoreType: "CATEGORICAL",
         prompt: `${JUDGE_PROMPT}\n\nVerdict categories: pass, partial, fail.`,

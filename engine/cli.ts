@@ -66,7 +66,7 @@ function buildMainHelpExamples() {
   const hasDesignBuild = chains.includes("design-build");
   return {
     taskWithChain: `mae task "Review engine/orchestrator.ts" --chain ${reviewChain}`,
-    chainPrimary: `mae chain ${pickConfigured(["standard-swarm", "swarm-review", "red-blue"], chains, "standard-swarm")} "Find RC1 holes in the dashboard"`,
+    chainPrimary: `mae chain ${pickConfigured(["standard-swarm", "swarm-review", "red-blue"], chains, "standard-swarm")} "Find release blockers in the dashboard"`,
     chainSecondary: `mae chain ${pickConfigured(["plan-build-review", "build-verify", "full-sdlc"], chains, "plan-build-review")} "Add cost summary to session detail"`,
     promptPrimary: `mae run ${pickConfigured(["review", "swarm-review", "plan-build-review"], prompts, "review")} "git diff HEAD~1"`,
     promptSecondary: `mae run ${pickConfigured(["swarm-review", "review", "scout"], prompts, "swarm-review")} "Review engine/ for bugs"`,
@@ -337,14 +337,26 @@ async function ensureRuntime(opts: { announceAdapter?: boolean } = {}): Promise<
   if (dryRun) {
     orch.setDefaultAdapter("echo");
   } else if (adapterName) {
+    const requested = adapters.find((adapter) => adapter.name === adapterName);
+    if (!requested) {
+      throw new Error(`Adapter not registered: ${adapterName}. Available: ${adapters.map((adapter) => adapter.name).join(", ")}`);
+    }
+    if (adapterName !== "echo" && !await requested.isAvailable()) {
+      throw new Error(`Adapter '${adapterName}' is not available. Install/configure it first, or use --dry-run for echo mode.`);
+    }
     orch.setDefaultAdapter(adapterName);
   } else {
+    let selected = false;
     for (const adapter of adapters) {
-      if (adapter.name !== "echo" && adapter.name !== "a2a" && await adapter.isAvailable()) {
+      if (adapter.name !== "echo" && await adapter.isAvailable()) {
         orch.setDefaultAdapter(adapter.name);
         if (opts.announceAdapter) console.log(`[cli] Using adapter: ${adapter.name}`);
+        selected = true;
         break;
       }
+    }
+    if (!selected) {
+      throw new Error("No real adapter available. Install Pi, configure MAE_A2A_URL, choose --adapter a2a with an endpoint, or use --dry-run for echo mode.");
     }
   }
 
@@ -916,7 +928,7 @@ Chains:
 ${chainList}
 
 Examples:
-  ${chainExample(["standard-swarm", "swarm-review", "review-only"], "Find RC1 holes in the dashboard", "standard-swarm").replace("mae chain", "mae validate-chain").replace(/ ".*"$/, "")}
+  ${chainExample(["standard-swarm", "swarm-review", "review-only"], "Find release blockers in the dashboard", "standard-swarm").replace("mae chain", "mae validate-chain").replace(/ ".*"$/, "")}
   mae validate-chain "Design dashboard UI review"
   ${chainExample(["plan-build-review", "build-verify", "full-sdlc"], "Add cost summary to session detail", "plan-build-review").replace("mae chain", "mae validate-chain")}
 
@@ -1405,7 +1417,7 @@ async function tuiRunWork(): Promise<void> {
       })),
     });
     if (p.isCancel(chain)) return;
-    const task = await tuiText("Task", { placeholder: "Find RC1 holes in the dashboard", required: true });
+    const task = await tuiText("Task", { placeholder: "Find release blockers in the dashboard", required: true });
     if (!task) return;
     await tuiRunSession({ chain: asString(chain), task, adapter, workingDir: cwd });
     return;
@@ -1665,7 +1677,7 @@ async function tuiValidateChain(): Promise<void> {
         })),
       });
       if (p.isCancel(selected)) return;
-      const goal = await tuiText("Optional goal/context", { placeholder: "Find RC1 holes in the dashboard" });
+      const goal = await tuiText("Optional goal/context", { placeholder: "Find release blockers in the dashboard" });
       const report = buildChainValidationReport(asString(selected), goal || undefined);
       p.note(formatChainValidationReport(report), `Chain ${asString(selected)}`);
       return;

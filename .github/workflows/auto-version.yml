@@ -38,8 +38,9 @@ jobs:
       - name: Determine bump type
         if: steps.check.outputs.skip == 'false'
         id: bump
+        env:
+          LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
         run: |
-          LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
           if echo "$LABELS" | grep -q '"major"'; then
             echo "type=major" >> "$GITHUB_OUTPUT"
           elif echo "$LABELS" | grep -q '"minor"'; then
@@ -70,6 +71,12 @@ jobs:
 
           NEW="${MAJOR}.${MINOR}.${PATCH}"
           echo "$NEW" > VERSION
+          if [ -f scripts/mae ]; then
+            perl -0pi -e "s/MAE_VERSION=\"[^\"]+\"/MAE_VERSION=\"$NEW\"/" scripts/mae
+          fi
+          if [ -f README.md ]; then
+            perl -0pi -e "s/Current stable release: \\*\\*v[0-9]+\\.[0-9]+\\.[0-9]+\\*\\*\\./Current stable release: **v$NEW**./" README.md
+          fi
           echo "version=$NEW" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "Bumped $CURRENT → $NEW ($BUMP)"
@@ -78,8 +85,8 @@ jobs:
         if: steps.check.outputs.skip == 'false' && steps.version.outputs.skip != 'true'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          git add VERSION
+          git add VERSION scripts/mae README.md
           git commit -m "chore(release): v${VERSION}"
-          git tag -a -m "v${VERSION}" "v${VERSION}"
           git pull --rebase origin main
+          git tag -a -m "v${VERSION}" "v${VERSION}"
           git push origin main --follow-tags
