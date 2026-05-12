@@ -28,7 +28,22 @@ MAE_DASHBOARD_URL="${MAE_DASHBOARD_URL:-http://localhost:8400}"
 DATABASE_URL="${DATABASE_URL:-postgres://mae:mae@localhost:5432/mae?sslmode=disable}"
 MAE_API_URL="${MAE_API_URL:-http://localhost:8400}"
 MAE_LLM_GATEWAY_URL="${MAE_LLM_GATEWAY_URL:-}"
-export MAE_DASHBOARD_URL DATABASE_URL MAE_API_URL MAE_LLM_GATEWAY_URL
+MAE_LLM_GATEWAY_KEY="${MAE_LLM_GATEWAY_KEY:-}"
+MAE_API_TOKEN="${MAE_API_TOKEN:-}"
+MAE_DEFAULT_ADAPTER="${MAE_DEFAULT_ADAPTER:-}"
+MAE_A2A_URL="${MAE_A2A_URL:-}"
+MAE_A2A_TOKEN="${MAE_A2A_TOKEN:-}"
+LANGFUSE_PUBLIC_KEY="${LANGFUSE_PUBLIC_KEY:-}"
+LANGFUSE_SECRET_KEY="${LANGFUSE_SECRET_KEY:-}"
+LANGFUSE_HOST="${LANGFUSE_HOST:-}"
+LITELLM_API_BASE="${LITELLM_API_BASE:-${MAE_LLM_GATEWAY_URL:-}}"
+LITELLM_API_KEY="${LITELLM_API_KEY:-${MAE_LLM_GATEWAY_KEY:-}}"
+ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-${MAE_LLM_GATEWAY_URL:-}}"
+ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-${MAE_LLM_GATEWAY_KEY:-${LITELLM_API_KEY:-}}}"
+export MAE_DASHBOARD_URL DATABASE_URL MAE_API_URL MAE_LLM_GATEWAY_URL MAE_LLM_GATEWAY_KEY
+export MAE_API_TOKEN MAE_DEFAULT_ADAPTER MAE_A2A_URL MAE_A2A_TOKEN
+export LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY LANGFUSE_HOST
+export LITELLM_API_BASE LITELLM_API_KEY ANTHROPIC_BASE_URL ANTHROPIC_API_KEY
 
 write_shell_var() {
   local key="$1"
@@ -36,6 +51,16 @@ write_shell_var() {
   printf '%s=' "$key"
   printf '%q' "$value"
   printf '\n'
+}
+
+write_optional_shell_var() {
+  local key="$1"
+  local value="$2"
+  if [[ -n "$value" ]]; then
+    write_shell_var "$key" "$value"
+  else
+    printf '# %s=""\n' "$key"
+  fi
 }
 
 display_version() {
@@ -171,16 +196,31 @@ CONF
 # Optional LiteLLM/OpenAI-compatible gateway
 CONF
         write_shell_var MAE_LLM_GATEWAY_URL "$MAE_LLM_GATEWAY_URL"
+        write_optional_shell_var MAE_LLM_GATEWAY_KEY "$MAE_LLM_GATEWAY_KEY"
         cat << CONF
 
 # Default adapter (pi, a2a, echo)
-# MAE_DEFAULT_ADAPTER="pi"
+CONF
+        write_optional_shell_var MAE_DEFAULT_ADAPTER "$MAE_DEFAULT_ADAPTER"
+        cat << CONF
 
 # API auth token (set if dashboard requires auth)
-# MAE_API_TOKEN=""
+CONF
+        write_optional_shell_var MAE_API_TOKEN "$MAE_API_TOKEN"
+        cat << CONF
 
 # Default A2A endpoint (for remote agent delegation)
-# MAE_A2A_URL=""
+CONF
+        write_optional_shell_var MAE_A2A_URL "$MAE_A2A_URL"
+        write_optional_shell_var MAE_A2A_TOKEN "$MAE_A2A_TOKEN"
+        cat << CONF
+
+# Langfuse observability
+CONF
+        write_optional_shell_var LANGFUSE_PUBLIC_KEY "$LANGFUSE_PUBLIC_KEY"
+        write_optional_shell_var LANGFUSE_SECRET_KEY "$LANGFUSE_SECRET_KEY"
+        write_optional_shell_var LANGFUSE_HOST "$LANGFUSE_HOST"
+        cat << CONF
 CONF
       } > "$MAE_CONFIG"
     fi
@@ -386,12 +426,14 @@ Config:
     DATABASE_URL           postgres://mae:mae@localhost:5432/mae?sslmode=disable
     MAE_API_URL            http://localhost:8400
     MAE_LLM_GATEWAY_URL    unset unless provided
+    LANGFUSE_HOST          unset unless provided
 
 Environment (override config):
   MAE_DASHBOARD_URL   Dashboard API
   DATABASE_URL        PostgreSQL connection string
   MAE_API_URL         Vite dev proxy target
   MAE_LLM_GATEWAY_URL LiteLLM/OpenAI-compatible gateway
+  MAE_LLM_GATEWAY_KEY LiteLLM/OpenAI-compatible gateway API key
   MAE_ROOT            Override repo location
   MAE_HOME            Install directory (default: ~/.mae)
   MAE_REF             Git ref used by install (default: main)
@@ -400,6 +442,10 @@ Environment (override config):
   MAE_REQUIRE_PI      Require 'pi' during install (default: 1; set 0 for echo/A2A-only)
   MAE_API_TOKEN       API auth token
   MAE_A2A_URL         Default A2A endpoint
+  MAE_A2A_TOKEN       A2A bearer token
+  LANGFUSE_PUBLIC_KEY Langfuse public key
+  LANGFUSE_SECRET_KEY Langfuse secret key
+  LANGFUSE_HOST       Langfuse host URL
 HELP
 }
 
@@ -445,7 +491,9 @@ case "${1:-}" in
       exit 1
     }
     export MAE_ROOT="$root"
-    export MAE_DASHBOARD_URL DATABASE_URL MAE_API_URL
+    export MAE_DASHBOARD_URL DATABASE_URL MAE_API_URL MAE_LLM_GATEWAY_URL MAE_LLM_GATEWAY_KEY
+    export MAE_API_TOKEN MAE_DEFAULT_ADAPTER MAE_A2A_URL MAE_A2A_TOKEN
+    export LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY LANGFUSE_HOST
     exec bun run "$root/engine/cli.ts" "$@"
     ;;
 esac

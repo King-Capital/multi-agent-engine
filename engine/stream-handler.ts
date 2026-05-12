@@ -30,16 +30,20 @@ export function buildStreamHandler(opts: StreamHandlerOpts): (evt: StreamEvent) 
         data: { tool: streamEvt.tool ?? "", status: streamEvt.status ?? "running" },
       });
     } else if (streamEvt.type === "cost") {
+      trackToolCall(agentId, "cost_update");
       emitter.costUpdate(sessionId, agentId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
-    } else if (streamEvt.type === "assistant_text" && streamEvt.content && pausedSessions && session) {
-      const severity = scanSeverity(streamEvt.content);
-      if (severity && shouldAutoPause(severity, sessionId)) {
-        pausedSessions.add(sessionId);
-        transitionStatus(session, "paused", "stream-handler:severity");
-        const excerpt = extractFindingExcerpt(streamEvt.content, severity);
-        emitter.severityAlert(sessionId, agentId, severity, excerpt);
-        emitter.autoPause(sessionId, `severity:${severity}`);
-        orchestratorLoop?.trigger("severity_alert", { severity, excerpt });
+    } else if (streamEvt.type === "assistant_text" && streamEvt.content) {
+      trackToolCall(agentId, "assistant_text");
+      if (pausedSessions && session) {
+        const severity = scanSeverity(streamEvt.content);
+        if (severity && shouldAutoPause(severity, sessionId)) {
+          pausedSessions.add(sessionId);
+          transitionStatus(session, "paused", "stream-handler:severity");
+          const excerpt = extractFindingExcerpt(streamEvt.content, severity);
+          emitter.severityAlert(sessionId, agentId, severity, excerpt);
+          emitter.autoPause(sessionId, `severity:${severity}`);
+          orchestratorLoop?.trigger("severity_alert", { severity, excerpt });
+        }
       }
     }
   };

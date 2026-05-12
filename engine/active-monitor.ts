@@ -120,7 +120,9 @@ export class ActiveMonitor {
     const sender = this.opts.messageSenders.get(
       `${this.opts.session.id}:${agentId}`,
     );
-    const adapter = this.opts.getAdapter?.();
+    const allowLlmNudges = process.env.MAE_ENABLE_LLM_NUDGES === "1"
+      || process.env.MAE_ENABLE_LLM_NUDGES === "true";
+    const adapter = allowLlmNudges ? this.opts.getAdapter?.() : undefined;
 
     executeNudge(
       state,

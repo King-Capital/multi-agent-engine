@@ -221,6 +221,7 @@ export class OrchestratorLoop {
           parentId: "orch-1",
           teamName: "Orchestrator",
           teamColor: "#36f9f6",
+          timeoutMs: REASONING_TIMEOUT_MS,
         }),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error("Orchestrator reasoning timeout")), REASONING_TIMEOUT_MS)),

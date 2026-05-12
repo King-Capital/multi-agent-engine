@@ -143,7 +143,12 @@ export class PiAdapter implements PlatformAdapter {
           XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
           LITELLM_API_BASE: process.env.LITELLM_API_BASE,
           LITELLM_API_KEY: process.env.LITELLM_API_KEY,
+          MAE_LLM_GATEWAY_URL: process.env.MAE_LLM_GATEWAY_URL,
+          MAE_LLM_GATEWAY_KEY: process.env.MAE_LLM_GATEWAY_KEY,
+          ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
           ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+          OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+          OPENAI_API_KEY: process.env.OPENAI_API_KEY,
           MAE_SESSION_ID: opts.sessionDir?.split("/").pop() ?? "",
           MAE_AGENT_ID: agentId,
           MAE_PARENT_ID: opts.parentId ?? "",
@@ -184,6 +189,11 @@ export class PiAdapter implements PlatformAdapter {
       // Register message sender so orchestrator/dashboard can inject messages
       if (opts.sendMessage) {
         opts.sendMessage((msg: string) => {
+          const normalized = msg.trim().toLowerCase();
+          if (normalized === "!stop" || normalized === "stop" || normalized === "abort") {
+            this.sendCmd(proc, { type: "abort" }, agentId);
+            return;
+          }
           this.sendCmd(proc, { type: "follow_up", message: msg }, agentId);
         });
       }
