@@ -16,7 +16,7 @@ describe("sync-install-version", () => {
     tempHome = mkdtempSync(join(tmpdir(), "mae-version-sync-"));
     const installHome = join(tempHome, ".mae-test");
 
-    await $`bun ${join(import.meta.dir, "..", "scripts", "sync-install-version.ts")}`.env({
+    await $`bun ${join(import.meta.dir, "sync-install-version.ts")}`.env({
       ...process.env,
       MAE_HOME: installHome,
     }).quiet();
