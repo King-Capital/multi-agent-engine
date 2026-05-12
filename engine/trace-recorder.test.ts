@@ -185,7 +185,83 @@ describe("trace-recorder", () => {
 
     expect(startEvent.type).toBe("chain.step.start");
     expect(startEvent.step).toBe(1);
+    expect(startEvent.name).toBe("build");
+    expect(startEvent.step_name).toBe("build");
     expect(endEvent.type).toBe("chain.step.end");
+    expect(endEvent.name).toBe("build");
+    recorder.close?.();
+  });
+
+  test("honors explicit trace_type over message heuristics", () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+    const sessionId = "test-explicit-step";
+
+    recorder.write(makeEntry({
+      session_id: sessionId,
+      component: "chain-runner",
+      msg: "Lifecycle marker",
+      trace_type: "chain.step.end",
+      step: 2,
+      name: "verify",
+      status: "failed",
+      reason: "deterministic check failed",
+    }));
+
+    const content = readFileSync(join(TEST_TRACE_DIR, `${sessionId}.jsonl`), "utf-8");
+    const event = JSON.parse(content.trim());
+
+    expect(event.type).toBe("chain.step.end");
+    expect(event.name).toBe("verify");
+    expect(event.status).toBe("failed");
+    expect(event.reason).toBe("deterministic check failed");
+    recorder.close?.();
+  });
+
+  test("preserves bounded step failure metadata", () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+    const sessionId = "test-step-failure";
+
+    recorder.write(makeEntry({
+      session_id: sessionId,
+      component: "chain-runner",
+      msg: "Step 2 failed",
+      trace_type: "chain.step.end",
+      step: 2,
+      name: "verify",
+      status: "failed",
+      error_type: "Error",
+      error_preview: "x".repeat(600),
+    }));
+
+    const content = readFileSync(join(TEST_TRACE_DIR, `${sessionId}.jsonl`), "utf-8");
+    const event = JSON.parse(content.trim());
+
+    expect(event.type).toBe("chain.step.end");
+    expect(event.error_type).toBe("Error");
+    expect(event.error_preview).toHaveLength(500);
+    recorder.close?.();
+  });
+
+  test("bounds step reason metadata", () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+    const sessionId = "test-step-reason";
+
+    recorder.write(makeEntry({
+      session_id: sessionId,
+      component: "chain-runner",
+      msg: "Step 3 skipped",
+      trace_type: "chain.step.end",
+      step: 3,
+      name: "review",
+      status: "skipped",
+      reason: "x".repeat(600),
+    }));
+
+    const content = readFileSync(join(TEST_TRACE_DIR, `${sessionId}.jsonl`), "utf-8");
+    const event = JSON.parse(content.trim());
+
+    expect(event.type).toBe("chain.step.end");
+    expect(event.reason).toHaveLength(500);
     recorder.close?.();
   });
 

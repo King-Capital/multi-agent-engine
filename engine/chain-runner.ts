@@ -6,13 +6,6 @@ import {
 } from "./config";
 import { sanitizeAgentInput } from "./security";
 import { createLogger } from "./logger";
-
-const log = createLogger("chain-runner");
-
-function wrapStepOutput(output: string): string {
-  return `<previous_agent_output>\n${sanitizeAgentInput(output)}\n</previous_agent_output>`;
-}
-
 import { delegateWithHealing } from "./self-healing";
 import { summarizeOutput, worstGrade } from "./output-parsing";
 import { trackActivity, trackToolCall } from "./monitoring";
@@ -39,6 +32,12 @@ import type {
 } from "./types";
 import { transitionStatus } from "./session-state";
 
+const log = createLogger("chain-runner");
+
+function wrapStepOutput(output: string): string {
+  return `<previous_agent_output>\n${sanitizeAgentInput(output)}\n</previous_agent_output>`;
+}
+
 /** Dependencies injected by the Orchestrator into chain-runner functions. */
 export interface ChainRunnerDeps {
   emitter: EventEmitter;
@@ -57,10 +56,6 @@ export interface ChainRunnerDeps {
   drainMessageBuffer: (sessionId: string) => string;
 }
 
-// ---------------------------------------------------------------------------
-// Utility helpers
-// ---------------------------------------------------------------------------
-
 /** Convert a chain with top-level parallel/then into flat steps. */
 export function normalizeParallelChain(chain: Chain): ChainStep[] {
   const steps: ChainStep[] = [];
@@ -76,10 +71,6 @@ export function interpolatePrompt(body: string, args: string[]): string {
     return idx >= 0 && idx < args.length ? args[idx]! : match;
   });
 }
-
-// ---------------------------------------------------------------------------
-// Till-done helpers
-// ---------------------------------------------------------------------------
 
 /** Build initial till_done tracking array from chain step definitions. */
 export function buildTillDone(chain: Chain): TillDoneItem[] {
@@ -202,10 +193,6 @@ export async function verifyTillDone(
   return { allMet: failures.length === 0, failures };
 }
 
-// ---------------------------------------------------------------------------
-// Deterministic step runner
-// ---------------------------------------------------------------------------
-
 export async function runDeterministicStep(
   emitter: EventEmitter,
   session: SessionState,
@@ -263,10 +250,6 @@ export async function runDeterministicStep(
   }
   return null;
 }
-
-// ---------------------------------------------------------------------------
-// Solo agent runner
-// ---------------------------------------------------------------------------
 
 export async function runAgent(
   deps: ChainRunnerDeps,
@@ -366,10 +349,6 @@ export async function runAgent(
   return result;
 }
 
-// ---------------------------------------------------------------------------
-// Action queue processing
-// ---------------------------------------------------------------------------
-
 export async function processLoopAction(
   deps: ChainRunnerDeps,
   session: SessionState,
@@ -425,10 +404,6 @@ export async function processLoopAction(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Main chain runner
-// ---------------------------------------------------------------------------
-
 /** Execute a chain's steps sequentially, delegating to teams/agents. */
 export async function runChain(
   deps: ChainRunnerDeps,
@@ -438,8 +413,6 @@ export async function runChain(
   adapterName?: string,
 ): Promise<void> {
   const steps = chain.steps ?? normalizeParallelChain(chain);
-  // Store original step count for SPAWN_TEAM limit tracking.
-  // We mutate deps.originalStepCount so processLoopAction sees the right value.
   deps.originalStepCount = steps.length;
   let previousOutput = "";
   let stepResult: DelegateResult | undefined;
@@ -450,23 +423,25 @@ export async function runChain(
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
     if (!step) continue;
+    const stepLabel = step.team ?? step.agent ?? step.deterministic?.label ?? step.deterministic?.command ?? "parallel teams";
+    const stepNumber = i + 1;
 
     stepResult = undefined;
     parallelResults = undefined;
 
     if (deps.skippedSteps.has(i)) {
       await deps.emitter.message(session.id, "orch-1", "Orchestrator", "user",
-        `Step ${i + 1} skipped.`);
+        `Step ${stepNumber} skipped.`);
+      log.info(`Step ${stepNumber} starting: ${stepLabel}`, { trace_type: "chain.step.start", session_id: session.id, step: stepNumber, name: stepLabel, team: step.team });
+      log.info(`Step ${stepNumber} skipped`, { trace_type: "chain.step.end", session_id: session.id, step: stepNumber, name: stepLabel, team: step.team, status: "skipped" });
       continue;
     }
 
-    // Pause gate: wait while session is paused
     while (deps.pausedSessions.has(session.id)) {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
     if (session.status === "error") break;
 
-    // Drain orchestrator loop action queue
     const actionQueue = deps.actionQueues.get(session.id) ?? [];
     while (actionQueue.length > 0) {
       const action = actionQueue.shift()!;
@@ -474,17 +449,14 @@ export async function runChain(
       if (session.status === "paused") break;
     }
 
-    // Update loop with current step
     deps.orchestratorLoop?.setCurrentStep(i, steps.length);
 
-    // Drain buffered steer messages into context
     const buffered = deps.drainMessageBuffer(session.id);
     if (buffered) {
       previousOutput += buffered;
       await deps.emitter.message(session.id, "orch-1", "User", "user", buffered.trim());
     }
 
-    const stepLabel = step.team ?? step.agent ?? "parallel teams";
     const pipeline = deps.pipelines.get(session.id);
     const stageIdx = pipeline?.addStage({
       name: stepLabel,
@@ -495,29 +467,43 @@ export async function runChain(
     }) ?? -1;
     pipeline?.startStage(stageIdx);
     await deps.emitter.message(session.id, "orch-1", "Orchestrator", "user",
-      `Starting step ${i + 1}/${steps.length}: ${stepLabel}.`);
-    deps.orchestratorLoop?.recordEvent({
-      session_id: session.id, agent_id: "orch-1",
-      event_type: "step_start", timestamp: new Date().toISOString(),
-      data: { step: i, label: stepLabel },
-    });
-
-    if (step.deterministic) {
-      const detResult = await runDeterministicStep(deps.emitter, session, step, i);
-      if (detResult) {
-        previousOutput = detResult;
-      }
-    } else if (step.parallel) {
-      parallelResults = await runParallelStep(teamDeps, session, step, task, previousOutput, adapterName);
-      previousOutput = wrapStepOutput(parallelResults.map((r) => `[${r.agentName}]: ${r.output}`).join("\n\n"));
-    } else if (step.team) {
-      stepResult = await runTeamStep(teamDeps, session, step, task, previousOutput, adapterName);
-      previousOutput = wrapStepOutput(stepResult.output);
-    } else if (step.agent) {
-      stepResult = await runAgent(deps, session, step.agent, task, previousOutput, "orch-1", adapterName);
-      previousOutput = wrapStepOutput(stepResult.output);
+      `Starting step ${stepNumber}/${steps.length}: ${stepLabel}.`);
+    const stepStartedAt = Date.now();
+    log.info(`Step ${stepNumber} starting: ${stepLabel}`, { trace_type: "chain.step.start", session_id: session.id, step: stepNumber, name: stepLabel, team: step.team });
+    try {
+      deps.orchestratorLoop?.recordEvent({
+        session_id: session.id, agent_id: "orch-1",
+        event_type: "step_start", timestamp: new Date().toISOString(),
+        data: { step: i, label: stepLabel },
+      });
+    } catch (err) {
+      log.warn("Failed to record orchestrator step start", { session_id: session.id, error_type: err instanceof Error ? err.name : typeof err });
     }
 
+    try {
+      if (step.deterministic) {
+        const detResult = await runDeterministicStep(deps.emitter, session, step, i);
+        if (detResult) {
+          previousOutput = detResult;
+        }
+      } else if (step.parallel) {
+        parallelResults = await runParallelStep(teamDeps, session, step, task, previousOutput, adapterName);
+        previousOutput = wrapStepOutput(parallelResults.map((r) => `[${r.agentName}]: ${r.output}`).join("\n\n"));
+      } else if (step.team) {
+        stepResult = await runTeamStep(teamDeps, session, step, task, previousOutput, adapterName);
+        previousOutput = wrapStepOutput(stepResult.output);
+      } else if (step.agent) {
+        stepResult = await runAgent(deps, session, step.agent, task, previousOutput, "orch-1", adapterName);
+        previousOutput = wrapStepOutput(stepResult.output);
+      }
+    } catch (err) {
+      const duration_ms = Date.now() - stepStartedAt;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      log.error(`Step ${stepNumber} failed`, { trace_type: "chain.step.end", session_id: session.id, step: stepNumber, name: stepLabel, team: step.team, status: "failed", duration_ms, error_type: err instanceof Error ? err.name : typeof err, error_preview: sanitizeAgentInput(errorMsg).slice(0, 500) });
+      throw err;
+    }
+
+    try {
     // --- Task 2 fix: synthesize stepResult from parallel results for retry loop ---
     const isIncomplete = stepResult && (stepResult.grade === "FEEDBACK" || stepResult.grade === "FAILED");
     const isParallelIncomplete = parallelResults?.some(r => r.grade === "FEEDBACK" || r.grade === "FAILED");
@@ -552,9 +538,26 @@ export async function runChain(
       }
     }
 
-    // Issue #65: Only mark till_done if the step didn't FAIL
-    const stepGrade = stepResult?.grade ?? (parallelResults ? worstGrade(parallelResults.map((r) => r.grade)) : undefined);
-    // Update pipeline state
+    let stepGrade = stepResult?.grade ?? (parallelResults ? worstGrade(parallelResults.map((r) => r.grade)) : undefined);
+
+    let stepVerified = true;
+    if (stepGrade !== "FAILED" && stepGrade !== "FEEDBACK") {
+      if (step.till_done) {
+        const stepOutput = stepResult?.output ?? parallelResults?.map(r => r.output).join("\n") ?? "";
+        const { allMet, failures } = await verifyTillDone(deps.emitter, session, step, i, stepOutput, steps);
+        if (!allMet) {
+          stepVerified = false;
+          await deps.emitter.message(session.id, "orch-1", "Orchestrator", "user",
+            `Till-done verification failed:\n${failures.map(f => `- ${f}`).join("\n")}`);
+          if (stepResult && stepResult.grade !== "FAILED" && stepResult.grade !== "FEEDBACK") {
+            stepResult = { ...stepResult, grade: "FEEDBACK" };
+          }
+        }
+      }
+      stepGrade = stepResult?.grade ?? (parallelResults ? worstGrade(parallelResults.map((r) => r.grade)) : undefined);
+    }
+
+    // Update pipeline state after verification so dashboard grade matches the trace.
     if (stepResult) {
       pipeline?.completeStage(stageIdx, {
         grade: stepResult.grade,
@@ -570,18 +573,7 @@ export async function runChain(
       });
     }
 
-    if (stepGrade !== "FAILED") {
-      if (step.till_done) {
-        const stepOutput = stepResult?.output ?? parallelResults?.map(r => r.output).join("\n") ?? "";
-        const { allMet, failures } = await verifyTillDone(deps.emitter, session, step, i, stepOutput, steps);
-        if (!allMet) {
-          await deps.emitter.message(session.id, "orch-1", "Orchestrator", "user",
-            `Till-done verification failed:\n${failures.map(f => `- ${f}`).join("\n")}`);
-          if (stepResult && stepResult.grade !== "FAILED" && stepResult.grade !== "FEEDBACK") {
-            stepResult = { ...stepResult, grade: "FEEDBACK" };
-          }
-        }
-      }
+    if (stepVerified && stepGrade !== "FAILED" && stepGrade !== "FEEDBACK") {
       markTillDone(session, i, steps);
     }
     await deps.emitter.tillDone(session.id, session.name, session.tillDone);
@@ -592,5 +584,13 @@ export async function runChain(
       event_type: "step_complete", timestamp: new Date().toISOString(),
       data: { step: i, grade: stepGrade },
     });
+    const stepStatus = !stepVerified || stepGrade === "FAILED" || stepGrade === "FEEDBACK" ? "failed" : "completed";
+    log.info(`Step ${stepNumber} ${stepStatus}`, { trace_type: "chain.step.end", session_id: session.id, step: stepNumber, name: stepLabel, team: step.team, status: stepStatus, duration_ms: Date.now() - stepStartedAt });
+    } catch (err) {
+      const duration_ms = Date.now() - stepStartedAt;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      log.error(`Step ${stepNumber} failed`, { trace_type: "chain.step.end", session_id: session.id, step: stepNumber, name: stepLabel, team: step.team, status: "failed", duration_ms, error_type: err instanceof Error ? err.name : typeof err, error_preview: sanitizeAgentInput(errorMsg).slice(0, 500) });
+      throw err;
+    }
   }
 }

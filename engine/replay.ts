@@ -208,10 +208,26 @@ export function scoreSession(trace: SessionTrace): ReplayScore {
   const completed = trace.status === "completed";
   checks.push({ name: "session_completed", pass: completed, details: completed ? undefined : `status: ${trace.status}` });
 
-  const stepStarts = trace.events.filter((e) => e.type === "chain.step.start").length;
-  const stepEnds = trace.events.filter((e) => e.type === "chain.step.end").length;
-  const allStepsRan = stepStarts > 0 && stepStarts === stepEnds;
-  checks.push({ name: "all_steps_executed", pass: allStepsRan, details: allStepsRan ? undefined : `started: ${stepStarts}, ended: ${stepEnds}` });
+  const stepStarts = trace.events
+    .map((event, index) => ({ event, index }))
+    .filter(({ event }) => event.type === "chain.step.start");
+  const stepEnds = trace.events
+    .map((event, index) => ({ event, index }))
+    .filter(({ event }) => event.type === "chain.step.end");
+  const endedByStep = new Map<string, Array<{ event: TraceEvent; index: number }>>();
+  for (const event of stepEnds) {
+    const traceEvent = event.event;
+    const key = String(traceEvent.step ?? traceEvent.id);
+    endedByStep.set(key, [...(endedByStep.get(key) ?? []), event]);
+  }
+  const unmatchedStarts = stepStarts.filter(({ event, index }) => {
+    const ends = endedByStep.get(String(event.step ?? event.id)) ?? [];
+    return !ends.some((end) => end.index > index);
+  }).length;
+  const unfinishedEnds = stepEnds.filter(({ event }) => event.status !== "completed").length;
+  const duplicateEnds = [...endedByStep.values()].filter((events) => events.length !== 1).length;
+  const allStepsRan = stepStarts.length > 0 && stepStarts.length === stepEnds.length && unmatchedStarts === 0 && unfinishedEnds === 0 && duplicateEnds === 0;
+  checks.push({ name: "all_steps_executed", pass: allStepsRan, details: allStepsRan ? undefined : `started: ${stepStarts.length}, ended: ${stepEnds.length}, unmatched: ${unmatchedStarts}, unfinished: ${unfinishedEnds}, duplicate_ends: ${duplicateEnds}` });
 
   const failedAgents = trace.events.filter((e) => e.type === "agent.error").length;
   checks.push({ name: "no_agent_failures", pass: failedAgents === 0, details: failedAgents > 0 ? `${failedAgents} agent error(s)` : undefined });

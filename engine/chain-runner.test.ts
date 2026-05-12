@@ -1,6 +1,7 @@
 import { test, expect, describe } from "bun:test";
-import { buildTillDone, interpolatePrompt, normalizeParallelChain, markTillDone } from "./chain-runner";
+import { buildTillDone, interpolatePrompt, normalizeParallelChain, markTillDone, runChain } from "./chain-runner";
 import type { Chain, ChainStep, SessionState, TillDoneItem } from "./types";
+import { addSink, clearSinks, type LogEntry } from "./logger";
 
 function makeChain(steps: ChainStep[], overrides?: Partial<Chain>): Chain {
   return { description: "test chain", steps, ...overrides };
@@ -247,5 +248,51 @@ describe("markTillDone", () => {
     markTillDone(session, 0, [{ team: "A" }, { team: "B" }]);
     expect(session.tillDone[0]!.active).toBe(false);
     expect(session.tillDone[1]!.active).toBe(true);
+  });
+});
+
+describe("runChain trace lifecycle", () => {
+  test("marks step trace failed when till_done verification fails", async () => {
+    const entries: LogEntry[] = [];
+    addSink({ write: (entry) => { entries.push(entry); } });
+
+    try {
+      const session = makeSession([
+        { description: "must match", completed: false, active: true, type: "output_match", verify: "PASS" },
+      ]);
+      session.workingDir = import.meta.dir;
+      const chain = makeChain([
+        {
+          deterministic: { command: "printf nope", label: "verify output" },
+          till_done: [{ text: "must match", type: "output_match", verify: "PASS" }],
+        },
+      ]);
+
+      await runChain({
+        emitter: {
+          message: async () => {},
+          tillDone: async () => {},
+        },
+        messageSenders: new Map(),
+        agentActivity: new Map(),
+        budgetState: { warned: false },
+        pausedSessions: new Set(),
+        messageBuffers: new Map(),
+        actionQueues: new Map(),
+        skippedSteps: new Set(),
+        originalStepCount: 0,
+        pipelines: new Map(),
+        orchestratorLoop: null,
+        getAdapter: () => { throw new Error("adapter should not be used"); },
+        buildTeamDeps: () => ({} as never),
+        drainMessageBuffer: () => "",
+      } as never, session, chain, "test task");
+
+      const stepEnd = entries.find((entry) => entry.trace_type === "chain.step.end");
+      expect(stepEnd?.status).toBe("failed");
+      expect(session.tillDone[0]!.completed).toBe(false);
+    } finally {
+      clearSinks();
+    }
   });
 });

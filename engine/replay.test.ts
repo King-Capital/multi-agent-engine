@@ -301,7 +301,7 @@ describe("replay", () => {
         totalCost: 10.0,
         extraEvents: [
           { ts: "2026-05-11T00:00:01.000Z", type: "chain.step.start", id: "cs1", session_id: "s-expensive", step: 1 },
-          { ts: "2026-05-11T00:00:02.000Z", type: "chain.step.end", id: "cse1", session_id: "s-expensive", step: 1 },
+          { ts: "2026-05-11T00:00:02.000Z", type: "chain.step.end", id: "cse1", session_id: "s-expensive", step: 1, status: "completed" },
         ],
       });
       writeTrace("s-expensive", events);
@@ -311,6 +311,76 @@ describe("replay", () => {
 
       const costCheck = score.checks.find((c) => c.name === "cost_reasonable");
       expect(costCheck?.pass).toBe(false);
+    });
+
+    test("fails all_steps_executed when start and end steps do not match", () => {
+      const events = buildTraceEvents("s-step-mismatch", {
+        status: "completed",
+        extraEvents: [
+          { ts: "2026-05-11T00:00:01.000Z", type: "chain.step.start", id: "cs1", session_id: "s-step-mismatch", step: 1 },
+          { ts: "2026-05-11T00:00:02.000Z", type: "chain.step.end", id: "cse2", session_id: "s-step-mismatch", step: 2, status: "completed" },
+        ],
+      });
+      writeTrace("s-step-mismatch", events);
+
+      const trace = loadTrace("s-step-mismatch", TEST_DIR);
+      const stepCheck = scoreSession(trace).checks.find((c) => c.name === "all_steps_executed");
+
+      expect(stepCheck?.pass).toBe(false);
+      expect(stepCheck?.details).toContain("unmatched: 1");
+    });
+
+    test("fails all_steps_executed for skipped or failed step ends", () => {
+      const events = buildTraceEvents("s-step-skipped", {
+        status: "completed",
+        extraEvents: [
+          { ts: "2026-05-11T00:00:01.000Z", type: "chain.step.start", id: "cs1", session_id: "s-step-skipped", step: 1 },
+          { ts: "2026-05-11T00:00:02.000Z", type: "chain.step.end", id: "cse1", session_id: "s-step-skipped", step: 1, status: "skipped" },
+        ],
+      });
+      writeTrace("s-step-skipped", events);
+
+      const trace = loadTrace("s-step-skipped", TEST_DIR);
+      const stepCheck = scoreSession(trace).checks.find((c) => c.name === "all_steps_executed");
+
+      expect(stepCheck?.pass).toBe(false);
+      expect(stepCheck?.details).toContain("unfinished: 1");
+    });
+
+    test("fails all_steps_executed for extra or duplicate completed step ends", () => {
+      const events = buildTraceEvents("s-step-duplicate-end", {
+        status: "completed",
+        extraEvents: [
+          { ts: "2026-05-11T00:00:01.000Z", type: "chain.step.start", id: "cs1", session_id: "s-step-duplicate-end", step: 1 },
+          { ts: "2026-05-11T00:00:02.000Z", type: "chain.step.end", id: "cse1", session_id: "s-step-duplicate-end", step: 1, status: "completed" },
+          { ts: "2026-05-11T00:00:03.000Z", type: "chain.step.end", id: "cse1b", session_id: "s-step-duplicate-end", step: 1, status: "completed" },
+        ],
+      });
+      writeTrace("s-step-duplicate-end", events);
+
+      const trace = loadTrace("s-step-duplicate-end", TEST_DIR);
+      const stepCheck = scoreSession(trace).checks.find((c) => c.name === "all_steps_executed");
+
+      expect(stepCheck?.pass).toBe(false);
+      expect(stepCheck?.details).toContain("ended: 2");
+      expect(stepCheck?.details).toContain("duplicate_ends: 1");
+    });
+
+    test("fails all_steps_executed when a step end appears before its start", () => {
+      const events = buildTraceEvents("s-step-order", {
+        status: "completed",
+        extraEvents: [
+          { ts: "2026-05-11T00:00:01.000Z", type: "chain.step.end", id: "cse1", session_id: "s-step-order", step: 1, status: "completed" },
+          { ts: "2026-05-11T00:00:02.000Z", type: "chain.step.start", id: "cs1", session_id: "s-step-order", step: 1 },
+        ],
+      });
+      writeTrace("s-step-order", events);
+
+      const trace = loadTrace("s-step-order", TEST_DIR);
+      const stepCheck = scoreSession(trace).checks.find((c) => c.name === "all_steps_executed");
+
+      expect(stepCheck?.pass).toBe(false);
+      expect(stepCheck?.details).toContain("unmatched: 1");
     });
   });
 
