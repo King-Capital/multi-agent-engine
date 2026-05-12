@@ -5,9 +5,12 @@ set -euo pipefail
 # Install: curl -fsSL https://raw.githubusercontent.com/King-Capital/multi-agent-engine/main/scripts/mae | bash -s install
 # Or:      mae install
 
-MAE_VERSION="1.0.0_RC1"
+MAE_VERSION="1.0.0"
 MAE_REPO="King-Capital/multi-agent-engine"
-MAE_GIT_URL="git@github.com:${MAE_REPO}.git"
+MAE_GIT_URL="${MAE_GIT_URL:-https://github.com/${MAE_REPO}.git}"
+MAE_REF="${MAE_REF:-main}"
+MAE_UPDATE_REF="${MAE_UPDATE_REF:-main}"
+MAE_REQUIRE_PI="${MAE_REQUIRE_PI:-1}"
 MAE_INSTALL_DIR="${MAE_HOME:-$HOME/.mae}"
 MAE_CONFIG="$MAE_INSTALL_DIR/config"
 MAE_BIN="${HOME}/.local/bin/mae"
@@ -18,11 +21,32 @@ if [[ -f "$MAE_CONFIG" ]]; then
   source "$MAE_CONFIG"
 fi
 
+MAE_REPO_DIR="${MAE_REPO_DIR:-$MAE_INSTALL_DIR/repo}"
+
 # Apply defaults for anything not set by config or env
 MAE_DASHBOARD_URL="${MAE_DASHBOARD_URL:-http://localhost:8400}"
 DATABASE_URL="${DATABASE_URL:-postgres://mae:mae@localhost:5432/mae?sslmode=disable}"
 MAE_API_URL="${MAE_API_URL:-http://localhost:8400}"
-export MAE_DASHBOARD_URL DATABASE_URL MAE_API_URL
+MAE_LLM_GATEWAY_URL="${MAE_LLM_GATEWAY_URL:-}"
+export MAE_DASHBOARD_URL DATABASE_URL MAE_API_URL MAE_LLM_GATEWAY_URL
+
+write_shell_var() {
+  local key="$1"
+  local value="$2"
+  printf '%s=' "$key"
+  printf '%q' "$value"
+  printf '\n'
+}
+
+display_version() {
+  local root
+  root="$(find_mae_root 2>/dev/null || true)"
+  if [[ -n "$root" ]] && [[ -f "$root/VERSION" ]]; then
+    tr -d '[:space:]' < "$root/VERSION"
+  else
+    echo "$MAE_VERSION"
+  fi
+}
 
 # ── Locate MAE root ──────────────────────────────────────────────────
 find_mae_root() {
@@ -30,11 +54,15 @@ find_mae_root() {
   if [[ -n "${MAE_ROOT:-}" ]] && [[ -f "$MAE_ROOT/engine/cli.ts" ]]; then
     echo "$MAE_ROOT"; return
   fi
-  # 2. Installed location
+  # 2. Current repo-backed install location
+  if [[ -f "$MAE_REPO_DIR/engine/cli.ts" ]]; then
+    echo "$MAE_REPO_DIR"; return
+  fi
+  # 3. Legacy install location
   if [[ -f "$MAE_INSTALL_DIR/engine/cli.ts" ]]; then
     echo "$MAE_INSTALL_DIR"; return
   fi
-  # 3. Walk up from script location (dev checkout)
+  # 4. Walk up from script location (dev checkout)
   local dir="$(cd "$(dirname "$0")" && pwd)"
   while [[ "$dir" != "/" ]]; do
     if [[ -f "$dir/engine/cli.ts" ]] && [[ -f "$dir/VERSION" ]]; then
@@ -50,10 +78,16 @@ check_deps() {
   local missing=()
   command -v bun >/dev/null 2>&1 || missing+=("bun")
   command -v git >/dev/null 2>&1 || missing+=("git")
+  if [[ "$MAE_REQUIRE_PI" != "0" ]] && [[ "$MAE_REQUIRE_PI" != "false" ]]; then
+    command -v pi >/dev/null 2>&1 || missing+=("pi")
+  fi
   if [[ ${#missing[@]} -gt 0 ]]; then
     echo "Missing dependencies: ${missing[*]}"
     if [[ " ${missing[*]} " == *" bun "* ]]; then
       echo "Install bun: curl -fsSL https://bun.sh/install | bash"
+    fi
+    if [[ " ${missing[*]} " == *" pi "* ]]; then
+      echo "Install Pi before running real swarms, or set MAE_REQUIRE_PI=0 for echo/A2A-only installs."
     fi
     exit 1
   fi
@@ -70,25 +104,33 @@ do_install() {
 
   check_deps
 
-  echo "Install target: $MAE_INSTALL_DIR"
+  echo "Install home: $MAE_INSTALL_DIR"
+  echo "Repo target:  $MAE_REPO_DIR"
   echo ""
 
-  if [[ -d "$MAE_INSTALL_DIR/.git" ]]; then
-    echo "MAE already installed at $MAE_INSTALL_DIR"
+  if [[ -d "$MAE_REPO_DIR/.git" ]]; then
+    echo "MAE already installed at $MAE_REPO_DIR"
     echo "Run 'mae update' to pull latest."
     exit 0
   fi
 
+  if [[ -d "$MAE_INSTALL_DIR/.git" ]]; then
+    echo "Legacy MAE install detected at $MAE_INSTALL_DIR"
+    echo "Run 'MAE_REPO_DIR=$MAE_INSTALL_DIR mae update' to update it, or move it before installing the repo-backed layout."
+    exit 1
+  fi
+
   # Step 1: Clone
-  echo "[1/4] Clone $MAE_REPO → $MAE_INSTALL_DIR"
+  echo "[1/4] Clone $MAE_REPO@$MAE_REF → $MAE_REPO_DIR"
   if ! $dry_run; then
-    git clone "$MAE_GIT_URL" "$MAE_INSTALL_DIR" 2>&1
+    mkdir -p "$MAE_INSTALL_DIR"
+    git clone --branch "$MAE_REF" "$MAE_GIT_URL" "$MAE_REPO_DIR" 2>&1
   fi
 
   # Step 2: Engine deps
   echo "[2/4] Install engine dependencies (bun install)"
   if ! $dry_run; then
-    cd "$MAE_INSTALL_DIR/engine" && bun install
+    cd "$MAE_REPO_DIR/engine" && bun install
   fi
 
   # Step 3: Config
@@ -96,22 +138,40 @@ do_install() {
     echo "[3/4] Config exists at $MAE_CONFIG (keeping current)"
   else
     echo "[3/4] Create config: $MAE_CONFIG"
-    echo "      MAE_DASHBOARD_URL = http://localhost:8400"
-    echo "      DATABASE_URL      = postgres://mae:mae@localhost:5432/mae"
-    echo "      MAE_API_URL       = http://localhost:8400"
+    echo "      MAE_DASHBOARD_URL = $MAE_DASHBOARD_URL"
+    echo "      DATABASE_URL      = $DATABASE_URL"
+    echo "      MAE_API_URL       = $MAE_API_URL"
+    echo "      MAE_LLM_GATEWAY_URL = $MAE_LLM_GATEWAY_URL"
     if ! $dry_run; then
-      cat > "$MAE_CONFIG" << 'CONF'
+      {
+        cat << CONF
 # MAE Configuration -- edit these values for your environment
 # Sourced by the mae CLI on every invocation
 
 # Dashboard / Go API server
-MAE_DASHBOARD_URL="http://localhost:8400"
+CONF
+        write_shell_var MAE_DASHBOARD_URL "$MAE_DASHBOARD_URL"
+        cat << CONF
 
 # PostgreSQL connection (used by Go dashboard)
-DATABASE_URL="postgres://mae:mae@localhost:5432/mae?sslmode=disable"
+CONF
+        write_shell_var DATABASE_URL "$DATABASE_URL"
+        cat << CONF
 
 # API URL for dashboard-next Vite proxy
-MAE_API_URL="http://localhost:8400"
+CONF
+        write_shell_var MAE_API_URL "$MAE_API_URL"
+        cat << CONF
+
+# Repo checkout used by the wrapper CLI
+CONF
+        write_shell_var MAE_ROOT "$MAE_REPO_DIR"
+        cat << CONF
+
+# Optional LiteLLM/OpenAI-compatible gateway
+CONF
+        write_shell_var MAE_LLM_GATEWAY_URL "$MAE_LLM_GATEWAY_URL"
+        cat << CONF
 
 # Default adapter (pi, a2a, echo)
 # MAE_DEFAULT_ADAPTER="pi"
@@ -122,6 +182,7 @@ MAE_API_URL="http://localhost:8400"
 # Default A2A endpoint (for remote agent delegation)
 # MAE_A2A_URL=""
 CONF
+      } > "$MAE_CONFIG"
     fi
   fi
 
@@ -129,7 +190,7 @@ CONF
   echo "[4/4] Install CLI: $MAE_BIN"
   if ! $dry_run; then
     mkdir -p "$(dirname "$MAE_BIN")"
-    cp "$MAE_INSTALL_DIR/scripts/mae" "$MAE_BIN"
+    cp "$MAE_REPO_DIR/scripts/mae" "$MAE_BIN"
     chmod +x "$MAE_BIN"
   fi
 
@@ -138,7 +199,8 @@ CONF
     echo "DRY RUN complete. Run 'mae install' to execute."
   else
     echo "✓ MAE installed (engine only -- no frontend)"
-    echo "  Root:      $MAE_INSTALL_DIR"
+    echo "  Home:      $MAE_INSTALL_DIR"
+    echo "  Root:      $MAE_REPO_DIR"
     echo "  Config:    $MAE_CONFIG"
     echo "  CLI:       $MAE_BIN"
     echo "  Dashboard: $MAE_DASHBOARD_URL"
@@ -190,6 +252,8 @@ do_dashboard() {
 
 # ── Update ───────────────────────────────────────────────────────────
 do_update() {
+  check_deps
+
   local root
   root="$(find_mae_root)" || { echo "MAE not found. Run 'mae install' first."; exit 1; }
 
@@ -197,7 +261,15 @@ do_update() {
 
   cd "$root"
   local before=$(git rev-parse HEAD)
-  git pull --ff-only 2>&1
+  local branch
+  branch="$(git symbolic-ref --short -q HEAD || true)"
+  if [[ -z "$branch" ]]; then
+    echo "Detached install detected; switching to origin/$MAE_UPDATE_REF before update."
+    git fetch origin "$MAE_UPDATE_REF" --tags
+    git checkout -B "$MAE_UPDATE_REF" "origin/$MAE_UPDATE_REF"
+  else
+    git pull --ff-only 2>&1
+  fi
   local after=$(git rev-parse HEAD)
 
   if [[ "$before" == "$after" ]]; then
@@ -232,7 +304,7 @@ do_uninstall() {
     echo "Removed $MAE_BIN"
   fi
   if [[ -d "$MAE_INSTALL_DIR" ]]; then
-    read -p "Remove $MAE_INSTALL_DIR? [y/N] " -n 1 -r
+    read -p "Remove $MAE_INSTALL_DIR, including repo/config/traces? [y/N] " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
       rm -rf "$MAE_INSTALL_DIR"
@@ -244,8 +316,10 @@ do_uninstall() {
 
 # ── Help ─────────────────────────────────────────────────────────────
 do_help() {
+  local version
+  version="$(display_version)"
   cat <<HELP
-mae -- Multi-Agent Engine CLI v${MAE_VERSION}
+mae -- Multi-Agent Engine CLI v${version}
 
 Lifecycle:
   mae install              Clone repo, install engine deps, create config
@@ -306,17 +380,24 @@ Examples:
 
 Config:
   ~/.mae/config            Sourced on every invocation (created by 'mae install')
+  ~/.mae/repo              Repo-backed install root for engine/config files
   Defaults:
     MAE_DASHBOARD_URL      http://localhost:8400
-    DATABASE_URL           postgres://mae:mae@localhost:5432/mae
+    DATABASE_URL           postgres://mae:mae@localhost:5432/mae?sslmode=disable
     MAE_API_URL            http://localhost:8400
+    MAE_LLM_GATEWAY_URL    unset unless provided
 
 Environment (override config):
   MAE_DASHBOARD_URL   Dashboard API
   DATABASE_URL        PostgreSQL connection string
   MAE_API_URL         Vite dev proxy target
+  MAE_LLM_GATEWAY_URL LiteLLM/OpenAI-compatible gateway
   MAE_ROOT            Override repo location
   MAE_HOME            Install directory (default: ~/.mae)
+  MAE_REF             Git ref used by install (default: main)
+  MAE_UPDATE_REF      Branch used by update from a tag install (default: main)
+  MAE_GIT_URL         Git URL used by install (default: https://github.com/${MAE_REPO}.git)
+  MAE_REQUIRE_PI      Require 'pi' during install (default: 1; set 0 for echo/A2A-only)
   MAE_API_TOKEN       API auth token
   MAE_A2A_URL         Default A2A endpoint
 HELP

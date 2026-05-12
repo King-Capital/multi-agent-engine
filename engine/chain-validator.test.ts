@@ -8,7 +8,7 @@ import {
 
 describe("chain-validator", () => {
   test("standard-swarm exposes Arch coordinator plus all SME squads", () => {
-    const report = buildChainValidationReport("standard-swarm", "Find RC1 holes");
+    const report = buildChainValidationReport("standard-swarm", "Find release blockers");
     const output = formatChainValidationReport(report);
 
     expect(report.summary.steps).toBe(2);
