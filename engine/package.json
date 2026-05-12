@@ -2,7 +2,7 @@
   "name": "engine",
   "private": true,
   "scripts": {
-    "postinstall": "bun ../scripts/sync-install-version.ts"
+    "postinstall": "bun sync-install-version.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"

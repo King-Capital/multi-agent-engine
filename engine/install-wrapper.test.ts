@@ -13,7 +13,7 @@ describe("scripts/mae install wrapper", () => {
 
   test("engine postinstall performs first-update version sync", () => {
     const packageJson = readFileSync(new URL("./package.json", import.meta.url), "utf8");
-    expect(packageJson).toContain('"postinstall": "bun ../scripts/sync-install-version.ts"');
+    expect(packageJson).toContain('"postinstall": "bun sync-install-version.ts"');
   });
 
   test("offers qmd setup for indexed repo search", () => {
