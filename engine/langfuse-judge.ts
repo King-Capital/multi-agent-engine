@@ -59,7 +59,14 @@ function eventPriority(event: TraceEvent): number {
 }
 
 function safeJudgeText(value: string, maxLength: number): string {
-  return sanitizeAgentInput(value).replace(/<[^>]*>/g, "").slice(0, maxLength);
+  return sanitizeAgentInput(value).replace(/[<>]/g, "").slice(0, maxLength);
+}
+
+function safeTraceId(traceId: string): string {
+  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(traceId)) {
+    throw new Error("Unsafe trace id for Langfuse score lookup");
+  }
+  return traceId;
 }
 
 export function selectJudgeEvents(trace: SessionTrace, maxEvents = 50): TraceEvent[] {
@@ -150,8 +157,10 @@ export async function getExistingJudgeScores(traceId: string, opts?: JudgeOption
   if (!cfg) return null;
   const fetchImpl = opts?.fetchImpl ?? fetch;
   const cacheDays = opts?.cacheDays ?? 7;
-  const url = `${cfg.host}/api/public/scores?traceId=${encodeURIComponent(traceId)}&limit=100`;
-  const resp = await fetchImpl(url, { headers: { Authorization: `Basic ${cfg.auth}` } });
+  const url = new URL("/api/public/scores", cfg.host);
+  url.searchParams.set("traceId", safeTraceId(traceId));
+  url.searchParams.set("limit", "100");
+  const resp = await fetchImpl(url.toString(), { headers: { Authorization: `Basic ${cfg.auth}` } });
   if (!resp.ok) return null;
   const json = await resp.json() as { data?: LangfuseScore[] } | LangfuseScore[];
   const scores = Array.isArray(json) ? json : json.data ?? [];
@@ -168,11 +177,13 @@ async function postJudgeScores(traceId: string, scores: JudgeScores, rationale: 
   const cfg = langfuseConfig();
   if (!cfg) return false;
   const fetchImpl = opts?.fetchImpl ?? fetch;
+  const safeId = safeTraceId(traceId);
+  const comment = safeJudgeText(rationale, 1000);
   for (const [name, value] of Object.entries(scores)) {
     const resp = await fetchImpl(`${cfg.host}/api/public/scores`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Basic ${cfg.auth}` },
-      body: JSON.stringify({ traceId, name, value, comment: rationale }),
+      body: JSON.stringify({ traceId: safeId, name, value, comment }),
     });
     if (!resp.ok) return false;
   }

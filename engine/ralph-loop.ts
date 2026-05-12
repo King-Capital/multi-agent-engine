@@ -521,7 +521,7 @@ export async function verifyMutation(mutation: ConfigMutation, config?: RalphCon
   }
 
   const file = resolveMutationFile(mutation, personaDir);
-  if (!file || !existsSync(file)) {
+  if (!file) {
     const reason = `Target persona file not found for ${targetType}:${target}`;
     writeJournal(journalPath, { mutation, verdict: "invalid", reason });
     return { accepted: false, status: "invalid", reason, tested: [], coverage: 0, journalPath };
@@ -534,7 +534,14 @@ export async function verifyMutation(mutation: ConfigMutation, config?: RalphCon
     return { accepted: false, status: "needs_verification", reason, tested: [], coverage: goldens.length, journalPath };
   }
 
-  const before = readFileSync(file, "utf-8");
+  let before: string;
+  try {
+    before = readFileSync(file, "utf-8");
+  } catch {
+    const reason = `Target persona file not found for ${targetType}:${target}`;
+    writeJournal(journalPath, { mutation, verdict: "invalid", reason });
+    return { accepted: false, status: "invalid", reason, tested: [], coverage: goldens.length, journalPath };
+  }
   const after = applyMutation(before, mutation);
   if (before === after) {
     const reason = "Mutation produced no file change.";
