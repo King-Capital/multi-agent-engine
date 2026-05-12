@@ -603,6 +603,36 @@ describe("ralph-loop", () => {
       expect(readFileSync(join(PERSONA_DIR, "test-agent.md"), "utf-8")).toBe(originalContent);
     });
 
+    test("verifyMutation rejects unsafe persona target paths", async () => {
+      writePersona("test-agent", SAMPLE_PERSONA);
+      writePassingGolden("golden-a");
+      writePassingGolden("golden-b");
+      writePassingGolden("golden-c");
+
+      const mutation: ConfigMutation = {
+        persona: "test-agent",
+        targetType: "persona",
+        target: "../../outside",
+        field: "system_prompt",
+        action: "append",
+        content: "Always include replay evidence before claiming success.",
+        reasoning: "Attempted unsafe target path",
+      };
+
+      const result = await verifyMutation(mutation, {
+        traceDir: TRACE_DIR,
+        personaDir: PERSONA_DIR,
+        journalPath: join(TEST_DIR, "journal.jsonl"),
+        replayRunner: async (golden) => ({ ...golden, sessionId: `${golden.sessionId}-replay` }),
+        getJudgeScoresFn: async () => null,
+      });
+
+      expect(result.status).toBe("invalid");
+      expect(result.reason).toContain("Target persona file not found");
+      expect(existsSync(join(TEST_DIR, "outside.md"))).toBe(false);
+      expect(readFileSync(join(PERSONA_DIR, "test-agent.md"), "utf-8")).toBe(SAMPLE_PERSONA);
+    });
+
     test("verifyMutation dry-run passes ratchet and restores persona file", async () => {
       writePersona("test-agent", SAMPLE_PERSONA);
       writePassingGolden("golden-a");

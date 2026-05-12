@@ -9,9 +9,11 @@ set -euo pipefail
 #   # or with options:
 #   curl -fsSL ... | bash -s -- --dashboard http://your-host:8400
 
-MAE_DIR="${MAE_DIR:-$HOME/.mae}"
-MAE_BIN="${MAE_BIN:-$HOME/.local/bin}"
-REPO="https://github.com/King-Capital/multi-agent-engine.git"
+MAE_DIR="${MAE_HOME:-${MAE_DIR:-$HOME/.mae}}"
+MAE_REPO_DIR="${MAE_REPO_DIR:-$MAE_DIR/repo}"
+MAE_BIN_DIR="${MAE_BIN_DIR:-${MAE_BIN:-$HOME/.local/bin}}"
+REPO="${MAE_GIT_URL:-https://github.com/King-Capital/multi-agent-engine.git}"
+MAE_REF="${MAE_REF:-main}"
 
 info() { echo "  [mae] $*"; }
 err()  { echo "  [mae] ERROR: $*" >&2; exit 1; }
@@ -20,6 +22,8 @@ err()  { echo "  [mae] ERROR: $*" >&2; exit 1; }
 DASHBOARD_URL=""
 GATEWAY_URL=""
 A2A_URL="${MAE_A2A_URL:-}"
+MAE_A2A_DEFAULT_HOST="${MAE_A2A_DEFAULT_HOST:-10.71.20.120}"
+MAE_A2A_DEFAULT_PORT="${MAE_A2A_DEFAULT_PORT:-3210}"
 LANGFUSE_HOST_VALUE="${LANGFUSE_HOST:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -63,18 +67,18 @@ fi
 info "Bun $(bun --version)"
 
 # Clone or update
-if [[ -d "$MAE_DIR/engine" ]]; then
+if [[ -d "$MAE_REPO_DIR/.git" ]]; then
   info "Updating existing installation..."
-  git -C "$MAE_DIR/engine" pull --ff-only 2>/dev/null || true
+  git -C "$MAE_REPO_DIR" pull --ff-only
 else
   info "Cloning MAE..."
   mkdir -p "$MAE_DIR"
-  git clone --depth 1 "$REPO" "$MAE_DIR/engine"
+  git clone --depth 1 --branch "$MAE_REF" "$REPO" "$MAE_REPO_DIR"
 fi
 
 # Install deps
 info "Installing dependencies..."
-cd "$MAE_DIR/engine/engine" && bun install --silent
+cd "$MAE_REPO_DIR/engine" && bun install --silent
 
 # Create config if it doesn't exist
 if [[ ! -f "$MAE_DIR/config" ]]; then
@@ -95,6 +99,12 @@ CONF
     write_optional_shell_var MAE_LLM_GATEWAY_KEY "${MAE_LLM_GATEWAY_KEY:-}"
     cat <<CONF
 
+# Repo checkout and trace storage
+CONF
+    write_shell_var MAE_ROOT "$MAE_REPO_DIR"
+    write_shell_var MAE_TRACE_DIR "${MAE_TRACE_DIR:-$MAE_DIR/traces}"
+    cat <<CONF
+
 # Default adapter: pi, claude-code, codex, echo
 CONF
     write_optional_shell_var MAE_DEFAULT_ADAPTER "${MAE_DEFAULT_ADAPTER:-}"
@@ -104,6 +114,8 @@ CONF
 # A2A endpoint (if this host has a local or remote A2A service)
 CONF
     write_optional_shell_var MAE_API_TOKEN "${MAE_API_TOKEN:-}"
+    write_shell_var MAE_A2A_DEFAULT_HOST "$MAE_A2A_DEFAULT_HOST"
+    write_shell_var MAE_A2A_DEFAULT_PORT "$MAE_A2A_DEFAULT_PORT"
     write_optional_shell_var MAE_A2A_URL "$A2A_URL"
     write_optional_shell_var MAE_A2A_TOKEN "${MAE_A2A_TOKEN:-}"
     cat <<CONF
@@ -123,14 +135,14 @@ CONF
 fi
 
 # Symlink CLI
-mkdir -p "$MAE_BIN"
-ln -sf "$MAE_DIR/engine/scripts/mae" "$MAE_BIN/mae"
-chmod +x "$MAE_BIN/mae"
+mkdir -p "$MAE_BIN_DIR"
+ln -sf "$MAE_REPO_DIR/scripts/mae" "$MAE_BIN_DIR/mae"
+chmod +x "$MAE_BIN_DIR/mae"
 
 # Check PATH
-if ! echo "$PATH" | grep -q "$MAE_BIN"; then
+if ! echo "$PATH" | grep -q "$MAE_BIN_DIR"; then
   info "Add to your shell profile:"
-  info "  export PATH=\"$MAE_BIN:\$PATH\""
+  info "  export PATH=\"$MAE_BIN_DIR:\$PATH\""
 fi
 
 echo ""

@@ -11,7 +11,7 @@
  */
 
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
-import { dirname, join } from "path";
+import { dirname, isAbsolute, join, relative, resolve } from "path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { compareFingerprints, extractFingerprint, getGoldenTraces, loadTrace, scoreSession } from "./replay";
 import type { SessionTrace, ReplayScore } from "./replay";
@@ -129,12 +129,24 @@ function loadRecentTraces(traceDir: string, limit: number): SessionTrace[] {
 }
 
 function personaSlug(personaName: string): string {
-  return personaName.toLowerCase().replace(/\s+/g, "-");
+  return personaName.trim().toLowerCase().replace(/\s+/g, "-");
+}
+
+function isSafeRelativeChild(baseDir: string, candidate: string): boolean {
+  const rel = relative(resolve(baseDir), resolve(candidate));
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+function personaFilePath(personaDir: string, personaName: string): string | null {
+  const slug = personaSlug(personaName);
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) return null;
+  const file = resolve(personaDir, `${slug}.md`);
+  return isSafeRelativeChild(personaDir, file) ? file : null;
 }
 
 function readPersonaRawFromDir(personaDir: string, personaName: string): string | null {
-  const slug = personaSlug(personaName);
-  const path = join(personaDir, `${slug}.md`);
+  const path = personaFilePath(personaDir, personaName);
+  if (!path) return null;
   try {
     return readFileSync(path, "utf-8");
   } catch {
@@ -407,7 +419,7 @@ function defaultJournalPath(): string {
 function resolveMutationFile(mutation: ConfigMutation, personaDir: string): string | null {
   const { targetType, target } = suggestionTarget(mutation);
   if (targetType !== "persona") return null;
-  return join(personaDir, `${personaSlug(target || mutation.persona)}.md`);
+  return personaFilePath(personaDir, target || mutation.persona);
 }
 
 function requiredDeterministicFailures(trace: SessionTrace): string[] {
