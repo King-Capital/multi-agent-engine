@@ -109,11 +109,11 @@ func main() {
 		if n, err := MarkStaleSessions(ctx, 30); err != nil {
 			log.Printf("WARNING: failed to mark stale sessions: %v", err)
 		} else if n > 0 {
-			log.Printf("Marked %d stale sessions as error", n)
+			log.Printf("Marked %d stale sessions as completed", n)
 		}
 
-		// Periodic stale session reaper — every 5 minutes, mark active sessions
-		// with no events in the last 30 minutes as error.
+		// Periodic stale session reaper — every 5 minutes, mark open sessions
+		// with no events in the last 30 minutes as completed.
 		go func() {
 			ticker := time.NewTicker(5 * time.Minute)
 			defer ticker.Stop()
@@ -122,7 +122,7 @@ func main() {
 				if n, err := MarkStaleSessions(bgCtx, 30); err != nil {
 					log.Printf("stale reaper error: %v", err)
 				} else if n > 0 {
-					log.Printf("Stale reaper: marked %d sessions as error", n)
+					log.Printf("Stale reaper: marked %d sessions as completed", n)
 				}
 			}
 		}()
@@ -406,7 +406,7 @@ func init() {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-if len(allowedOrigins) == 0 {
+		if len(allowedOrigins) == 0 {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 		} else {
 			for _, allowed := range allowedOrigins {
@@ -485,7 +485,6 @@ func getAuthUser(r *http.Request) *DBUser {
 	u, _ := r.Context().Value(userContextKey).(*DBUser)
 	return u
 }
-
 
 // --- Rate Limiting ---
 

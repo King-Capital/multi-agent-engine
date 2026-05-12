@@ -66,11 +66,11 @@ templ DashboardPage(sessions []*models.Session) {
 								</div>
 								<button
 									class="text-xs text-neutral-600 hover:text-orange-400 transition-colors"
-									title="Close all stale sessions as error"
+									title="Close all stale sessions as done"
 									hx-post="/api/sessions/close-stale"
 									hx-target="#session-list"
 									hx-swap="innerHTML"
-									hx-confirm="Close all active/waiting/paused sessions as error?"
+									hx-confirm="Close all active/waiting/paused sessions as done?"
 								>
 									<i class="ph-bold ph-prohibit"></i>
 								</button>
