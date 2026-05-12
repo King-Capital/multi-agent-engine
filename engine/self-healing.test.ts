@@ -1,4 +1,4 @@
-import { describe, test, expect, mock } from "bun:test";
+import { afterEach, describe, test, expect, mock } from "bun:test";
 import { delegateWithHealing } from "./self-healing";
 import type { PlatformAdapter, DelegateOptions, DelegateResult } from "./types";
 
@@ -45,6 +45,10 @@ function makeOpts(): DelegateOptions {
 const noopEvent = async () => {};
 
 describe("self-healing", () => {
+  afterEach(() => {
+    delete process.env.MAE_MODEL_UNAVAILABLE_FALLBACK;
+  });
+
   test("succeeds on first attempt", async () => {
     let callCount = 0;
     const adapter: PlatformAdapter = {
@@ -114,6 +118,60 @@ describe("self-healing", () => {
     expect(result.grade).toBe("VERIFIED");
     expect(callCount).toBe(3);
     expect(lastModel).toContain("opus");
+  });
+
+  test("respawns with fallback immediately when configured model is unavailable", async () => {
+    let callCount = 0;
+    const seenModels: string[] = [];
+    const events: string[] = [];
+    const adapter: PlatformAdapter = {
+      name: "test",
+      isAvailable: async () => true,
+      delegate: async (opts) => {
+        callCount++;
+        seenModels.push(opts.model);
+        if (callCount === 1) return makeFailed("ERROR: model not found: gpt-5.5");
+        return makeSuccess();
+      },
+    };
+
+    const result = await delegateWithHealing({
+      adapter,
+      opts: { ...makeOpts(), model: "gpt-5.5" },
+      sessionId: "test",
+      agentRole: "worker",
+      onEvent: async (_type, data) => { events.push(String(data.heal_action)); },
+    });
+
+    expect(result.grade).toBe("VERIFIED");
+    expect(callCount).toBe(2);
+    expect(seenModels).toEqual(["gpt-5.5", "opus"]);
+    expect(events[0]).toContain("was unavailable");
+  });
+
+  test("uses explicit unavailable-model fallback when configured", async () => {
+    process.env.MAE_MODEL_UNAVAILABLE_FALLBACK = "main";
+    const seenModels: string[] = [];
+    const adapter: PlatformAdapter = {
+      name: "test",
+      isAvailable: async () => true,
+      delegate: async (opts) => {
+        seenModels.push(opts.model);
+        if (seenModels.length === 1) return makeFailed("ERROR: unknown model");
+        return makeSuccess();
+      },
+    };
+
+    const result = await delegateWithHealing({
+      adapter,
+      opts: { ...makeOpts(), model: "gpt-5.5" },
+      sessionId: "test",
+      agentRole: "worker",
+      onEvent: noopEvent,
+    });
+
+    expect(result.grade).toBe("VERIFIED");
+    expect(seenModels).toEqual(["gpt-5.5", "sonnet"]);
   });
 
   test("returns FAILED after all attempts exhausted", async () => {

@@ -26,6 +26,14 @@ function getEscalationModel(currentModel: string): string {
   return MODEL_ESCALATION[currentModel] ?? currentModel;
 }
 
+function getUnavailableModelFallback(currentModel: string): string {
+  const configured = process.env.MAE_MODEL_UNAVAILABLE_FALLBACK;
+  if (configured && configured !== currentModel) return configured;
+  const fallback = getEscalationModel(currentModel);
+  if (fallback !== currentModel) return fallback;
+  return currentModel === "main" ? "quality" : "main";
+}
+
 const THINKING_ESCALATION: Record<ThinkingLevel, ThinkingLevel> = {
   off: "low",
   minimal: "low",
@@ -51,6 +59,24 @@ function isFailed(result: DelegateResult): boolean {
   return false;
 }
 
+function isModelUnavailable(result: DelegateResult): boolean {
+  const haystack = [
+    result.output,
+    ...(result.findings ?? []),
+  ].join("\n").toLowerCase();
+
+  return [
+    "model_not_found",
+    "model not found",
+    "unknown model",
+    "model_not_available",
+    "model unavailable",
+    "not available for model",
+    "no such model",
+    "could not find model",
+  ].some((needle) => haystack.includes(needle));
+}
+
 export interface SelfHealContext {
   adapter: PlatformAdapter;
   opts: DelegateOptions;
@@ -72,6 +98,37 @@ export async function delegateWithHealing(ctx: SelfHealContext): Promise<Delegat
   logOutput(opts.sessionDir, opts.persona.name, 1, result);
 
   if (!isFailed(result)) return result;
+
+  if (isModelUnavailable(result)) {
+    const fallbackModel = getUnavailableModelFallback(opts.model);
+    const fallbackResolved = resolveModel(fallbackModel);
+
+    if (fallbackResolved !== opts.model) {
+      log.warn("Attempt 2: model unavailable, respawning with fallback model", {
+        agent: opts.persona.name,
+        failed_model: opts.model,
+        fallback_model: fallbackResolved,
+      });
+      await onEvent("self_heal", {
+        failed_worker: opts.persona.name,
+        heal_action: `Model ${opts.model} was unavailable. Respawning with ${fallbackResolved}.`,
+      });
+
+      result = await adapter.delegate({
+        ...opts,
+        model: fallbackResolved,
+        userPrompt: [
+          opts.userPrompt,
+          "",
+          "## Runtime Note",
+          `The originally configured model (${opts.model}) was unavailable. Continue this assignment using ${fallbackResolved}.`,
+        ].join("\n"),
+      });
+      logOutput(opts.sessionDir, opts.persona.name, 2, result);
+
+      if (!isFailed(result)) return result;
+    }
+  }
 
   // Attempt 1.5: Try deterministic autofix before burning tokens on retry
   if (opts.workingDir) {
