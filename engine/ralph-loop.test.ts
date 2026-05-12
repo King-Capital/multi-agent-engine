@@ -6,6 +6,7 @@ import type { EvaluatorFinding } from "./ralph-evaluator";
 import { parseMutations } from "./ralph-evolver";
 import type { ConfigMutation } from "./ralph-evolver";
 import { applyMutation, numericScore, runRalphLoop } from "./ralph-loop";
+import { addGoldenTrace } from "./replay";
 import type { ReplayScore, BehavioralFingerprint } from "./replay";
 
 const TEST_DIR = join(import.meta.dir, "..", ".test-ralph-" + process.pid);
@@ -490,6 +491,33 @@ describe("ralph-loop", () => {
       });
 
       expect(seenIds).toEqual(["s-small"]);
+    });
+
+    test("golden-only mode includes fail goldens for evaluator training", async () => {
+      writeTrace("s-fail-golden", buildTraceEvents("s-fail-golden", {
+        goal: "Known bad swarm",
+        status: "error",
+        extraEvents: [
+          { ts: "2026-05-11T00:00:10.000Z", type: "agent.start", id: "agent-1", session_id: "s-fail-golden", agent_id: "lead", persona: "orchestrator", team: "Validation" },
+          { ts: "2026-05-11T00:00:11.000Z", type: "log", id: "err-1", session_id: "s-fail-golden", level: "ERROR", msg: "worker failed" },
+        ],
+      }));
+      addGoldenTrace("s-fail-golden", "fail", "known bad swarm", TRACE_DIR);
+
+      let seenIds: string[] = [];
+      const result = await runRalphLoop({
+        traceDir: TRACE_DIR,
+        personaDir: PERSONA_DIR,
+        goldenOnly: true,
+        dryRun: true,
+        evaluator: async (traces) => {
+          seenIds = traces.map((trace) => trace.sessionId);
+          return [];
+        },
+      });
+
+      expect(result.traces.map((trace) => trace.sessionId)).toEqual(["s-fail-golden"]);
+      expect(seenIds).toEqual(["s-fail-golden"]);
     });
 
     test("ralph emits suggestions only and does not write files", async () => {

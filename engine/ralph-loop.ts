@@ -227,7 +227,6 @@ function loadGoldenTraces(traceDir: string): SessionTrace[] {
   const golden = getGoldenTraces(traceDir);
   const traces: SessionTrace[] = [];
   for (const entry of golden) {
-    if (entry.verdict !== "pass") continue;
     try {
       traces.push(loadTrace(entry.sessionId, traceDir));
     } catch {
