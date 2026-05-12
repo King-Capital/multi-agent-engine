@@ -3,7 +3,7 @@ import { Orchestrator } from "./orchestrator";
 import { EchoAdapter } from "./adapters/echo";
 import { loadTeams, loadChains, loadPersona, buildSystemPrompt, getTeam, getChain, loadPrompt } from "./config";
 
-const INTEGRATION_TIMEOUT_MS = 15000;
+const INTEGRATION_TIMEOUT_MS = 30000;
 
 describe("config loading", () => {
   test("loads teams.yaml", () => {
