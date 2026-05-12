@@ -21,6 +21,12 @@
 
 ---
 
+## Release Status
+
+Current release candidate: **v1.0.0_RC1**.
+
+The `VERSION` file intentionally stays on `1.0.0_RC1` for the RC line. The auto-version workflow only bumps stable SemVer values like `1.0.0`; while the project is on an RC version, release bumps are manual.
+
 ## ✨ Features
 
 - **Multi-Model Orchestration** -- Route tasks across Claude, Codex, Pi, and custom adapters with per-agent model tier control
