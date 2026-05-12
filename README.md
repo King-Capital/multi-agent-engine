@@ -23,7 +23,7 @@
 
 ## Release Status
 
-Current stable release: **v1.0.3**.
+Current stable release: **v1.0.4**.
 
 The `VERSION` file uses standard stable SemVer. The auto-version workflow resumes from this value and applies normal patch/minor/major bumps after merged PRs.
 
