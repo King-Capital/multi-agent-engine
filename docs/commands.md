@@ -83,6 +83,8 @@ mae run swarm-review "Review engine/ for bugs"
 mae run scout "engine/"
 ```
 
+If you want to run a configured chain, use `mae chain <chain-name> <task-description>` instead. `mae run` intentionally targets prompt workflows only.
+
 ---
 
 ## chain
@@ -119,6 +121,28 @@ mae chain swarm-review "Full review of engine/"
 ```
 Session 8fa2c1b3 completed. Cost: $2.456
 ```
+
+---
+
+## setup qmd
+
+Register the installed MAE repo as a qmd collection so validation and review agents can use indexed repo search before exploratory file walking.
+
+**Usage:**
+
+```bash
+mae setup qmd [--name <collection>] [--embed]
+```
+
+**Examples:**
+
+```bash
+mae setup qmd
+mae setup qmd --embed
+mae setup qmd --name multi-agent-engine --embed
+```
+
+Without `--embed`, qmd keyword search is available after indexing. Add `--embed` when semantic `qmd vsearch`/`qmd query` should work.
 
 ---
 

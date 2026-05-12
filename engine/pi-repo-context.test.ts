@@ -34,6 +34,7 @@ describe("pi repo context", () => {
     expect(context).toContain("- engine/");
     expect(context).toContain("Tracked file sample:");
     expect(context).toContain("- engine/cli.ts");
+    expect(context).toContain("search it first with `qmd search <terms>");
     expect(context).toContain("Use glob patterns such as **/*.ts");
     expect(context).toContain("Do not treat `find <directory>` returning only a few entries");
     expect(context).not.toContain(".env");

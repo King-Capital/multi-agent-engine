@@ -407,6 +407,12 @@ switch (command) {
 	      console.error("Usage: mae run <prompt-name> [args...]\nRun 'mae run --help' for available prompts.");
 	      process.exit(1);
 	    }
+    if (!configuredPrompts().includes(promptName) && configuredChains().includes(promptName)) {
+      console.error(`"${promptName}" is a chain, not a prompt workflow.`);
+      console.error(`Use: mae chain ${promptName} <task>`);
+      console.error("Run 'mae chain --help' for available chains or 'mae run --help' for prompt workflows.");
+      process.exit(1);
+    }
 	    const promptArgs = stripFlags(args.slice(2));
 	    const { orch } = await ensureRuntime({ announceAdapter: true });
 	    const session = await orch.run({

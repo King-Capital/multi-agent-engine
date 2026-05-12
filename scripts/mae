@@ -101,6 +101,18 @@ display_version() {
   fi
 }
 
+sync_install_version() {
+  local root="$1"
+  local version="unknown"
+  if [[ -f "$root/VERSION" ]]; then
+    version="$(tr -d '[:space:]' < "$root/VERSION")"
+  else
+    version="$MAE_VERSION"
+  fi
+  mkdir -p "$MAE_INSTALL_DIR"
+  printf '%s\n' "$version" > "$MAE_INSTALL_DIR/VERSION"
+}
+
 # ── Locate MAE root ──────────────────────────────────────────────────
 find_mae_root() {
   # 1. MAE_ROOT env var
@@ -264,6 +276,7 @@ CONF
   # Step 4: CLI binary
   echo "[4/4] Install CLI: $MAE_BIN"
   if ! $dry_run; then
+    sync_install_version "$MAE_REPO_DIR"
     mkdir -p "$(dirname "$MAE_BIN")"
     cp "$MAE_REPO_DIR/scripts/mae" "$MAE_BIN"
     chmod +x "$MAE_BIN"
@@ -460,6 +473,66 @@ HELP
         fi
       fi
       ;;
+    qmd)
+      local collection="mae"
+      local embed=false
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --name)
+            collection="${2:-}"
+            shift 2
+            ;;
+          --name=*)
+            collection="${1#--name=}"
+            shift
+            ;;
+          --embed)
+            embed=true
+            shift
+            ;;
+          -h|--help)
+            cat <<'HELP'
+mae setup qmd [--name <collection>] [--embed]
+
+Registers the installed MAE repo as a qmd collection for fast repo search.
+Default collection name: mae
+
+Examples:
+  mae setup qmd
+  mae setup qmd --embed
+  mae setup qmd --name multi-agent-engine --embed
+HELP
+            exit 0
+            ;;
+          *)
+            echo "Unknown setup qmd option: $1"
+            echo "Run: mae setup qmd --help"
+            exit 1
+            ;;
+        esac
+      done
+
+      if [[ -z "$collection" ]]; then
+        echo "qmd collection name required."
+        exit 1
+      fi
+      if ! command -v qmd >/dev/null 2>&1; then
+        echo "qmd not found. Install qmd before running mae setup qmd."
+        exit 1
+      fi
+
+      echo "Registering qmd collection '$collection' for $root..."
+      if qmd ls "$collection" >/dev/null 2>&1; then
+        qmd update
+      else
+        qmd collection add "$root" --name "$collection" --mask '**/*.{ts,tsx,js,jsx,md,yaml,yml,json,toml,sh}'
+      fi
+      if $embed; then
+        qmd embed
+      else
+        echo "Skipping embeddings. Run 'mae setup qmd --embed' to enable semantic search."
+      fi
+      ;;
     help|--help|-h|"")
       cat <<'HELP'
 mae setup — Configure optional MAE integrations
@@ -467,12 +540,14 @@ mae setup — Configure optional MAE integrations
 Commands:
   mae setup a2a --standard         Configure/test standard MAE A2A delegation
   mae setup a2a --url <endpoint>   Configure/test custom remote A2A delegation
+  mae setup qmd [--embed]          Register this repo as a qmd collection
 
 Examples:
   mae setup a2a --standard
   mae setup a2a --host 10.71.20.120
   mae setup a2a --url http://10.71.20.120:3210
   mae setup a2a --url http://10.71.20.120:3210 --default-adapter
+  mae setup qmd --embed
 HELP
       ;;
     *)
@@ -515,6 +590,7 @@ do_update() {
   # Reinstall engine deps in case they changed
   echo "Updating engine dependencies..."
   cd "$root/engine" && bun install
+  sync_install_version "$root"
 
   # Update the CLI script itself
   if [[ -f "$MAE_BIN" ]]; then
@@ -583,6 +659,7 @@ Lifecycle:
   mae install              Clone repo, install engine deps, create config
   mae install --dry-run    Preview install steps without making changes
   mae setup a2a            Configure/test optional A2A delegation
+  mae setup qmd            Register repo with qmd for indexed code search
   mae update               Pull latest, reinstall deps, update CLI
   mae uninstall            Remove CLI and optionally the repo
 
