@@ -112,6 +112,7 @@ export async function buildPiRepoContext(workingDir: string): Promise<string> {
     trackedFiles.length ? "Tracked file sample:" : "",
     ...trackedFiles.map((file) => `- ${file}`),
     "File discovery guidance:",
+    "- If `qmd` is installed and this repo has a qmd collection, search it first with `qmd search <terms> -c <collection> --files` or retrieve known files with `qmd get <collection>/<path>`.",
     "- Use glob patterns such as **/*.ts or exact read paths for repo discovery.",
     "- Do not treat `find <directory>` returning only a few entries as evidence that a repo is empty.",
     "- This manifest was computed by MAE from the host filesystem before the Pi agent started.",

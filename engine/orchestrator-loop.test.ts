@@ -228,6 +228,27 @@ describe("OrchestratorLoop", () => {
     expect(adapter.delegateCalls.length).toBe(0);
   });
 
+  test("periodic cycles are skipped while paused", async () => {
+    const { loop, adapter, session } = createLoop(JSON.stringify({
+      assessment: "ok", actions: [{ type: "CONTINUE" }],
+    }), { intervalMs: 25 });
+    activeLoop = loop;
+    session.status = "paused";
+    loop.start();
+    await Bun.sleep(80);
+    expect(adapter.delegateCalls.length).toBe(0);
+  });
+
+  test("user messages still run while paused", async () => {
+    const { loop, adapter, session } = createLoop(JSON.stringify({
+      assessment: "ok", actions: [{ type: "CONTINUE" }],
+    }));
+    activeLoop = loop;
+    session.status = "paused";
+    await loop.handleUserMessage("ping");
+    expect(adapter.delegateCalls.length).toBe(1);
+  });
+
   test("session cost is tracked", async () => {
     const { loop, session } = createLoop(JSON.stringify({
       assessment: "ok", actions: [{ type: "CONTINUE" }],

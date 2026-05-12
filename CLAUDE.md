@@ -66,7 +66,8 @@ multi-agent-engine/
 | Command | Description |
 |---------|-------------|
 | `mae task "description"` | Run a task (auto-classifies chain, or use `--chain name`) |
-| `mae run <chain> "task"` | Run with explicit chain |
+| `mae chain <chain> "task"` | Run with explicit chain |
+| `mae run <prompt> [args...]` | Run a reusable prompt workflow from `prompts/` |
 | `mae traces` | List recent trace files |
 | `mae traces <id>` | Show trace summary |
 | `mae score <id>` | Score a session with deterministic checks |

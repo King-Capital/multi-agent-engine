@@ -193,6 +193,14 @@ export class OrchestratorLoop {
     trigger: OrchestratorTrigger,
     context?: Record<string, unknown>,
   ): Promise<void> {
+    if (!this.shouldRunCycle(trigger)) {
+      log.info("Cycle skipped", {
+        trigger,
+        status: this.opts.session.status,
+        session_id: this.opts.session.id,
+      });
+      return;
+    }
     if (this.cycleInFlight) return;
     this.cycleInFlight = true;
     this.lastCycleAt = Date.now();
@@ -266,6 +274,13 @@ export class OrchestratorLoop {
       const waiters = this.idleWaiters.splice(0);
       for (const resolve of waiters) resolve();
     }
+  }
+
+  private shouldRunCycle(trigger: OrchestratorTrigger): boolean {
+    const status = this.opts.session.status;
+    if (status === "completed" || status === "error") return false;
+    if (status === "paused" && trigger !== "user_message") return false;
+    return true;
   }
 
   private buildContextWindow(
