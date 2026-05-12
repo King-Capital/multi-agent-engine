@@ -307,6 +307,7 @@ export async function runAgent(
     parentId,
     teamName,
     teamColor,
+    abortSignal: session.abortSignal,
     onStreamEvent: buildStreamHandler({
       emitter, sessionId: session.id, agentId,
       trackToolCall: (id, tool) => trackToolCall(agentActivity, id, tool),

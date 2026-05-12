@@ -37,6 +37,12 @@ export interface WorkerLifecycleDeps {
   pausedSessions?: Set<string>;
 }
 
+function assertSessionActive(session: SessionState, phase: string): void {
+  if (session.status === "error" || session.abortSignal?.aborted === true) {
+    throw new Error(`Session stopped by user during ${phase}`);
+  }
+}
+
 /**
  * Retry a worker with a reworked prompt from the lead's review.
  */
@@ -53,6 +59,7 @@ export async function retryWorker(
   step: ChainStep,
 ): Promise<DelegateResult> {
   const { emitter, messageSenders, trackToolCall, checkBudget, orchestratorLoop, pausedSessions } = deps;
+  assertSessionActive(session, "worker retry");
   const workerPersona = loadPersona(member.path);
   const baseWorkerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   const workerId = `${baseWorkerId}-retry-${attempt}`;
@@ -89,6 +96,7 @@ export async function retryWorker(
     parentId: leadId,
     teamName: teamConfig["team-name"],
     teamColor: member.color ?? teamConfig["team-color"],
+    abortSignal: session.abortSignal,
     onStreamEvent: buildStreamHandler({
       emitter, sessionId: session.id, agentId: workerId,
       trackToolCall, messageSenders, orchestratorLoop, pausedSessions, session,
@@ -146,6 +154,7 @@ export async function spawnSenior(
   step: ChainStep,
 ): Promise<DelegateResult> {
   const { emitter, messageSenders, trackToolCall, checkBudget, orchestratorLoop, pausedSessions } = deps;
+  assertSessionActive(session, "senior spawn");
   const domainNames = failedReview.srDomains ?? [];
   const srId = `${step.team}-sr-${domainNames.join("-").toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 
@@ -232,6 +241,7 @@ export async function spawnSenior(
     parentId: leadId,
     teamName: teamConfig["team-name"],
     teamColor: "#ffaa00",
+    abortSignal: session.abortSignal,
     onStreamEvent: buildStreamHandler({
       emitter, sessionId: session.id, agentId: srId,
       trackToolCall, messageSenders, orchestratorLoop, pausedSessions, session,
@@ -287,6 +297,7 @@ export async function leadReviewWorkers(
   leadId: string,
 ): Promise<WorkerReview[]> {
   const { emitter, messageSenders, trackToolCall, orchestratorLoop, pausedSessions } = deps;
+  assertSessionActive(session, "lead review");
 
   log.info("Lead reviewing workers", { lead: teamConfig.lead.name, worker_count: workerResults.length, session_id: session.id });
 
@@ -349,6 +360,7 @@ export async function leadReviewWorkers(
     parentId: "orch-1",
     teamName: teamConfig["team-name"],
     teamColor: teamConfig["team-color"],
+    abortSignal: session.abortSignal,
     onStreamEvent: buildStreamHandler({
       emitter, sessionId: session.id, agentId: leadId,
       trackToolCall, messageSenders, orchestratorLoop, pausedSessions, session,

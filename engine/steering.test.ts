@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { sendUserMessage } from "./messaging";
+import { sendUserMessage, broadcastControlMessage } from "./messaging";
 
 describe("steering commands (#147)", () => {
   describe("message routing", () => {
@@ -27,6 +27,21 @@ describe("steering commands (#147)", () => {
       senders.set("sess-1:agent-1", () => {});
       // Should not throw
       sendUserMessage(senders, "unknown-session", "hello");
+    });
+
+    test("control broadcast reaches all active agents in the session", () => {
+      const received: Record<string, string[]> = { a1: [], a2: [], other: [] };
+      const senders = new Map<string, (msg: string) => void>();
+      senders.set("sess-1:agent-1", (msg) => received["a1"]!.push(msg));
+      senders.set("sess-1:agent-2", (msg) => received["a2"]!.push(msg));
+      senders.set("sess-2:agent-1", (msg) => received["other"]!.push(msg));
+
+      const delivered = broadcastControlMessage(senders, "sess-1", "!stop");
+
+      expect(delivered).toBe(2);
+      expect(received["a1"]).toEqual(["!stop"]);
+      expect(received["a2"]).toEqual(["!stop"]);
+      expect(received["other"]).toEqual([]);
     });
   });
 

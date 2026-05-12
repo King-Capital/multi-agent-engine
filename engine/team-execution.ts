@@ -112,6 +112,16 @@ function findTeamMember(teamConfig: TeamConfig, review: WorkerReview) {
   });
 }
 
+function isSessionStopped(session: SessionState): boolean {
+  return session.status === "error" || session.abortSignal?.aborted === true;
+}
+
+function assertSessionActive(session: SessionState, phase: string): void {
+  if (isSessionStopped(session)) {
+    throw new Error(`Session stopped by user during ${phase}`);
+  }
+}
+
 export function buildFailedWorkerReviews(
   step: ChainStep,
   teamConfig: TeamConfig,
@@ -252,6 +262,7 @@ export async function prepareTeamStep(
     parentId: "orch-1",
     teamName: teamConfig["team-name"],
     teamColor: teamConfig["team-color"],
+    abortSignal: session.abortSignal,
     onStreamEvent: buildStreamHandler({
       emitter, sessionId: session.id, agentId: leadId,
       trackToolCall, messageSenders, orchestratorLoop: deps.orchestratorLoop,
@@ -328,6 +339,7 @@ export async function executeWorkers(
 ): Promise<WorkerExecutionResult> {
   const { emitter, messageSenders, trackActivity, untrackActivity, trackToolCall } = deps;
 
+  assertSessionActive(session, "worker spawn");
   const useWorktrees = teamConfig.members.length > 1 && await isGitRepo(session.workingDir);
   const workerWtIds: string[] = [];
   const workerAssignments = new Map<string, string>();
@@ -349,6 +361,7 @@ export async function executeWorkers(
 
   const workerPromises = teamConfig.members.map(async (member) => {
     const runWorker = async () => {
+      assertSessionActive(session, "worker start");
       const workerPersona = loadPersona(member.path);
       const workerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
 
@@ -391,6 +404,7 @@ export async function executeWorkers(
         parentId: leadId,
         teamName: teamConfig["team-name"],
         teamColor: member.color ?? teamConfig["team-color"],
+        abortSignal: session.abortSignal,
         onStreamEvent: buildStreamHandler({
           emitter, sessionId: session.id, agentId: workerId,
           trackToolCall, messageSenders, orchestratorLoop: deps.orchestratorLoop,
@@ -744,11 +758,14 @@ export async function runTeamStep(
 ): Promise<DelegateResult> {
   const adapter = deps.getAdapter(adapterName);
 
+  assertSessionActive(session, "team step start");
+
   // 1. Prepare lead prompt, config, delegate options
   const prepared = await prepareTeamStep(deps, session, step, task, previousOutput, adapter);
 
   // 2. Delegate to lead, get result (may early-return if lead fails or no workers)
   const leadDelegation = await delegateToLead(deps, session, prepared, adapter);
+  assertSessionActive(session, "lead delegation");
   if (leadDelegation.earlyReturn) return leadDelegation.earlyReturn;
 
   // 3. Spawn workers in parallel, collect results
@@ -759,6 +776,7 @@ export async function runTeamStep(
 
   // 4. Merge worker worktrees (always runs, even if workers threw)
   await mergeWorkerWorktrees(deps, session, execution.workerWtIds);
+  assertSessionActive(session, "worker execution");
 
   // 5. Accumulate costs, build failure notice
   const accumulated = await accumulateWorkerCosts(
@@ -962,6 +980,7 @@ export async function runParallelStep(
     parentId: "orch-1",
     teamName: "Synthesis",
     teamColor: "#a855f7",
+    abortSignal: session.abortSignal,
     onStreamEvent: buildStreamHandler({
       emitter, sessionId: session.id, agentId: synthId,
       trackToolCall: trackTool, messageSenders, orchestratorLoop: deps.orchestratorLoop,

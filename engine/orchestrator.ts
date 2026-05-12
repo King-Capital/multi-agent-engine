@@ -24,7 +24,7 @@ import type { AgentActivity } from "./monitoring";
 import { ActiveMonitor } from "./active-monitor";
 import { loadBudgets, checkBudget } from "./budget";
 import type { BudgetState } from "./budget";
-import { sendUserMessage, listenForUserMessages, stopListening } from "./messaging";
+import { sendUserMessage, broadcastControlMessage, listenForUserMessages, stopListening } from "./messaging";
 import { OrchestratorLoop } from "./orchestrator-loop";
 import { ConcurrencyLimiter } from "./concurrency";
 
@@ -64,6 +64,7 @@ export class Orchestrator {
   private skippedSteps = new Set<number>();
   private originalStepCount = 0;
   private orchestratorLoop: OrchestratorLoop | null = null;
+  private sessionAborts: Map<string, AbortController> = new Map();
 
   constructor(dashboardUrl?: string, apiToken?: string) {
     this.dashboardUrl = dashboardUrl ?? process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400";
@@ -80,11 +81,14 @@ export class Orchestrator {
     for (const [id, session] of this.sessions) {
       if (session.status === "active" || session.status === "paused") {
         transitionStatus(session, "error", "orchestrator:shutdown");
+        this.sessionAborts.get(id)?.abort("Orchestrator shutdown");
+        broadcastControlMessage(this.messageSenders, id, "!stop");
         this.activeMonitor?.stop();
         stopListening(this.sseAbort);
         await this.emitter.sessionEnd(id, session.status);
       }
     }
+    this.sessionAborts.clear();
     this.sessions.clear();
   }
 
@@ -156,8 +160,9 @@ export class Orchestrator {
         this.pausedSessions.delete(sessionId);
         this.activeMonitor?.stop();
         this.orchestratorLoop?.stop();
+        this.sessionAborts.get(sessionId)?.abort("Session stopped by user");
         stopListening(this.sseAbort);
-        sendUserMessage(this.messageSenders, sessionId, "!stop");
+        broadcastControlMessage(this.messageSenders, sessionId, "!stop");
         await emit("session_end", "Session stopped by user.");
         break;
       }
@@ -222,6 +227,7 @@ export class Orchestrator {
     const taskSummary = (taskBody.split("\n")[0] ?? "").replace(/^#+\s*/, "").slice(0, 50).trim();
     const sessionName = opts.sessionName ?? `${taskSummary || chainName}`;
 
+    const sessionAbort = new AbortController();
     const session: SessionState = {
       id: sessionId,
       name: sessionName,
@@ -229,6 +235,7 @@ export class Orchestrator {
       task: taskBody,
       workingDir: opts.workingDir ?? process.cwd(),
       status: "active",
+      abortSignal: sessionAbort.signal,
       agents: new Map(),
       tillDone: buildTillDone(chain),
       events: [],
@@ -237,6 +244,7 @@ export class Orchestrator {
       startedAt: new Date(),
     };
     this.sessions.set(sessionId, session);
+    this.sessionAborts.set(sessionId, sessionAbort);
 
     // Create pipeline state tracker for checkpoint/resume
     const pipeline = new PipelineTracker(sessionId, sessionName, chainName, taskBody);
@@ -276,8 +284,12 @@ export class Orchestrator {
     const chainRunnerDeps = this.buildChainRunnerDeps();
     try {
       await runChain(chainRunnerDeps, session, chain, taskBody, opts.adapter);
-      transitionStatus(session, "completed", "orchestrator:run");
-      pipeline?.complete();
+      if (session.status === "error" || sessionAbort.signal.aborted) {
+        pipeline?.fail("Session stopped by user.");
+      } else {
+        transitionStatus(session, "completed", "orchestrator:run");
+        pipeline?.complete();
+      }
     } catch (err) {
       transitionStatus(session, "error", "orchestrator:run:catch");
       pipeline?.fail(String(err));
@@ -298,6 +310,7 @@ export class Orchestrator {
     }
     this.orchestratorLoop = null;
     this.actionQueues.delete(sessionId);
+    this.sessionAborts.delete(sessionId);
     await this.emitter.sessionEnd(sessionId, session.status);
     stopListening(this.sseAbort);
     this.sseAbort = null;
