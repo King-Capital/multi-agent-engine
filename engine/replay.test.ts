@@ -7,6 +7,8 @@ import {
   compareFingerprints,
   scoreSession,
   addGoldenTrace,
+  addValidatedGoldenTrace,
+  validateGoldenTrace,
   getGoldenTraces,
   listGoldenCandidates,
 } from "./replay";
@@ -432,6 +434,61 @@ describe("replay", () => {
 
       const entries = getGoldenTraces(TEST_DIR);
       expect(entries).toHaveLength(2);
+    });
+
+    test("validateGoldenTrace summarizes a usable golden trace", () => {
+      writeTrace("validated", buildTraceEvents("validated", {
+        goal: "Reference build",
+        chain: "build-verify",
+        extraEvents: [
+          { ts: "2026-05-11T00:00:01.000Z", type: "chain.step.start", id: "cs1", session_id: "validated", step: 1 },
+          { ts: "2026-05-11T00:00:02.000Z", type: "llm.call", id: "llm1", session_id: "validated", model: "sonnet" },
+          { ts: "2026-05-11T00:00:03.000Z", type: "chain.step.end", id: "ce1", session_id: "validated", step: 1, status: "completed" },
+        ],
+      }));
+
+      const summary = validateGoldenTrace("validated", "pass", { traceDirOverride: TEST_DIR });
+
+      expect(summary.goal).toBe("Reference build");
+      expect(summary.chain).toBe("build-verify");
+      expect(summary.eventCount).toBe(5);
+      expect(summary.hasLlmCall).toBe(true);
+      expect(summary.hasChainStepStart).toBe(true);
+      expect(summary.scoreOverall).toBe("pass");
+    });
+
+    test("addValidatedGoldenTrace refuses failed verdicts unless forced", () => {
+      writeTrace("known-bad", buildTraceEvents("known-bad", {
+        status: "error",
+        extraEvents: [
+          { ts: "2026-05-11T00:00:01.000Z", type: "chain.step.start", id: "cs1", session_id: "known-bad", step: 1 },
+          { ts: "2026-05-11T00:00:02.000Z", type: "llm.call", id: "llm1", session_id: "known-bad", model: "sonnet" },
+          { ts: "2026-05-11T00:00:03.000Z", type: "chain.step.end", id: "ce1", session_id: "known-bad", step: 1, status: "completed" },
+        ],
+      }));
+
+      expect(() => addValidatedGoldenTrace("known-bad", "fail", "bad run", { traceDirOverride: TEST_DIR })).toThrow(/without --force/);
+
+      const summary = addValidatedGoldenTrace("known-bad", "fail", "bad run", { force: true, traceDirOverride: TEST_DIR });
+      expect(summary.verdict).toBe("fail");
+      expect(getGoldenTraces(TEST_DIR)[0]!.sessionId).toBe("known-bad");
+    });
+
+    test("addValidatedGoldenTrace requires llm and chain step events", () => {
+      writeTrace("no-llm", buildTraceEvents("no-llm", {
+        extraEvents: [
+          { ts: "2026-05-11T00:00:01.000Z", type: "chain.step.start", id: "cs1", session_id: "no-llm", step: 1 },
+          { ts: "2026-05-11T00:00:02.000Z", type: "chain.step.end", id: "ce1", session_id: "no-llm", step: 1, status: "completed" },
+        ],
+      }));
+      writeTrace("no-step", buildTraceEvents("no-step", {
+        extraEvents: [
+          { ts: "2026-05-11T00:00:01.000Z", type: "llm.call", id: "llm1", session_id: "no-step", model: "sonnet" },
+        ],
+      }));
+
+      expect(() => addValidatedGoldenTrace("no-llm", "pass", undefined, { traceDirOverride: TEST_DIR })).toThrow(/llm.call/);
+      expect(() => addValidatedGoldenTrace("no-step", "pass", undefined, { traceDirOverride: TEST_DIR })).toThrow(/chain.step.start/);
     });
 
     test("listGoldenCandidates ranks bigger traces and shows existing verdicts", () => {

@@ -5,7 +5,7 @@ import { parseFindings } from "./ralph-evaluator";
 import type { EvaluatorFinding } from "./ralph-evaluator";
 import { parseMutations } from "./ralph-evolver";
 import type { ConfigMutation } from "./ralph-evolver";
-import { applyMutation, numericScore, runRalphLoop } from "./ralph-loop";
+import { applyMutation, numericScore, runRalphLoop, verifyMutation } from "./ralph-loop";
 import { addGoldenTrace } from "./replay";
 import type { ReplayScore, BehavioralFingerprint } from "./replay";
 
@@ -58,6 +58,23 @@ function buildTraceEvents(
 
 function writePersona(slug: string, content: string): void {
   writeFileSync(join(PERSONA_DIR, `${slug}.md`), content);
+}
+
+function writePassingGolden(sessionId: string, persona = "Test Agent"): void {
+  writeTrace(sessionId, buildTraceEvents(sessionId, {
+    goal: "Passing golden",
+    chain: "build-verify",
+    status: "completed",
+    totalCost: 0.05,
+    extraEvents: [
+      { ts: "2026-05-11T00:00:01.000Z", type: "chain.step.start", id: `${sessionId}-cs`, session_id: sessionId, step: 1 },
+      { ts: "2026-05-11T00:00:02.000Z", type: "agent.start", id: `${sessionId}-as`, session_id: sessionId, agent_id: "test-agent-1", persona, team: "Engineering" },
+      { ts: "2026-05-11T00:00:03.000Z", type: "llm.call", id: `${sessionId}-llm`, session_id: sessionId, agent_id: "test-agent-1", model: "sonnet" },
+      { ts: "2026-05-11T00:00:04.000Z", type: "agent.end", id: `${sessionId}-ae`, session_id: sessionId, agent_id: "test-agent-1", persona, output_preview: "done" },
+      { ts: "2026-05-11T00:00:05.000Z", type: "chain.step.end", id: `${sessionId}-ce`, session_id: sessionId, step: 1, status: "completed" },
+    ],
+  }));
+  addGoldenTrace(sessionId, "pass", "test golden", TRACE_DIR);
 }
 
 const SAMPLE_PERSONA = `---
@@ -559,6 +576,95 @@ describe("ralph-loop", () => {
       expect(result.suggestions[0]!.targetType).toBe("persona");
       expect(result.accepted).toBe(0);
       expect(result.rejected).toBe(0);
+      expect(readFileSync(join(PERSONA_DIR, "test-agent.md"), "utf-8")).toBe(originalContent);
+    });
+
+    test("verifyMutation refuses apply when golden coverage is insufficient", async () => {
+      writePersona("test-agent", SAMPLE_PERSONA);
+      writePassingGolden("golden-one");
+      const originalContent = readFileSync(join(PERSONA_DIR, "test-agent.md"), "utf-8");
+
+      const mutation: ConfigMutation = {
+        persona: "test-agent",
+        field: "system_prompt",
+        action: "append",
+        content: "Always include replay evidence before claiming success.",
+        reasoning: "Require evidence-backed output",
+      };
+
+      const result = await verifyMutation(mutation, {
+        traceDir: TRACE_DIR,
+        personaDir: PERSONA_DIR,
+        journalPath: join(TEST_DIR, "journal.jsonl"),
+      });
+
+      expect(result.status).toBe("needs_verification");
+      expect(result.reason).toContain("Insufficient passing golden coverage");
+      expect(readFileSync(join(PERSONA_DIR, "test-agent.md"), "utf-8")).toBe(originalContent);
+    });
+
+    test("verifyMutation dry-run passes ratchet and restores persona file", async () => {
+      writePersona("test-agent", SAMPLE_PERSONA);
+      writePassingGolden("golden-a");
+      writePassingGolden("golden-b");
+      writePassingGolden("golden-c");
+      const originalContent = readFileSync(join(PERSONA_DIR, "test-agent.md"), "utf-8");
+
+      const mutation: ConfigMutation = {
+        persona: "test-agent",
+        field: "system_prompt",
+        action: "append",
+        content: "Always include replay evidence before claiming success.",
+        reasoning: "Require evidence-backed output",
+      };
+
+      const result = await verifyMutation(mutation, {
+        traceDir: TRACE_DIR,
+        personaDir: PERSONA_DIR,
+        dryRun: true,
+        journalPath: join(TEST_DIR, "journal.jsonl"),
+        replayRunner: async (golden) => ({ ...golden, sessionId: `${golden.sessionId}-replay` }),
+        getJudgeScoresFn: async () => null,
+      });
+
+      expect(result.status).toBe("dry_run");
+      expect(result.coverage).toBe(3);
+      expect(result.tested).toHaveLength(3);
+      expect(readFileSync(join(PERSONA_DIR, "test-agent.md"), "utf-8")).toBe(originalContent);
+    });
+
+    test("verifyMutation rejects and restores when replay deterministic checks fail", async () => {
+      writePersona("test-agent", SAMPLE_PERSONA);
+      writePassingGolden("golden-x");
+      writePassingGolden("golden-y");
+      writePassingGolden("golden-z");
+      const originalContent = readFileSync(join(PERSONA_DIR, "test-agent.md"), "utf-8");
+
+      const mutation: ConfigMutation = {
+        persona: "test-agent",
+        field: "system_prompt",
+        action: "append",
+        content: "Always include replay evidence before claiming success.",
+        reasoning: "Require evidence-backed output",
+      };
+
+      const result = await verifyMutation(mutation, {
+        traceDir: TRACE_DIR,
+        personaDir: PERSONA_DIR,
+        journalPath: join(TEST_DIR, "journal.jsonl"),
+        replayRunner: async (golden) => ({
+          ...golden,
+          sessionId: `${golden.sessionId}-bad`,
+          events: [
+            ...golden.events,
+            { ts: "2026-05-11T00:00:06.000Z", type: "agent.error", id: `${golden.sessionId}-err`, session_id: `${golden.sessionId}-bad`, error: "failed" },
+          ],
+        }),
+        getJudgeScoresFn: async () => null,
+      });
+
+      expect(result.status).toBe("rejected");
+      expect(result.tested[0]!.failedChecks.some((check) => check.includes("no_agent_failures"))).toBe(true);
       expect(readFileSync(join(PERSONA_DIR, "test-agent.md"), "utf-8")).toBe(originalContent);
     });
 

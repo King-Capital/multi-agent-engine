@@ -256,6 +256,17 @@ export interface ConcurrencyConfig {
   max_concurrent_per_team: number;
 }
 
+export interface RatchetConfig {
+  min_golden_coverage?: number;
+  max_cost_multiplier?: number;
+  max_judge_regression?: number;
+  judge_model?: string;
+  judge_ratchet_model?: string;
+  judge_max_traces_per_run?: number;
+  judge_cache_days?: number;
+  require_langfuse_scores?: boolean;
+}
+
 export interface ModelRoutingConfig {
   tiers: Record<string, TierConfig>;
   aliases?: Record<string, string>;
@@ -264,6 +275,7 @@ export interface ModelRoutingConfig {
   crossModelPairs?: { builder: string; verifier: string }[];
   budgets?: { max_per_session_usd: number; warn_at_usd: number; max_per_agent_usd: number; max_total_tokens: number; budget_action?: "warn" | "pause" };
   concurrency?: ConcurrencyConfig;
+  ratchet?: RatchetConfig;
 }
 
 export interface StreamEvent {

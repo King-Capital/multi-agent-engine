@@ -22,6 +22,8 @@ import type {
   StreamEvent,
 } from "../types";
 import { createLogger } from "../logger";
+import { sanitizeAgentInput } from "../security";
+import { trackPromptVersion } from "../langfuse-prompts";
 
 const log = createLogger("a2a-adapter");
 
@@ -166,10 +168,46 @@ export class A2AAdapter implements PlatformAdapter {
 
   async delegate(opts: DelegateOptions): Promise<DelegateResult> {
     const agentId = `a2a-${opts.persona.name.toLowerCase().replace(/\s+/g, "-")}`;
+    const sessionId = opts.sessionDir?.split(/[\\/]/).pop() ?? undefined;
     const endpoint = this.resolveEndpoint(opts.persona.name, opts.teamName);
+    const startedAt = Date.now();
+    const promptMeta = trackPromptVersion(opts.persona.name, opts.systemPrompt, {
+      workingDir: opts.workingDir,
+      sourceRoot: process.cwd(),
+      team: opts.teamName,
+    });
+
+    const finish = (result: DelegateResult): DelegateResult => {
+      log.info("Agent completed", {
+        trace_type: "agent.end",
+        session_id: sessionId,
+        agent_id: agentId,
+        persona: opts.persona.name,
+        team: opts.teamName,
+        status: result.grade === "FAILED" ? "failed" : "completed",
+        grade: result.grade,
+        cost: result.costUsd ?? 0,
+        tokens: result.tokensUsed ?? 0,
+        duration_ms: Date.now() - startedAt,
+        output_preview: sanitizeAgentInput(result.output ?? "").slice(0, 500),
+      });
+      return result;
+    };
+
+    log.info("Delegating to remote agent", {
+      trace_type: "agent.start",
+      session_id: sessionId,
+      agent_id: agentId,
+      persona: opts.persona.name,
+      team: opts.teamName,
+      model: opts.model,
+      endpoint: endpoint?.url,
+      system_prompt_length: opts.systemPrompt.length,
+      ...promptMeta,
+    });
 
     if (!endpoint) {
-      return {
+      return finish({
         agentId,
         agentName: opts.persona.name,
         output: "ERROR: No A2A endpoint configured for this agent/team",
@@ -177,7 +215,7 @@ export class A2AAdapter implements PlatformAdapter {
         findings: ["no_endpoint"],
         costUsd: 0,
         tokensUsed: 0,
-      };
+      });
     }
 
     const contextId = randomUUID();
@@ -205,8 +243,6 @@ export class A2AAdapter implements PlatformAdapter {
 
     const timeout = opts.timeoutMs ?? 300_000;
 
-    log.info("Delegating to remote agent", { agent_id: agentId, persona: opts.persona.name, endpoint: endpoint.url });
-
     try {
       // Try streaming first if supported
       const agentCard = this.agentCards.get(opts.persona.name.toLowerCase())
@@ -223,10 +259,10 @@ export class A2AAdapter implements PlatformAdapter {
         result = await this.delegateSync(endpoint, userMessage, opts, agentId, timeout);
       }
 
-      return result;
+      return finish(result);
     } catch (err) {
       log.error("Delegation failed", { agent_id: agentId, persona: opts.persona.name, error: (err as Error)?.message });
-      return {
+      return finish({
         agentId,
         agentName: opts.persona.name,
         output: `ERROR: A2A delegation failed: ${err}`,
@@ -234,7 +270,7 @@ export class A2AAdapter implements PlatformAdapter {
         findings: [`${err}`],
         costUsd: 0,
         tokensUsed: 0,
-      };
+      });
     }
   }
 

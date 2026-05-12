@@ -3,6 +3,8 @@ import { mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import type { PlatformAdapter, DelegateOptions, DelegateResult, StreamEvent, GradeLevel } from "../types";
 import { createLogger } from "../logger";
+import { sanitizeAgentInput } from "../security";
+import { trackPromptVersion } from "../langfuse-prompts";
 
 const log = createLogger("pi-adapter");
 
@@ -71,6 +73,12 @@ export class PiAdapter implements PlatformAdapter {
 
   async delegate(opts: DelegateOptions): Promise<DelegateResult> {
     const agentId = `pi-${opts.persona.name.toLowerCase().replace(/\s+/g, "-")}`;
+    const sessionId = opts.sessionDir?.split(/[\\/]/).pop() ?? undefined;
+    const promptMeta = trackPromptVersion(opts.persona.name, opts.systemPrompt, {
+      workingDir: opts.workingDir,
+      sourceRoot: process.cwd(),
+      team: opts.teamName,
+    });
 
     mkdirSync(opts.sessionDir, { recursive: true });
 
@@ -109,7 +117,19 @@ export class PiAdapter implements PlatformAdapter {
       }
     }
 
-    log.info("Spawning pi-rpc agent", { agent_id: agentId, model: piModel, skills: opts.persona.skills.length, working_dir: opts.workingDir });
+    log.info("Spawning pi-rpc agent", {
+      trace_type: "agent.start",
+      session_id: sessionId,
+      agent_id: agentId,
+      model: piModel,
+      persona: opts.persona.name,
+      team: opts.teamName,
+      role: (opts.persona as { role?: string }).role,
+      skills: opts.persona.skills.length,
+      working_dir: opts.workingDir,
+      system_prompt_length: (opts.persona as { systemPrompt?: string }).systemPrompt?.length ?? opts.systemPrompt.length,
+      ...promptMeta,
+    });
 
     const timeout = opts.timeoutMs ?? (PiAdapter.MODEL_TIMEOUTS[piModel] ?? 300_000);
 
@@ -123,6 +143,17 @@ export class PiAdapter implements PlatformAdapter {
       const safeResolve = (result: DelegateResult) => {
         if (resolved) return;
         resolved = true;
+        log.info("Agent completed", {
+          trace_type: "agent.end",
+          session_id: sessionId,
+          agent_id: agentId,
+          persona: opts.persona.name,
+          team: opts.teamName,
+          grade: result.grade,
+          cost: result.costUsd,
+          tokens: result.tokensUsed,
+          output_preview: sanitizeAgentInput(result.output ?? "").slice(0, 500),
+        });
         clearTimeout(timer);
         resolve(result);
       };
@@ -226,24 +257,19 @@ export class PiAdapter implements PlatformAdapter {
                   totalCost += cost;
                   totalTokens = tokens;
                   cacheReadTokens = cache;
+                }, {
+                  sessionId,
+                  agentId,
+                  persona: opts.persona.name,
+                  team: opts.teamName,
+                  model: piModel,
+                  prompt_name: promptMeta.prompt_name,
+                  prompt_version: promptMeta.prompt_version,
+                  prompt_hash: promptMeta.prompt_hash,
+                  prompt_context_repo: promptMeta.prompt_context_repo,
+                  prompt_context_root: promptMeta.prompt_context_root,
+                  prompt_context_stack: promptMeta.prompt_context_stack,
                 });
-
-                if (evt.type === "tool_execution_end") {
-                  const toolName = evt.toolName ?? "unknown";
-                  const isError = evt.isError ?? false;
-                  let toolResult = "";
-                  if (evt.result) {
-                    try {
-                      toolResult = (typeof evt.result === "string" ? evt.result : JSON.stringify(evt.result)).slice(0, 2000);
-                    } catch { /* ignore */ }
-                  }
-                  opts.onStreamEvent?.({
-                    type: "tool_result",
-                    tool: toolName,
-                    toolResult,
-                    status: isError ? "error" : "success",
-                  });
-                }
 
                 if (evt.type === "agent_end") {
                   const messages = evt.messages ?? [];
@@ -392,9 +418,20 @@ export class PiAdapter implements PlatformAdapter {
     evt: Record<string, unknown>,
     onStream: ((event: StreamEvent) => void) | undefined,
     onCost: (cost: number, tokens: number, cacheRead: number) => void,
+    context: {
+      sessionId?: string;
+      agentId: string;
+      persona: string;
+      team?: string;
+      model: string;
+      prompt_name?: string;
+      prompt_version?: string;
+      prompt_hash?: string;
+      prompt_context_repo?: string;
+      prompt_context_root?: string;
+      prompt_context_stack?: string;
+    },
   ): void {
-    if (!onStream) return;
-
     // Tool execution events — real-time tool call visibility
     if (evt.type === "tool_execution_start") {
       const toolName = (evt.toolName as string) ?? "unknown";
@@ -408,12 +445,44 @@ export class PiAdapter implements PlatformAdapter {
           toolArgs = JSON.stringify(args, null, 2).slice(0, 2000);
         } catch { /* ignore */ }
       }
-      onStream({
+      log.info("Tool call", {
+        trace_type: "tool.call",
+        session_id: context.sessionId,
+        agent_id: context.agentId,
+        tool: toolName,
+        args_preview: sanitizeAgentInput(filePath || toolArgs).slice(0, 200),
+      });
+      onStream?.({
         type: "tool_call",
         tool: toolName,
         filePath,
         toolArgs,
         status: "running",
+      });
+    }
+
+    if (evt.type === "tool_execution_end") {
+      const toolName = (evt.toolName as string) ?? "unknown";
+      const isError = (evt.isError as boolean) ?? false;
+      let toolResult = "";
+      if (evt.result) {
+        try {
+          toolResult = (typeof evt.result === "string" ? evt.result : JSON.stringify(evt.result)).slice(0, 2000);
+        } catch { /* ignore */ }
+      }
+      log.info("Tool call completed", {
+        trace_type: "tool.call",
+        session_id: context.sessionId,
+        agent_id: context.agentId,
+        tool: toolName,
+        success: !isError,
+        output_preview: sanitizeAgentInput(toolResult).slice(0, 500),
+      });
+      onStream?.({
+        type: "tool_result",
+        tool: toolName,
+        toolResult,
+        status: isError ? "error" : "success",
       });
     }
 
@@ -424,7 +493,7 @@ export class PiAdapter implements PlatformAdapter {
         // Don't emit individual deltas as full messages — accumulate
       }
       if (ame?.type === "text_end" && ame.content) {
-        onStream({
+        onStream?.({
           type: "assistant_text",
           content: ame.content as string,
         });
@@ -452,8 +521,29 @@ export class PiAdapter implements PlatformAdapter {
             );
           }
           if (finalCost > 0 || tokens > 0) {
+            const inputTokens = (usage.inputTokens as number) ?? (usage.input_tokens as number) ?? 0;
+            const outputTokens = (usage.outputTokens as number) ?? (usage.output_tokens as number) ?? 0;
+            log.info("LLM call completed", {
+              trace_type: "llm.call",
+              session_id: context.sessionId,
+              agent_id: context.agentId,
+              model: ((msg as Record<string, unknown>).model as string) ?? context.model,
+              prompt_tokens: inputTokens,
+              completion_tokens: outputTokens,
+              cache_read_tokens: cache,
+              total_tokens: tokens || inputTokens + outputTokens,
+              cost: finalCost,
+              persona: context.persona,
+              team: context.team,
+              prompt_name: context.prompt_name,
+              prompt_version: context.prompt_version,
+              prompt_hash: context.prompt_hash,
+              prompt_context_repo: context.prompt_context_repo,
+              prompt_context_root: context.prompt_context_root,
+              prompt_context_stack: context.prompt_context_stack,
+            });
             onCost(finalCost, tokens, cache);
-            onStream({ type: "cost", costUsd: finalCost, tokensUsed: tokens, cacheReadTokens: cache });
+            onStream?.({ type: "cost", costUsd: finalCost, tokensUsed: tokens, cacheReadTokens: cache });
           }
         }
       }
