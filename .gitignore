@@ -7,6 +7,8 @@ bun.lockb
 .DS_Store
 
 # Dashboard
+dashboard-bin
+dashboard-next-dist/
 dashboard/dashboard-bin
 dashboard/mae-dashboard
 dashboard/**/*_templ.go

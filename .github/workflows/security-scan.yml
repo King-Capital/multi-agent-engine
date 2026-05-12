@@ -16,10 +16,6 @@ concurrency:
   group: security-scan-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  GOPATH: /tmp/go
-  GOMODCACHE: /tmp/go/pkg/mod
-
 jobs:
   codeql:
     name: CodeQL
@@ -33,7 +29,15 @@ jobs:
 
       - name: Setup Go env
         run: |
+          echo "GOPATH=$RUNNER_TEMP/go" >> "$GITHUB_ENV"
+          echo "GOMODCACHE=$RUNNER_TEMP/go/pkg/mod" >> "$GITHUB_ENV"
+          echo "GOCACHE=$RUNNER_TEMP/go-build" >> "$GITHUB_ENV"
+          export GOPATH="$RUNNER_TEMP/go"
+          export GOMODCACHE="$RUNNER_TEMP/go/pkg/mod"
+          export GOCACHE="$RUNNER_TEMP/go-build"
           mkdir -p $GOPATH/pkg/mod
+          mkdir -p $GOPATH/pkg/sumdb
+          mkdir -p $GOCACHE
           cd dashboard && go mod download
 
       - name: Initialize CodeQL
@@ -42,11 +46,13 @@ jobs:
           languages: javascript-typescript, go
           queries: security-extended
 
+      - name: Generate Go templates
+        working-directory: dashboard
+        run: go run github.com/a-h/templ/cmd/templ@v0.3.1001 generate
+
       - name: Build Go
         working-directory: dashboard
-        run: |
-          export PATH=$PATH:/home/mae/go/bin:/root/go/bin
-          templ generate ./templates/ && go build ./...
+        run: go build ./...
 
       - name: Run CodeQL analysis
         uses: github/codeql-action/analyze@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4

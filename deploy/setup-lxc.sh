@@ -67,9 +67,17 @@ cd engine
 bun install
 cd ..
 
-# Build dashboard
+# Build dashboard SPA
+cd dashboard-next
+bun install
+bun run build
+cd ..
+rm -rf dashboard-next-dist
+cp -R dashboard-next/dist dashboard-next-dist
+
+# Build dashboard API
 cd dashboard
-templ generate ./templates/
+templ generate
 go build -o dashboard-bin .
 cd ..
 

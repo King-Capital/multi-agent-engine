@@ -234,7 +234,7 @@ mae discover http://agent-host:41271
 ```
 Discovered A2A agent:
   Name: Bilby
-  URL: http://10.71.20.71:41271
+  URL: http://agent-host:41271
   Skills:
     - code-review: Reviews code for quality and security
   Streaming: yes

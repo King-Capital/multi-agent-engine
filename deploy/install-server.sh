@@ -100,7 +100,7 @@ sudo -u "$MAE_USER" bash -c "cd $APP_DIR/engine && bun install --silent"
 # 9. Build dashboard
 info "Building dashboard..."
 cd "$APP_DIR/dashboard"
-sudo -u "$MAE_USER" bash -c "cd $APP_DIR/dashboard && templ generate ./templates/ 2>/dev/null; go build -o mae-dashboard ."
+sudo -u "$MAE_USER" bash -c "cd $APP_DIR/dashboard && templ generate && go build -o mae-dashboard ."
 
 # 10. Build SPA
 info "Building dashboard SPA..."

@@ -146,7 +146,7 @@ Set these environment variables to enable Langfuse:
 ```bash
 LANGFUSE_PUBLIC_KEY="pk-lf-..."
 LANGFUSE_SECRET_KEY="sk-lf-..."
-LANGFUSE_HOST="http://your-langfuse-host:3000"  # Optional, defaults to http://10.71.20.73:3000
+LANGFUSE_HOST="http://your-langfuse-host:3000"  # Optional, defaults to http://localhost:3000
 ```
 
 When both keys are set, MAE automatically registers a Langfuse sink that sends data in real time. When not set, Langfuse is silently disabled -- no errors, no impact on operation.

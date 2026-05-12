@@ -60,7 +60,7 @@ describe("config loading", () => {
 
 describe("orchestrator with echo adapter", () => {
   test("runs plan-build-review chain", async () => {
-    const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
+    const orch = new Orchestrator("");
     orch.registerAdapter(new EchoAdapter());
     orch.setDefaultAdapter("echo");
 
@@ -75,7 +75,7 @@ describe("orchestrator with echo adapter", () => {
   }, INTEGRATION_TIMEOUT_MS);
 
   test("runs scout-then-plan chain", async () => {
-    const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
+    const orch = new Orchestrator("");
     orch.registerAdapter(new EchoAdapter());
     orch.setDefaultAdapter("echo");
 
@@ -89,7 +89,7 @@ describe("orchestrator with echo adapter", () => {
   });
 
   test("runs review-only chain", async () => {
-    const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
+    const orch = new Orchestrator("");
     orch.registerAdapter(new EchoAdapter());
     orch.setDefaultAdapter("echo");
 
@@ -103,7 +103,7 @@ describe("orchestrator with echo adapter", () => {
   });
 
   test("runs prompt-based workflow", async () => {
-    const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
+    const orch = new Orchestrator("");
     orch.registerAdapter(new EchoAdapter());
     orch.setDefaultAdapter("echo");
 
@@ -147,7 +147,7 @@ describe("team configs", () => {
 
 describe("steering", () => {
   test("routes @agent-name message to correct agent", () => {
-    const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
+    const orch = new Orchestrator("");
     
     // Simulate message senders registered by the adapter
     const received: { agent: string; message: string }[] = [];
@@ -169,7 +169,7 @@ describe("steering", () => {
   });
 
   test("broadcasts to first agent when no @target", () => {
-    const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
+    const orch = new Orchestrator("");
     const received: string[] = [];
     
     const orchAny = orch as any;
@@ -186,7 +186,7 @@ describe("steering", () => {
   });
 
   test("acknowledges frontend steer messages immediately and passes them to the orchestrator loop", async () => {
-    const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
+    const orch = new Orchestrator("");
     const messages: { content: string; metadata: Record<string, unknown> }[] = [];
     const loopMessages: string[] = [];
 
@@ -219,7 +219,7 @@ describe("steering", () => {
   });
 
   test("pause and resume commands update session state and PG status", async () => {
-    const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
+    const orch = new Orchestrator("");
     const session = { id: "session-1", status: "active" };
     const messages: string[] = [];
     const events: string[] = [];
@@ -329,7 +329,7 @@ describe("pipeline state tracking", () => {
     const { join } = require("path");
     const tmpDir = mkdtempSync(join(require("os").tmpdir(), "mae-pipe-"));
     
-    const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
+    const orch = new Orchestrator("");
     orch.registerAdapter(new EchoAdapter());
     orch.setDefaultAdapter("echo");
 
@@ -361,7 +361,7 @@ describe("pipeline state tracking", () => {
   }, INTEGRATION_TIMEOUT_MS);
 
   test("collects events from chain steps", async () => {
-    const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
+    const orch = new Orchestrator("");
     orch.registerAdapter(new EchoAdapter());
     orch.setDefaultAdapter("echo");
 
@@ -377,7 +377,7 @@ describe("pipeline state tracking", () => {
   });
 
   test("reports cost per agent in chain", async () => {
-    const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
+    const orch = new Orchestrator("");
     orch.registerAdapter(new EchoAdapter());
     orch.setDefaultAdapter("echo");
 
@@ -400,7 +400,7 @@ describe("pipeline state tracking", () => {
 
 describe("chain robustness", () => {
   test("handles build-verify chain", async () => {
-    const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
+    const orch = new Orchestrator("");
     orch.registerAdapter(new EchoAdapter());
     orch.setDefaultAdapter("echo");
 
@@ -413,7 +413,7 @@ describe("chain robustness", () => {
   }, INTEGRATION_TIMEOUT_MS);
 
   test("handles swarm-review chain", async () => {
-    const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
+    const orch = new Orchestrator("");
     orch.registerAdapter(new EchoAdapter());
     orch.setDefaultAdapter("echo");
 
@@ -426,7 +426,7 @@ describe("chain robustness", () => {
   });
 
   test("chain run completes with cost data", async () => {
-    const orch = new Orchestrator(process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400");
+    const orch = new Orchestrator("");
     orch.registerAdapter(new EchoAdapter());
     orch.setDefaultAdapter("echo");
 

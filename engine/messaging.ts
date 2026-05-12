@@ -59,6 +59,10 @@ export function listenForUserMessages(
   onMessage: (sessionId: string, content: string, messageId?: string) => void,
 ): AbortController {
   const abort = new AbortController();
+  if (dashboardUrl.trim() === "" || dashboardUrl === "off" || process.env.MAE_DISABLE_DASHBOARD === "1") {
+    return abort;
+  }
+
   const url = `${dashboardUrl}/api/sessions/${sessionId}/stream`;
   const BASE_RETRY_MS = 3_000;
   const MAX_RETRY_MS = 60_000;

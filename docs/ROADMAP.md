@@ -5,7 +5,7 @@
 
 ## Current State (v0.1)
 
-Working: YAML-configured teams/chains, 4 adapters (CC, Codex, Pi, echo), PG persistence,
+Working: YAML-configured teams/chains, Pi/A2A/echo adapters, PG persistence,
 user scoping (6 users), dashboard API + basic UI, `mae` CLI installed globally, LXC deployed
 at your-domain.example.com, 54 tests passing.
 

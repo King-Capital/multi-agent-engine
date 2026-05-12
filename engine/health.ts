@@ -184,7 +184,7 @@ export async function probeDashboard(dashboardUrl: string): Promise<ProbeResult>
 export async function probeLangfuse(): Promise<ProbeResult> {
   const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
   const secretKey = process.env.LANGFUSE_SECRET_KEY;
-  const host = process.env.LANGFUSE_HOST ?? "http://10.71.20.73:3000";
+  const host = process.env.LANGFUSE_HOST ?? "http://localhost:3000";
 
   if (!publicKey || !secretKey) {
     return {

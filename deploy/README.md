@@ -102,13 +102,13 @@ cd engine && bun build cli.ts --target=bun --outfile=../agent && cd ..
 
 ### Adapter Selection
 
-The CLI auto-detects available adapters. To use a specific one:
+The RC ships `pi`, `a2a`, and `echo`. To use a specific one:
 ```bash
-# Claude Code (requires `claude` CLI installed)
-bun engine/cli.ts task "your task" --adapter claude-code
+# Pi coding agent
+bun engine/cli.ts task "your task" --adapter pi
 
-# OpenAI Codex (requires `codex` CLI installed)
-bun engine/cli.ts task "your task" --adapter codex
+# A2A-compatible remote agent
+bun engine/cli.ts task "your task" --adapter a2a
 
 # Dry run (no LLM calls)
 bun engine/cli.ts task "your task" --dry-run

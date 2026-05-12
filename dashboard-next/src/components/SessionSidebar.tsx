@@ -169,7 +169,8 @@ export function SessionSidebar({
 	// Fetch history for cost data (keyed by session ID)
 	const [costMap, setCostMap] = React.useState<Map<string, { cost: number; agents: number; tokens: number }>>(new Map());
 	React.useEffect(() => {
-		api.history(500)
+		const limit = Math.min(Math.max(sessions.length, 500), 5000);
+		api.history(limit)
 			.then((h) => {
 				const m = new Map<string, { cost: number; agents: number; tokens: number }>();
 				for (const e of h) m.set(e.id, { cost: e.total_cost, agents: e.agent_count, tokens: e.total_tokens ?? 0 });
@@ -357,27 +358,27 @@ export function SessionSidebar({
 							<div className="mt-1 text-xs text-slate-500">
 								{shortId(s.id)} · {new Date(s.created_at).toLocaleString()}
 							</div>
-							<div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-								<Badge className={cn(statusColor(s.status), "text-[10px]")} variant="outline">
-									{s.status}
-								</Badge>
-								{s.chain && <Badge variant="secondary" className="text-[10px]">{s.chain}</Badge>}
+							<div className="mt-1.5 flex items-start justify-between gap-2">
+								<div className="flex min-w-0 flex-wrap items-center gap-1.5">
+									<Badge className={cn(statusColor(s.status), "text-[10px]")} variant="outline">
+										{s.status}
+									</Badge>
+									{s.chain && <Badge variant="secondary" className="max-w-[150px] truncate text-[10px]">{s.chain}</Badge>}
+								</div>
 								{(() => {
 									const info = costMap.get(s.id);
-									if (!info) return null;
+									if (!info) {
+										return null;
+									}
 									return (
-										<>
-											{info.cost > 0 && (
-												<span className="text-[10px] text-emerald-400 font-mono">
-													{formatCurrency(info.cost)}
-												</span>
-											)}
+										<div className="shrink-0 text-right font-mono text-[10px] leading-tight">
+											<div className="text-emerald-400">{formatCurrency(info.cost)}</div>
 											{info.tokens > 0 && (
-												<span className="text-[10px] text-cyan-400 font-mono">
+												<div className="text-cyan-400">
 													{(info.tokens / 1000).toFixed(0)}K tok
-												</span>
+												</div>
 											)}
-										</>
+										</div>
 									);
 								})()}
 							</div>

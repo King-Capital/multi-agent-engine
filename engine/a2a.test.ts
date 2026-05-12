@@ -5,9 +5,7 @@ import type { DelegateOptions, PersonaConfig, DomainConfig } from "./types";
 // --- Mock A2A Server ---
 
 let mockServer: ReturnType<typeof Bun.serve> | null = null;
-const githubRunId = Number(Bun.env.GITHUB_RUN_ID ?? 0);
-const MOCK_PORT = githubRunId ? 20000 + (githubRunId % 20000) : 19876;
-const mockUrl = `http://localhost:${MOCK_PORT}`;
+let mockUrl = "";
 
 // Track requests for assertions
 const receivedRequests: Array<{ method: string; params: any }> = [];
@@ -17,10 +15,7 @@ let mockBehavior: "message" | "task-immediate" | "task-polling" | "error" | "tim
 let mockTaskState: "completed" | "working" | "failed" = "completed";
 let pollCount = 0;
 
-beforeAll(() => {
-  mockServer = Bun.serve({
-    port: MOCK_PORT,
-    async fetch(req) {
+async function handleMockRequest(req: Request): Promise<Response> {
       const url = new URL(req.url);
 
       // Agent card endpoint
@@ -138,9 +133,22 @@ beforeAll(() => {
         }), { headers: { "Content-Type": "application/json" } });
       }
 
-      return new Response("Not Found", { status: 404 });
-    },
-  });
+  return new Response("Not Found", { status: 404 });
+}
+
+beforeAll(() => {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const port = 20000 + Math.floor(Math.random() * 30000);
+    try {
+      mockServer = Bun.serve({ port, fetch: handleMockRequest });
+      mockUrl = `http://localhost:${port}`;
+      return;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
 });
 
 afterAll(() => {

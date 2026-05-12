@@ -356,25 +356,26 @@ func handleAPISessionHistory(w http.ResponseWriter, r *http.Request) {
 
 	limit := 500
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 2000 {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 5000 {
 			limit = n
 		}
 	}
 
-	rows, err := db.QueryContext(r.Context(), `
+	rows, err := db.QueryContext(r.Context(), sessionAgentCostRollupSQL+`
 		SELECT
 			s.id, s.name, s.chain, s.status, s.created_at, s.completed_at,
-			CASE
-				WHEN COALESCE((SELECT SUM(max_cost) FROM (SELECT MAX((e.payload->>'cost_usd')::numeric) as max_cost FROM events e WHERE e.session_id = s.id AND e.event_type = 'cost_update' AND e.payload->>'cost_usd' IS NOT NULL GROUP BY e.agent_id) sub), 0) > 0
-					THEN COALESCE((SELECT SUM(max_cost) FROM (SELECT MAX((e.payload->>'cost_usd')::numeric) as max_cost FROM events e WHERE e.session_id = s.id AND e.event_type = 'cost_update' AND e.payload->>'cost_usd' IS NOT NULL GROUP BY e.agent_id) sub), 0)
-				ELSE COALESCE(SUM(a.cost_usd), 0)
-			END as total_cost,
-			COALESCE((SELECT SUM(max_tokens) FROM (SELECT MAX((e.payload->>'tokens_used')::bigint) as max_tokens FROM events e WHERE e.session_id = s.id AND e.event_type = 'cost_update' AND e.payload->>'tokens_used' IS NOT NULL GROUP BY e.agent_id) sub), COALESCE(SUM(a.tokens_used), 0), 0) as total_tokens,
+			COALESCE(sc.total_cost, 0) as total_cost,
+			COALESCE(sc.total_tokens, 0) as total_tokens,
 			COUNT(DISTINCT a.id) as agent_count,
 			EXTRACT(EPOCH FROM COALESCE(s.completed_at, NOW()) - s.created_at) as duration_secs
 		FROM sessions s
 		LEFT JOIN agents a ON a.session_id = s.id
-		GROUP BY s.id
+		LEFT JOIN (
+			SELECT session_id, SUM(cost_usd) AS total_cost, SUM(tokens_used) AS total_tokens
+			FROM session_agent_costs
+			GROUP BY session_id
+		) sc ON sc.session_id = s.id
+		GROUP BY s.id, sc.total_cost, sc.total_tokens
 		ORDER BY s.created_at DESC
 		LIMIT $1`, limit)
 	if err != nil {
@@ -415,16 +416,21 @@ func handleHistoryPage(w http.ResponseWriter, r *http.Request) {
 	var entries []templates.HistoryEntry
 
 	if db != nil {
-		rows, err := db.QueryContext(r.Context(), `
+		rows, err := db.QueryContext(r.Context(), sessionAgentCostRollupSQL+`
 			SELECT 
 				s.id, s.name, COALESCE(s.chain, ''), s.status, 
 				s.created_at, s.completed_at,
-				COALESCE(SUM(a.cost_usd), 0) as total_cost,
+				COALESCE(sc.total_cost, 0) as total_cost,
 				COUNT(DISTINCT a.id) as agent_count,
 				EXTRACT(EPOCH FROM COALESCE(s.completed_at, NOW()) - s.created_at) as duration_secs
 			FROM sessions s
 			LEFT JOIN agents a ON a.session_id = s.id
-			GROUP BY s.id
+			LEFT JOIN (
+				SELECT session_id, SUM(cost_usd) AS total_cost
+				FROM session_agent_costs
+				GROUP BY session_id
+			) sc ON sc.session_id = s.id
+			GROUP BY s.id, sc.total_cost
 			ORDER BY s.created_at DESC
 			LIMIT 100`)
 		if err == nil {
@@ -539,7 +545,8 @@ func handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# HELP mae_total_cost_usd Total cost in USD across all agents\n")
 	fmt.Fprintf(w, "# TYPE mae_total_cost_usd gauge\n")
 	var totalCost float64
-	if err := db.QueryRowContext(ctx, `SELECT CASE WHEN COALESCE(SUM(cost_usd), 0) > 0 THEN SUM(cost_usd) ELSE COALESCE((SELECT SUM(max_cost) FROM (SELECT MAX((payload->>'cost_usd')::numeric) as max_cost FROM events WHERE event_type = 'cost_update' AND payload->>'cost_usd' IS NOT NULL GROUP BY agent_id, session_id) sub), 0) END FROM agents`).Scan(&totalCost); err != nil {
+	if err := db.QueryRowContext(ctx, sessionAgentCostRollupSQL+`
+		SELECT COALESCE(SUM(cost_usd), 0) FROM session_agent_costs`).Scan(&totalCost); err != nil {
 		totalCost = 0
 	}
 	fmt.Fprintf(w, "mae_total_cost_usd %.6f\n\n", totalCost)
@@ -592,11 +599,8 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 		resp.TotalAgents = 0
 	}
 
-	// Total cost — prefer agents sum; fall back to MAX per-agent from events for old sessions
-	if err := db.QueryRowContext(ctx, `SELECT CASE
-		WHEN COALESCE((SELECT SUM(cost_usd) FROM agents), 0) > 0 THEN (SELECT SUM(cost_usd) FROM agents)
-		ELSE COALESCE((SELECT SUM(max_cost) FROM (SELECT MAX((payload->>'cost_usd')::numeric) as max_cost FROM events WHERE event_type = 'cost_update' AND payload->>'cost_usd' IS NOT NULL GROUP BY agent_id, session_id) sub), 0)
-	END`).Scan(&resp.TotalCost); err != nil {
+	if err := db.QueryRowContext(ctx, sessionAgentCostRollupSQL+`
+		SELECT COALESCE(SUM(cost_usd), 0) FROM session_agent_costs`).Scan(&resp.TotalCost); err != nil {
 		resp.TotalCost = 0
 	}
 
@@ -605,15 +609,10 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 		resp.TotalEvents = 0
 	}
 
-	// Cost per day (last 30 days) — use MAX per agent per session to avoid double-counting incremental updates
-	rows, err := db.QueryContext(ctx, `
-		SELECT day, SUM(max_cost) as cost FROM (
-			SELECT DATE(e.created_at) as day, e.session_id, e.agent_id, MAX((e.payload->>'cost_usd')::numeric) as max_cost
-			FROM events e
-			WHERE e.event_type = 'cost_update' AND e.payload->>'cost_usd' IS NOT NULL
-			AND e.created_at > NOW() - INTERVAL '30 days'
-			GROUP BY day, e.session_id, e.agent_id
-		) sub
+	rows, err := db.QueryContext(ctx, sessionAgentCostRollupSQL+`
+		SELECT DATE(last_cost_at) as day, SUM(cost_usd) as cost
+		FROM session_agent_costs
+		WHERE last_cost_at > NOW() - INTERVAL '30 days'
 		GROUP BY day
 		ORDER BY day`)
 	if err == nil {
@@ -632,11 +631,10 @@ func handleAPIStats(w http.ResponseWriter, r *http.Request) {
 		resp.CostPerDay = []DayCost{}
 	}
 
-	// Top 5 chains by cost
-	rows2, err := db.QueryContext(ctx, `
-		SELECT s.chain, COALESCE(SUM(a.cost_usd), 0) as cost, COUNT(DISTINCT s.id) as sessions
+	rows2, err := db.QueryContext(ctx, sessionAgentCostRollupSQL+`
+		SELECT s.chain, COALESCE(SUM(c.cost_usd), 0) as cost, COUNT(DISTINCT s.id) as sessions
 		FROM sessions s
-		JOIN agents a ON a.session_id = s.id
+		JOIN session_agent_costs c ON c.session_id = s.id
 		WHERE s.chain IS NOT NULL
 		GROUP BY s.chain
 		ORDER BY cost DESC

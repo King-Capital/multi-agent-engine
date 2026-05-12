@@ -8,6 +8,7 @@ const RETRY_DELAYS = [100, 500, 2000];
 export class EventEmitter {
   private dashboardUrl: string;
   private apiToken: string | undefined;
+  private disabled: boolean;
   private buffer: SessionEvent[] = [];
   private flushing = false;
   private seq = 0;
@@ -20,7 +21,8 @@ export class EventEmitter {
 
   constructor(dashboardUrl?: string, apiToken?: string) {
     this.dashboardUrl = dashboardUrl ?? process.env.MAE_DASHBOARD_URL ?? "http://localhost:8400";
-    log.info("Dashboard URL configured", { dashboardUrl: this.dashboardUrl });
+    this.disabled = this.dashboardUrl.trim() === "" || this.dashboardUrl === "off" || process.env.MAE_DISABLE_DASHBOARD === "1";
+    log.info(this.disabled ? "Dashboard event streaming disabled" : "Dashboard URL configured", { dashboardUrl: this.dashboardUrl || "(disabled)" });
     this.apiToken = apiToken ?? process.env.MAE_API_TOKEN;
   }
 
@@ -60,6 +62,8 @@ export class EventEmitter {
   }
 
   async emit(event: SessionEvent): Promise<void> {
+    if (this.disabled) return;
+
     if (!event.timestamp) {
       event.timestamp = new Date().toISOString();
     }
@@ -353,6 +357,8 @@ export class EventEmitter {
     chain?: string;
     config?: Record<string, unknown>;
   }): Promise<void> {
+    if (this.disabled) return;
+
     const res = await this.fetchWithRetry(`${this.dashboardUrl}/api/pg/sessions`, {
       method: "POST",
       headers: this.authHeaders(),
@@ -370,6 +376,8 @@ export class EventEmitter {
   }
 
   async pgUpdateSession(sessionId: string, updates: { name?: string; status?: string }): Promise<void> {
+    if (this.disabled) return;
+
     const res = await this.fetchWithRetry(`${this.dashboardUrl}/api/pg/sessions/${sessionId}`, {
       method: "PATCH",
       headers: this.authHeaders(),
@@ -387,6 +395,8 @@ export class EventEmitter {
     prompt?: string;
     config?: Record<string, unknown>;
   }): Promise<void> {
+    if (this.disabled) return;
+
     const res = await this.fetchWithRetry(`${this.dashboardUrl}/api/pg/sessions/${opts.sessionId}/agents`, {
       method: "POST",
       headers: this.authHeaders(),
@@ -417,6 +427,8 @@ export class EventEmitter {
     result?: Record<string, unknown>;
     cost_usd?: number;
   }): Promise<void> {
+    if (this.disabled) return;
+
     const pgId = this.pgAgentIds.get(agentId);
     if (!pgId) return;
     const res = await this.fetchWithRetry(`${this.dashboardUrl}/api/pg/agents/${pgId}`, {
@@ -428,6 +440,8 @@ export class EventEmitter {
   }
 
   async trace(sessionId: string, agentId: string, direction: "input" | "output", content: string, metadata?: Record<string, unknown>): Promise<void> {
+    if (this.disabled) return;
+
     const res = await this.fetchWithRetry(`${this.dashboardUrl}/api/traces`, {
       method: "POST",
       headers: this.authHeaders(),
