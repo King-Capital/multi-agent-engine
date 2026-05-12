@@ -20,10 +20,6 @@ jobs:
   codeql:
     name: CodeQL
     runs-on: [self-hosted, mae]
-    env:
-      GOPATH: ${{ runner.temp }}/go
-      GOMODCACHE: ${{ runner.temp }}/go/pkg/mod
-      GOCACHE: ${{ runner.temp }}/go-build
     permissions:
       actions: read
       contents: read
@@ -33,6 +29,12 @@ jobs:
 
       - name: Setup Go env
         run: |
+          echo "GOPATH=$RUNNER_TEMP/go" >> "$GITHUB_ENV"
+          echo "GOMODCACHE=$RUNNER_TEMP/go/pkg/mod" >> "$GITHUB_ENV"
+          echo "GOCACHE=$RUNNER_TEMP/go-build" >> "$GITHUB_ENV"
+          export GOPATH="$RUNNER_TEMP/go"
+          export GOMODCACHE="$RUNNER_TEMP/go/pkg/mod"
+          export GOCACHE="$RUNNER_TEMP/go-build"
           mkdir -p $GOPATH/pkg/mod
           mkdir -p $GOPATH/pkg/sumdb
           mkdir -p $GOCACHE
