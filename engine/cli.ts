@@ -314,13 +314,16 @@ function createA2AAdapter(): A2AAdapter {
 
 function createAdapters(): { adapters: Array<EchoAdapter | PiAdapter | A2AAdapter>; a2aAdapter: A2AAdapter } {
   const a2aAdapter = createA2AAdapter();
+  const adapters: Array<EchoAdapter | PiAdapter | A2AAdapter> = [
+    new EchoAdapter(),
+    new PiAdapter(),
+  ];
+  if (a2aUrl) {
+    adapters.push(a2aAdapter);
+  }
   return {
     a2aAdapter,
-    adapters: [
-      new EchoAdapter(),
-      new PiAdapter(),
-      a2aAdapter,
-    ],
+    adapters,
   };
 }
 

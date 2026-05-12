@@ -150,8 +150,14 @@ export class Orchestrator {
       }
       case "stop": {
         const session = this.sessions.get(sessionId);
-        if (session) transitionStatus(session, "error", "orchestrator:!stop");
+        if (session && transitionStatus(session, "error", "orchestrator:!stop")) {
+          await this.emitter.pgUpdateSession(sessionId, { status: "error" });
+        }
         this.pausedSessions.delete(sessionId);
+        this.activeMonitor?.stop();
+        this.orchestratorLoop?.stop();
+        stopListening(this.sseAbort);
+        sendUserMessage(this.messageSenders, sessionId, "!stop");
         await emit("session_end", "Session stopped by user.");
         break;
       }

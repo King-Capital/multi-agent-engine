@@ -19,13 +19,35 @@ err()  { echo "  [mae] ERROR: $*" >&2; exit 1; }
 # Parse args
 DASHBOARD_URL=""
 GATEWAY_URL=""
+A2A_URL="${MAE_A2A_URL:-}"
+LANGFUSE_HOST_VALUE="${LANGFUSE_HOST:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dashboard) DASHBOARD_URL="$2"; shift 2 ;;
     --gateway)   GATEWAY_URL="$2"; shift 2 ;;
+    --a2a-url)   A2A_URL="$2"; shift 2 ;;
+    --langfuse)  LANGFUSE_HOST_VALUE="$2"; shift 2 ;;
     *)           shift ;;
   esac
 done
+
+write_shell_var() {
+  local key="$1"
+  local value="$2"
+  printf '%s=' "$key"
+  printf '%q' "$value"
+  printf '\n'
+}
+
+write_optional_shell_var() {
+  local key="$1"
+  local value="$2"
+  if [[ -n "$value" ]]; then
+    write_shell_var "$key" "$value"
+  else
+    printf '# %s=""\n' "$key"
+  fi
+}
 
 echo ""
 echo "  Multi-Agent Engine — Client Install"
@@ -57,23 +79,41 @@ cd "$MAE_DIR/engine/engine" && bun install --silent
 # Create config if it doesn't exist
 if [[ ! -f "$MAE_DIR/config" ]]; then
   info "Creating config at $MAE_DIR/config"
-  cat > "$MAE_DIR/config" <<CONF
+  {
+    cat <<CONF
 # MAE Configuration — edit these values for your environment
 # This file is sourced by the mae CLI on every invocation.
 
 # Dashboard server URL (required)
-MAE_DASHBOARD_URL="${DASHBOARD_URL}"
+CONF
+    write_shell_var MAE_DASHBOARD_URL "$DASHBOARD_URL"
+    cat <<CONF
 
 # LLM gateway URL (required for model discover + AI assist)
-MAE_LLM_GATEWAY_URL="${GATEWAY_URL}"
-MAE_LLM_GATEWAY_KEY=""
+CONF
+    write_shell_var MAE_LLM_GATEWAY_URL "$GATEWAY_URL"
+    write_optional_shell_var MAE_LLM_GATEWAY_KEY "${MAE_LLM_GATEWAY_KEY:-}"
+    cat <<CONF
 
 # Default adapter: pi, claude-code, codex, echo
-# MAE_DEFAULT_ADAPTER=""
+CONF
+    write_optional_shell_var MAE_DEFAULT_ADAPTER "${MAE_DEFAULT_ADAPTER:-}"
+    cat <<CONF
 
 # API auth token (if dashboard requires auth)
-# MAE_API_TOKEN=""
+# A2A endpoint (if this host has a local or remote A2A service)
 CONF
+    write_optional_shell_var MAE_API_TOKEN "${MAE_API_TOKEN:-}"
+    write_optional_shell_var MAE_A2A_URL "$A2A_URL"
+    write_optional_shell_var MAE_A2A_TOKEN "${MAE_A2A_TOKEN:-}"
+    cat <<CONF
+
+# Langfuse observability
+CONF
+    write_optional_shell_var LANGFUSE_PUBLIC_KEY "${LANGFUSE_PUBLIC_KEY:-}"
+    write_optional_shell_var LANGFUSE_SECRET_KEY "${LANGFUSE_SECRET_KEY:-}"
+    write_optional_shell_var LANGFUSE_HOST "$LANGFUSE_HOST_VALUE"
+  } > "$MAE_DIR/config"
 
   if [[ -z "$DASHBOARD_URL" ]]; then
     info ""
