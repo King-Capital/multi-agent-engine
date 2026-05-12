@@ -67,6 +67,21 @@ export interface GoldenCandidate {
   suggestedVerdict: "pass" | "fail" | "review";
 }
 
+export interface GoldenValidationSummary {
+  sessionId: string;
+  goal: string;
+  chain: string;
+  verdict: "pass" | "fail";
+  eventCount: number;
+  duration_ms?: number;
+  totalCost?: number;
+  scoreOverall: ReplayScore["overall"];
+  passedChecks: number;
+  failedChecks: number;
+  hasLlmCall: boolean;
+  hasChainStepStart: boolean;
+}
+
 export interface FingerprintComparison {
   similarity: number;
   diffs: string[];
@@ -269,6 +284,57 @@ export function addGoldenTrace(sessionId: string, verdict: "pass" | "fail", note
   if (idx >= 0) { entries[idx] = entry; } else { entries.push(entry); }
 
   writeFileSync(filePath, JSON.stringify(entries, null, 2) + "\n");
+}
+
+/** Validate a trace before it is promoted to the golden registry. */
+export function validateGoldenTrace(
+  sessionId: string,
+  verdict: "pass" | "fail",
+  opts?: { force?: boolean; traceDirOverride?: string },
+): GoldenValidationSummary {
+  const trace = loadTrace(sessionId, opts?.traceDirOverride);
+  const score = scoreSession(trace);
+  const hasLlmCall = trace.events.some((event) => event.type === "llm.call");
+  const hasChainStepStart = trace.events.some((event) => event.type === "chain.step.start");
+  const failedChecks = score.checks.filter((check) => !check.pass).length;
+  const passedChecks = score.checks.length - failedChecks;
+
+  if (verdict === "fail" && !opts?.force) {
+    throw new Error(`Refusing to add failed golden trace ${sessionId} without --force`);
+  }
+  if (!hasLlmCall) {
+    throw new Error(`Refusing to add ${sessionId}: golden traces must include at least one llm.call event`);
+  }
+  if (!hasChainStepStart) {
+    throw new Error(`Refusing to add ${sessionId}: golden traces must include at least one chain.step.start event`);
+  }
+
+  return {
+    sessionId,
+    goal: trace.goal,
+    chain: trace.chain,
+    verdict,
+    eventCount: trace.events.length,
+    duration_ms: trace.duration_ms,
+    totalCost: trace.totalCost,
+    scoreOverall: score.overall,
+    passedChecks,
+    failedChecks,
+    hasLlmCall,
+    hasChainStepStart,
+  };
+}
+
+/** Validate and mark a trace as a golden reference in one operation. */
+export function addValidatedGoldenTrace(
+  sessionId: string,
+  verdict: "pass" | "fail",
+  notes?: string,
+  opts?: { force?: boolean; traceDirOverride?: string },
+): GoldenValidationSummary {
+  const summary = validateGoldenTrace(sessionId, verdict, opts);
+  addGoldenTrace(sessionId, verdict, notes, opts?.traceDirOverride);
+  return summary;
 }
 
 /** List all golden traces from the registry. */

@@ -1,6 +1,9 @@
 import { getFlag, getFlags } from "./cli-utils";
 import { provisionLangfuseForMae } from "./langfuse-admin";
 import { runRalphLoop } from "./ralph-loop";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
+import { execFileSync } from "child_process";
 
 function showRalphHelp(): never {
   console.log(`
@@ -10,14 +13,17 @@ Usage:
   mae ralph                    Run the improvement loop (default: 5 iterations)
   mae ralph --iterations 10    Run 10 iterations
   mae ralph --model quality    Use specific model for evaluator/evolver
+  mae ralph --apply            Apply proposed mutations only after ratchet verification
+  mae ralph --apply --dry-run  Run ratchet verification and restore files
+  mae ralph history            Show recent ratchet journal entries
   mae ralph --trace <id>       Train on a specific trace (repeatable)
   mae ralph --golden-only      Train only on curated golden traces
   mae ralph --recent           Use newest traces instead of high-signal traces
   mae ralph --limit 20         Number of high-signal/recent traces to include
 
 By default Ralph uses high-signal sessions (larger/richer runs) plus
-available golden traces. It outputs suggestions only; no files are changed
-until a replay/golden verification ratchet is available.
+available golden traces. It outputs suggestions only unless --apply is set.
+Applied mutations must pass golden replay ratchet checks first.
 `);
   process.exit(0);
 }
@@ -42,8 +48,46 @@ This command provisions the score schemas and LiteLLM model connection it should
   process.exit(0);
 }
 
+function ralphJournalPath(): string {
+  return join(process.env.HOME ?? ".", ".mae", "ralph-journal.jsonl");
+}
+
+function handleRalphHistory(args: string[]): void {
+  const limit = parseInt(getFlag(args, "--limit") ?? "20", 10);
+  const path = ralphJournalPath();
+  if (!existsSync(path)) {
+    console.log("No Ralph journal entries found.");
+    return;
+  }
+  const lines = readFileSync(path, "utf-8").trim().split("\n").filter(Boolean).slice(-Math.max(1, limit)).reverse();
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line) as { ts?: string; verdict?: string; reason?: string; mutation?: { targetType?: string; target?: string; persona?: string; action?: string } };
+      const mutation = entry.mutation;
+      const target = mutation?.target ?? mutation?.persona ?? "?";
+      console.log(`${entry.ts ?? ""} [${entry.verdict ?? "unknown"}] ${mutation?.targetType ?? "persona"}:${target} ${mutation?.action ?? ""}`);
+      if (entry.reason) console.log(`  ${entry.reason}`);
+    } catch {
+      console.log(line);
+    }
+  }
+}
+
+function commitAcceptedMutations(result: Awaited<ReturnType<typeof runRalphLoop>>): void {
+  const accepted = result.mutations.filter((mutation) => mutation.accepted && mutation.file);
+  for (const mutation of accepted) {
+    const file = mutation.file!;
+    execFileSync("git", ["add", "--", file], { stdio: "inherit" });
+    execFileSync("git", ["commit", "-m", `ralph: ${mutation.target} ${mutation.action} (ratchet-verified)`], { stdio: "inherit" });
+  }
+}
+
 export async function handleRalphCommand(args: string[], subHelp: boolean, dryRun: boolean): Promise<void> {
   if (subHelp) showRalphHelp();
+  if (args[1] === "history") {
+    handleRalphHistory(args);
+    return;
+  }
 
   const iterations = parseInt(getFlag(args, "--iterations") ?? "5", 10);
   const ralphModel = getFlag(args, "--model") ?? "quality";
@@ -52,6 +96,7 @@ export async function handleRalphCommand(args: string[], subHelp: boolean, dryRu
   const goldenOnly = args.includes("--golden-only");
   const includeGolden = !args.includes("--no-golden");
   const selectionMode = args.includes("--recent") ? "recent" : "high_signal";
+  const apply = args.includes("--apply");
 
   try {
     const result = await runRalphLoop({
@@ -63,13 +108,17 @@ export async function handleRalphCommand(args: string[], subHelp: boolean, dryRu
       selectionMode,
       model: ralphModel,
       dryRun,
+      apply,
     });
+
+    if (apply && result.accepted > 0 && !dryRun) commitAcceptedMutations(result);
 
     console.log(`\nRalph loop complete:`);
     console.log(`  Training:   ${result.traces.length} trace(s)`);
     console.log(`  Findings:   ${result.findings.length}`);
     console.log(`  Suggested:  ${result.suggestions.length}`);
-    console.log(`  Applied:    0 (advisory mode)`);
+    console.log(`  Applied:    ${result.accepted}${apply ? "" : " (advisory mode)"}`);
+    if (apply) console.log(`  Rejected:   ${result.rejected}`);
 
     if (result.traces.length > 0) {
       console.log(`\nTraining traces:`);

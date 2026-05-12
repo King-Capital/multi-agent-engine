@@ -84,6 +84,15 @@ budgets:
   max_per_agent_usd: 15
   max_total_tokens: 10000000
   budget_action: pause
+ratchet:
+  min_golden_coverage: 3
+  max_cost_multiplier: 2
+  max_judge_regression: 0.1
+  judge_model: main
+  judge_ratchet_model: quality
+  judge_max_traces_per_run: 10
+  judge_cache_days: 7
+  require_langfuse_scores: false
 concurrency:
   max_concurrent_agents: 10
   max_concurrent_per_team: 5

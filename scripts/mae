@@ -13,7 +13,7 @@ MAE_UPDATE_REF="${MAE_UPDATE_REF:-main}"
 MAE_REQUIRE_PI="${MAE_REQUIRE_PI:-1}"
 MAE_INSTALL_DIR="${MAE_HOME:-$HOME/.mae}"
 MAE_CONFIG="$MAE_INSTALL_DIR/config"
-MAE_BIN="${HOME}/.local/bin/mae"
+MAE_BIN="${MAE_BIN:-${HOME}/.local/bin/mae}"
 
 # ── Load config (created during install, user-editable) ─────────────
 if [[ -f "$MAE_CONFIG" ]]; then
@@ -27,12 +27,15 @@ MAE_REPO_DIR="${MAE_REPO_DIR:-$MAE_INSTALL_DIR/repo}"
 MAE_DASHBOARD_URL="${MAE_DASHBOARD_URL:-http://localhost:8400}"
 DATABASE_URL="${DATABASE_URL:-postgres://mae:mae@localhost:5432/mae?sslmode=disable}"
 MAE_API_URL="${MAE_API_URL:-http://localhost:8400}"
+MAE_TRACE_DIR="${MAE_TRACE_DIR:-$MAE_INSTALL_DIR/traces}"
 MAE_LLM_GATEWAY_URL="${MAE_LLM_GATEWAY_URL:-}"
 MAE_LLM_GATEWAY_KEY="${MAE_LLM_GATEWAY_KEY:-}"
 MAE_API_TOKEN="${MAE_API_TOKEN:-}"
 MAE_DEFAULT_ADAPTER="${MAE_DEFAULT_ADAPTER:-}"
 MAE_A2A_URL="${MAE_A2A_URL:-}"
 MAE_A2A_TOKEN="${MAE_A2A_TOKEN:-}"
+MAE_A2A_DEFAULT_HOST="${MAE_A2A_DEFAULT_HOST:-10.71.20.120}"
+MAE_A2A_DEFAULT_PORT="${MAE_A2A_DEFAULT_PORT:-3210}"
 LANGFUSE_PUBLIC_KEY="${LANGFUSE_PUBLIC_KEY:-}"
 LANGFUSE_SECRET_KEY="${LANGFUSE_SECRET_KEY:-}"
 LANGFUSE_HOST="${LANGFUSE_HOST:-}"
@@ -40,8 +43,8 @@ LITELLM_API_BASE="${LITELLM_API_BASE:-${MAE_LLM_GATEWAY_URL:-}}"
 LITELLM_API_KEY="${LITELLM_API_KEY:-${MAE_LLM_GATEWAY_KEY:-}}"
 ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-${MAE_LLM_GATEWAY_URL:-}}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-${MAE_LLM_GATEWAY_KEY:-${LITELLM_API_KEY:-}}}"
-export MAE_DASHBOARD_URL DATABASE_URL MAE_API_URL MAE_LLM_GATEWAY_URL MAE_LLM_GATEWAY_KEY
-export MAE_API_TOKEN MAE_DEFAULT_ADAPTER MAE_A2A_URL MAE_A2A_TOKEN
+export MAE_DASHBOARD_URL DATABASE_URL MAE_API_URL MAE_TRACE_DIR MAE_LLM_GATEWAY_URL MAE_LLM_GATEWAY_KEY
+export MAE_API_TOKEN MAE_DEFAULT_ADAPTER MAE_A2A_URL MAE_A2A_TOKEN MAE_A2A_DEFAULT_HOST MAE_A2A_DEFAULT_PORT
 export LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY LANGFUSE_HOST
 export LITELLM_API_BASE LITELLM_API_KEY ANTHROPIC_BASE_URL ANTHROPIC_API_KEY
 
@@ -61,6 +64,31 @@ write_optional_shell_var() {
   else
     printf '# %s=""\n' "$key"
   fi
+}
+
+upsert_config_var() {
+  local key="$1"
+  local value="$2"
+  local line tmp
+  line="$(write_shell_var "$key" "$value")"
+  mkdir -p "$(dirname "$MAE_CONFIG")"
+  touch "$MAE_CONFIG"
+  tmp="$(mktemp "${MAE_CONFIG}.XXXXXX")"
+  awk -v key="$key" -v line="$line" '
+    BEGIN { done = 0 }
+    $0 ~ "^[[:space:]]*#?[[:space:]]*" key "=" {
+      if (!done) {
+        print line
+        done = 1
+      }
+      next
+    }
+    { print }
+    END {
+      if (!done) print line
+    }
+  ' "$MAE_CONFIG" > "$tmp"
+  mv "$tmp" "$MAE_CONFIG"
 }
 
 display_version() {
@@ -188,6 +216,11 @@ CONF
         write_shell_var MAE_API_URL "$MAE_API_URL"
         cat << CONF
 
+# Trace storage
+CONF
+        write_shell_var MAE_TRACE_DIR "$MAE_TRACE_DIR"
+        cat << CONF
+
 # Repo checkout used by the wrapper CLI
 CONF
         write_shell_var MAE_ROOT "$MAE_REPO_DIR"
@@ -211,6 +244,8 @@ CONF
 
 # Default A2A endpoint (for remote agent delegation)
 CONF
+        write_shell_var MAE_A2A_DEFAULT_HOST "$MAE_A2A_DEFAULT_HOST"
+        write_shell_var MAE_A2A_DEFAULT_PORT "$MAE_A2A_DEFAULT_PORT"
         write_optional_shell_var MAE_A2A_URL "$MAE_A2A_URL"
         write_optional_shell_var MAE_A2A_TOKEN "$MAE_A2A_TOKEN"
         cat << CONF
@@ -286,6 +321,164 @@ do_dashboard() {
       echo "  mae dashboard install   Install frontend dependencies"
       echo "  mae dashboard dev       Start Vite dev server (port 5173)"
       echo "  mae dashboard build     Build for production to dist/"
+      ;;
+  esac
+}
+
+# ── Setup helpers ────────────────────────────────────────────────────
+do_setup() {
+  local root
+  root="$(find_mae_root)" || { echo "MAE not found. Run 'mae install' first."; exit 1; }
+
+  local subcmd="${1:-help}"
+  shift || true
+  case "$subcmd" in
+    a2a)
+      local url="${MAE_A2A_URL:-}"
+      local token="${MAE_A2A_TOKEN:-}"
+      local host="${MAE_A2A_DEFAULT_HOST:-10.71.20.120}"
+      local port="${MAE_A2A_DEFAULT_PORT:-3210}"
+      local set_default=false
+      local test_endpoint=true
+      local use_standard=false
+
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --standard)
+            use_standard=true
+            shift
+            ;;
+          --host)
+            host="${2:-}"
+            use_standard=true
+            shift 2
+            ;;
+          --host=*)
+            host="${1#--host=}"
+            use_standard=true
+            shift
+            ;;
+          --port)
+            port="${2:-}"
+            use_standard=true
+            shift 2
+            ;;
+          --port=*)
+            port="${1#--port=}"
+            use_standard=true
+            shift
+            ;;
+          --url)
+            url="${2:-}"
+            shift 2
+            ;;
+          --url=*)
+            url="${1#--url=}"
+            shift
+            ;;
+          --token)
+            token="${2:-}"
+            shift 2
+            ;;
+          --token=*)
+            token="${1#--token=}"
+            shift
+            ;;
+          --default-adapter)
+            set_default=true
+            shift
+            ;;
+          --no-test)
+            test_endpoint=false
+            shift
+            ;;
+          --test)
+            test_endpoint=true
+            shift
+            ;;
+          -h|--help)
+            cat <<'HELP'
+mae setup a2a [--standard] [--host <host>] [--port <port>] [--url <endpoint>] [--token <token>] [--default-adapter] [--no-test]
+
+Writes A2A configuration into ~/.mae/config and verifies discovery by default.
+Default standard endpoint: http://10.71.20.120:3210
+
+Examples:
+  mae setup a2a --standard
+  mae setup a2a --host 10.71.20.120
+  mae setup a2a --url http://10.71.20.120:3210
+  mae setup a2a --url http://10.71.20.120:3210 --default-adapter
+  mae setup a2a --url http://agent-host:41271 --token "$A2A_TOKEN"
+HELP
+            exit 0
+            ;;
+          *)
+            echo "Unknown setup a2a option: $1"
+            echo "Run: mae setup a2a --help"
+            exit 1
+            ;;
+        esac
+      done
+
+      if [[ -z "$url" && ( "$use_standard" == true || ! -t 0 ) ]]; then
+        url="http://${host}:${port}"
+      fi
+      if [[ -z "$url" && -t 0 ]]; then
+        echo "Press Enter to use standard endpoint http://${host}:${port}"
+        read -r -p "A2A endpoint URL: " url
+        url="${url:-http://${host}:${port}}"
+      fi
+      if [[ -z "$url" ]]; then
+        echo "A2A endpoint URL required."
+        echo "Run: mae setup a2a --standard"
+        exit 1
+      fi
+
+      upsert_config_var MAE_A2A_DEFAULT_HOST "$host"
+      upsert_config_var MAE_A2A_DEFAULT_PORT "$port"
+      upsert_config_var MAE_A2A_URL "$url"
+      if [[ -n "$token" ]]; then
+        upsert_config_var MAE_A2A_TOKEN "$token"
+      fi
+      if $set_default; then
+        upsert_config_var MAE_DEFAULT_ADAPTER "a2a"
+      fi
+
+      echo "✓ A2A config updated: $MAE_CONFIG"
+      echo "  MAE_A2A_URL=$url"
+      if $set_default; then
+        echo "  MAE_DEFAULT_ADAPTER=a2a"
+      fi
+
+      if $test_endpoint; then
+        echo ""
+        echo "Testing A2A discovery..."
+        if [[ -n "$token" ]]; then
+          MAE_A2A_URL="$url" MAE_A2A_TOKEN="$token" bun "$root/engine/cli.ts" discover "$url" --a2a-token "$token"
+        else
+          MAE_A2A_URL="$url" bun "$root/engine/cli.ts" discover "$url"
+        fi
+      fi
+      ;;
+    help|--help|-h|"")
+      cat <<'HELP'
+mae setup — Configure optional MAE integrations
+
+Commands:
+  mae setup a2a --standard         Configure/test standard MAE A2A delegation
+  mae setup a2a --url <endpoint>   Configure/test custom remote A2A delegation
+
+Examples:
+  mae setup a2a --standard
+  mae setup a2a --host 10.71.20.120
+  mae setup a2a --url http://10.71.20.120:3210
+  mae setup a2a --url http://10.71.20.120:3210 --default-adapter
+HELP
+      ;;
+    *)
+      echo "Unknown setup command: $subcmd"
+      echo "Run: mae setup --help"
+      exit 1
       ;;
   esac
 }
@@ -389,6 +582,7 @@ mae -- Multi-Agent Engine CLI v${version}
 Lifecycle:
   mae install              Clone repo, install engine deps, create config
   mae install --dry-run    Preview install steps without making changes
+  mae setup a2a            Configure/test optional A2A delegation
   mae update               Pull latest, reinstall deps, update CLI
   mae uninstall            Remove CLI and optionally the repo
 
@@ -440,6 +634,8 @@ Examples:
   mae run review "git diff HEAD~3"
   mae task "Fix the auth bug" --adapter pi
   mae task "review this PR" --adapter a2a --a2a-url http://agent-host:41271
+  mae setup a2a --standard
+  mae setup a2a --url http://agent-host:41271
   mae info
   mae session list
 
@@ -457,6 +653,7 @@ Environment (override config):
   MAE_DASHBOARD_URL   Dashboard API
   DATABASE_URL        PostgreSQL connection string
   MAE_API_URL         Vite dev proxy target
+  MAE_TRACE_DIR       Trace directory (default: \$MAE_HOME/traces)
   MAE_LLM_GATEWAY_URL LiteLLM/OpenAI-compatible gateway
   MAE_LLM_GATEWAY_KEY LiteLLM/OpenAI-compatible gateway API key
   MAE_ROOT            Override repo location
@@ -465,7 +662,10 @@ Environment (override config):
   MAE_UPDATE_REF      Branch used by update from a tag install (default: main)
   MAE_GIT_URL         Git URL used by install (default: https://github.com/${MAE_REPO}.git)
   MAE_REQUIRE_PI      Require 'pi' during install (default: 1; set 0 for echo/A2A-only)
+  MAE_BIN             CLI install path (default: \$HOME/.local/bin/mae)
   MAE_API_TOKEN       API auth token
+  MAE_A2A_DEFAULT_HOST Standard A2A host (default: 10.71.20.120)
+  MAE_A2A_DEFAULT_PORT Standard A2A port (default: 3210)
   MAE_A2A_URL         Default A2A endpoint
   MAE_A2A_TOKEN       A2A bearer token
   LANGFUSE_PUBLIC_KEY Langfuse public key
@@ -489,6 +689,11 @@ case "${1:-}" in
     ;;
   uninstall)
     do_uninstall
+    ;;
+  setup)
+    shift
+    do_setup "$@"
+    exit 0
     ;;
   dashboard)
     shift
@@ -516,7 +721,7 @@ case "${1:-}" in
       exit 1
     }
     export MAE_ROOT="$root"
-    export MAE_DASHBOARD_URL DATABASE_URL MAE_API_URL MAE_LLM_GATEWAY_URL MAE_LLM_GATEWAY_KEY
+    export MAE_DASHBOARD_URL DATABASE_URL MAE_API_URL MAE_TRACE_DIR MAE_LLM_GATEWAY_URL MAE_LLM_GATEWAY_KEY
     export MAE_API_TOKEN MAE_DEFAULT_ADAPTER MAE_A2A_URL MAE_A2A_TOKEN
     export LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY LANGFUSE_HOST
     exec bun run "$root/engine/cli.ts" "$@"

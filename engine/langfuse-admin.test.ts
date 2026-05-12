@@ -11,7 +11,11 @@ describe("langfuse-admin", () => {
     expect(plan.llmConnection.provider).toBe("openai");
     expect(plan.llmConnection.customModels).toContain("opus");
     expect(plan.llmConnection.customModels).toContain("sonnet");
+    expect(plan.llmConnection.customModels).not.toContain("gpt-5.4");
+    expect(plan.llmConnection.customModels).not.toContain("gpt-5.5");
     expect(plan.judgeConfigs.map((cfg) => cfg.scoreName)).toContain("judge_overall_quality");
+    expect(plan.judgeConfigs.find((cfg) => cfg.name === "MAE Overall Quality Judge")!.model).toBe("sonnet");
+    expect(plan.judgeConfigs.find((cfg) => cfg.name === "MAE Golden Overall Quality Judge")!.model).toBe("opus");
   });
 
   test("dry-run provisioning returns a complete plan without network calls", async () => {

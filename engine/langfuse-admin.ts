@@ -132,7 +132,9 @@ function configuredJudgeModels(): string[] {
   const tierOptions = Object.values(routing.tiers)
     .flatMap((tier) => tier.options ?? [])
     .map((option) => resolveModel(option.model));
-  return uniq([...aliases, ...tierDefaults, ...tierOptions]).sort();
+  return uniq([...aliases, ...tierDefaults, ...tierOptions])
+    .filter((model) => !model.startsWith("gpt-"))
+    .sort();
 }
 
 export function buildLangfuseProvisionPlan(): LangfuseProvisionPlan {
@@ -143,7 +145,12 @@ export function buildLangfuseProvisionPlan(): LangfuseProvisionPlan {
     ?? process.env.LITELLM_API_BASE
     ?? "";
   const customModels = configuredJudgeModels();
-  const defaultJudgeModel = resolveModel(process.env.LANGFUSE_JUDGE_MODEL ?? "quality");
+  const defaultJudgeModel = resolveModel(process.env.LANGFUSE_JUDGE_MODEL ?? "main");
+  const goldenJudgeModel = resolveModel(
+    process.env.LANGFUSE_GOLDEN_JUDGE_MODEL
+      ?? process.env.LANGFUSE_RATCHET_JUDGE_MODEL
+      ?? "quality",
+  );
 
   return {
     host,
@@ -168,6 +175,20 @@ export function buildLangfuseProvisionPlan(): LangfuseProvisionPlan {
         model: defaultJudgeModel,
         scoreType: "CATEGORICAL",
         prompt: `${JUDGE_PROMPT}\n\nVerdict categories: pass, partial, fail.`,
+      },
+      {
+        name: "MAE Golden Overall Quality Judge",
+        scoreName: "judge_overall_quality",
+        model: goldenJudgeModel,
+        scoreType: "NUMERIC",
+        prompt: `${JUDGE_PROMPT}\n\nUse this evaluator only for golden trace ratchet decisions.`,
+      },
+      {
+        name: "MAE Golden Release Readiness Judge",
+        scoreName: "judge_release_readiness",
+        model: goldenJudgeModel,
+        scoreType: "CATEGORICAL",
+        prompt: `${JUDGE_PROMPT}\n\nVerdict categories: pass, partial, fail. Use this evaluator only for golden trace ratchet decisions.`,
       },
     ],
   };

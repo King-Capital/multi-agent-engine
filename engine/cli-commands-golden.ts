@@ -1,12 +1,15 @@
 import { getFlag } from "./cli-utils";
-import { addGoldenTrace, getGoldenTraces, listGoldenCandidates } from "./replay";
+import { generateGoldenTraces } from "./golden-bootstrap";
+import { addValidatedGoldenTrace, getGoldenTraces, listGoldenCandidates } from "./replay";
+import type { GoldenValidationSummary } from "./replay";
 
 function showGoldenHelp(): never {
   console.log(`
 mae golden - Manage golden trace references
 
 Usage:
-  mae golden add <session_id> [--verdict pass|fail] [--notes "..."]
+  mae golden add <session_id> [--verdict pass|fail] [--notes "..."] [--force]
+  mae golden generate [--adapter echo|pi|a2a] [--dry-run]
   mae golden list
   mae golden candidates [--limit 20]
   mae golden candidates --all
@@ -14,6 +17,7 @@ Usage:
 Golden traces are reference sessions used for regression detection.
 Mark good runs as "pass" and bad runs as "fail" to build a test corpus.
 Use candidates to rank bigger/high-signal runs before promotion.
+Failed traces require --force. All promoted goldens must contain llm.call and chain.step.start events.
 `);
   process.exit(0);
 }
@@ -27,10 +31,21 @@ function shouldHideCandidate(goalText: string): boolean {
   return false;
 }
 
+function printValidationSummary(summary: GoldenValidationSummary): void {
+  const cost = summary.totalCost === undefined ? "n/a" : `$${summary.totalCost.toFixed(4)}`;
+  const duration = summary.duration_ms === undefined ? "n/a" : `${Math.round(summary.duration_ms / 1000)}s`;
+  console.log(`Trace: ${summary.sessionId}`);
+  console.log(`Goal: ${summary.goal || "(missing)"}`);
+  console.log(`Chain: ${summary.chain || "(missing)"}`);
+  console.log(`Verdict: ${summary.verdict}`);
+  console.log(`Score: ${summary.scoreOverall} (${summary.passedChecks} passed, ${summary.failedChecks} failed)`);
+  console.log(`Events: ${summary.eventCount} | Cost: ${cost} | Duration: ${duration}`);
+}
+
 function handleGoldenAdd(args: string[]): void {
   const goldenId = args[2];
   if (!goldenId) {
-    console.error("Usage: mae golden add <session_id> [--verdict pass|fail] [--notes \"...\"]");
+    console.error("Usage: mae golden add <session_id> [--verdict pass|fail] [--notes \"...\"] [--force]");
     process.exit(1);
   }
 
@@ -41,9 +56,28 @@ function handleGoldenAdd(args: string[]): void {
   }
 
   const notes = getFlag(args, "--notes");
+  const force = args.includes("--force");
   try {
-    addGoldenTrace(goldenId, verdict, notes);
+    const summary = addValidatedGoldenTrace(goldenId, verdict, notes, { force });
+    printValidationSummary(summary);
     console.log(`Added golden trace: ${goldenId} (${verdict})${notes ? ` - ${notes}` : ""}`);
+  } catch (err: unknown) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
+}
+
+async function handleGoldenGenerate(args: string[]): Promise<void> {
+  const adapter = getFlag(args, "--adapter") ?? process.env.MAE_GOLDEN_ADAPTER ?? "echo";
+  const dryRun = args.includes("--dry-run");
+  try {
+    const result = await generateGoldenTraces({ adapter, dryRun });
+    for (const run of result.runs) {
+      const status = run.added ? "added" : "skipped";
+      const score = run.scoreOverall ?? "n/a";
+      console.log(`${status.padEnd(8)} ${run.chain.padEnd(18)} ${score.padEnd(7)} ${run.sessionId ?? "-"} ${run.reason ?? ""}`);
+    }
+    console.log(`Golden bootstrap complete: ${result.added} added, ${result.failed} failed/skipped.`);
   } catch (err: unknown) {
     console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
@@ -103,12 +137,14 @@ export async function handleGoldenCommand(args: string[], subHelp: boolean): Pro
   const goldenSub = args[1];
   if (goldenSub === "add") {
     handleGoldenAdd(args);
+  } else if (goldenSub === "generate") {
+    await handleGoldenGenerate(args);
   } else if (goldenSub === "candidates") {
     handleGoldenCandidates(args);
   } else if (goldenSub === "list") {
     handleGoldenList();
   } else {
-    console.error("Usage: mae golden <add|list|candidates>");
+    console.error("Usage: mae golden <add|generate|list|candidates>");
     process.exit(1);
   }
 }

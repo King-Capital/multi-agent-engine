@@ -23,5 +23,8 @@ engine/data/sessions/
 engine/.pi/
 engine/data/
 
+# Local goal-run scratch files
+.goal-runs/
+
 # Added by ggshield
 .cache_ggshield

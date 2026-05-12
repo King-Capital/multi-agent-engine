@@ -10,18 +10,20 @@
  * operated by this module, not by any agent. Current Ralph output is advisory.
  */
 
-import { readdirSync, readFileSync, existsSync } from "fs";
-import { join } from "path";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
+import { dirname, isAbsolute, join, relative, resolve } from "path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { loadTrace, scoreSession, getGoldenTraces } from "./replay";
+import { compareFingerprints, extractFingerprint, getGoldenTraces, loadTrace, scoreSession } from "./replay";
 import type { SessionTrace, ReplayScore } from "./replay";
 import { TRACE_DIR } from "./trace-recorder";
-import { BASE_DIR } from "./config";
+import { BASE_DIR, loadModelRouting } from "./config";
 import { evaluateTraces } from "./ralph-evaluator";
 import type { EvaluatorFinding } from "./ralph-evaluator";
 import { proposeConfigMutations, readPersonaRaw } from "./ralph-evolver";
 import type { ConfigMutation } from "./ralph-evolver";
 import { createLogger } from "./logger";
+import { getExistingJudgeScores, judgeTrace } from "./langfuse-judge";
+import type { JudgeScores } from "./langfuse-judge";
 
 const log = createLogger("ralph");
 
@@ -36,7 +38,12 @@ export interface RalphConfig {
   includeGolden?: boolean;
   model?: string;
   dryRun?: boolean;
+  apply?: boolean;
   acceptUnproven?: boolean;
+  journalPath?: string;
+  replayRunner?: (goldenTrace: SessionTrace, mutation: ConfigMutation) => Promise<SessionTrace>;
+  judgeTraceFn?: typeof judgeTrace;
+  getJudgeScoresFn?: typeof getExistingJudgeScores;
   evaluator?: typeof evaluateTraces;
   evolver?: typeof proposeConfigMutations;
 }
@@ -67,6 +74,25 @@ export interface MutationResult {
   content: string;
   verification?: string;
   diffPreview: string;
+}
+
+export interface RatchetTraceResult {
+  goldenSessionId: string;
+  replaySessionId: string;
+  deterministicPassed: boolean;
+  failedChecks: string[];
+  costOk: boolean;
+  judgeRegression?: number;
+  fingerprintSimilarity: number;
+}
+
+export interface RatchetVerification {
+  accepted: boolean;
+  status: MutationResult["status"];
+  reason: string;
+  tested: RatchetTraceResult[];
+  coverage: number;
+  journalPath: string;
 }
 
 export interface RalphResult {
@@ -103,12 +129,24 @@ function loadRecentTraces(traceDir: string, limit: number): SessionTrace[] {
 }
 
 function personaSlug(personaName: string): string {
-  return personaName.toLowerCase().replace(/\s+/g, "-");
+  return personaName.trim().toLowerCase().replace(/\s+/g, "-");
+}
+
+function isSafeRelativeChild(baseDir: string, candidate: string): boolean {
+  const rel = relative(resolve(baseDir), resolve(candidate));
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+function personaFilePath(personaDir: string, personaName: string): string | null {
+  const slug = personaSlug(personaName);
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) return null;
+  const file = resolve(personaDir, `${slug}.md`);
+  return isSafeRelativeChild(personaDir, file) ? file : null;
 }
 
 function readPersonaRawFromDir(personaDir: string, personaName: string): string | null {
-  const slug = personaSlug(personaName);
-  const path = join(personaDir, `${slug}.md`);
+  const path = personaFilePath(personaDir, personaName);
+  if (!path) return null;
   try {
     return readFileSync(path, "utf-8");
   } catch {
@@ -374,6 +412,208 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function defaultJournalPath(): string {
+  return join(process.env.HOME ?? ".", ".mae", "ralph-journal.jsonl");
+}
+
+function resolveMutationFile(mutation: ConfigMutation, personaDir: string): string | null {
+  const { targetType, target } = suggestionTarget(mutation);
+  if (targetType !== "persona") return null;
+  return personaFilePath(personaDir, target || mutation.persona);
+}
+
+function requiredDeterministicFailures(trace: SessionTrace): string[] {
+  const score = scoreSession(trace);
+  const required = new Set(["session_completed", "no_agent_failures", "no_error_logs", "cost_reasonable"]);
+  return score.checks
+    .filter((check) => required.has(check.name) && !check.pass)
+    .map((check) => `${check.name}${check.details ? `: ${check.details}` : ""}`);
+}
+
+function mutationMatchesTrace(mutation: ConfigMutation, trace: SessionTrace): boolean {
+  const { targetType, target } = suggestionTarget(mutation);
+  if (targetType === "chain") return trace.chain === target;
+  if (targetType !== "persona") return false;
+  const wanted = personaSlug(target || mutation.persona);
+  return trace.events.some((event) => {
+    const persona = typeof event.persona === "string" ? personaSlug(event.persona) : "";
+    const agentId = typeof event.agent_id === "string" ? event.agent_id.toLowerCase() : "";
+    return persona === wanted || agentId.includes(wanted);
+  });
+}
+
+function selectRatchetGoldens(mutation: ConfigMutation, traceDir: string, minCoverage: number): SessionTrace[] {
+  const passGoldens = getGoldenTraces(traceDir).filter((entry) => entry.verdict === "pass");
+  const loaded: SessionTrace[] = [];
+  for (const entry of passGoldens) {
+    try {
+      loaded.push(loadTrace(entry.sessionId, traceDir));
+    } catch {
+      log.warn("Golden trace missing during ratchet selection", { session_id: entry.sessionId });
+    }
+  }
+  const targeted = loaded.filter((trace) => mutationMatchesTrace(mutation, trace));
+  return targeted.length >= minCoverage ? targeted : loaded;
+}
+
+async function defaultReplayRunner(goldenTrace: SessionTrace): Promise<SessionTrace> {
+  const proc = Bun.spawn(["bun", "engine/cli.ts", "replay", goldenTrace.sessionId, "--dry-run"], {
+    cwd: BASE_DIR,
+    stdout: "pipe",
+    stderr: "pipe",
+    env: process.env,
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  const output = `${stdout}\n${stderr}`;
+  const match = output.match(/New session:\s+([0-9a-fA-F-]{32,36})/);
+  if (!match?.[1]) throw new Error(`Replay did not report a new session id: ${output.slice(-800)}`);
+  if (exitCode !== 0) throw new Error(`Replay failed for ${goldenTrace.sessionId}: ${output.slice(-800)}`);
+  return loadTrace(match[1]);
+}
+
+function writeJournal(path: string, entry: Record<string, unknown>): void {
+  mkdirSync(dirname(path), { recursive: true });
+  appendFileSync(path, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n");
+}
+
+async function judgeRegression(
+  goldenTrace: SessionTrace,
+  replayTrace: SessionTrace,
+  opts: {
+    model: string;
+    maxRegression: number;
+    cacheDays: number;
+    requireScores: boolean;
+    judgeTraceFn: typeof judgeTrace;
+    getJudgeScoresFn: typeof getExistingJudgeScores;
+  },
+): Promise<{ ok: boolean; regression?: number; replayScores?: JudgeScores }> {
+  const goldenScores = await opts.getJudgeScoresFn(goldenTrace.sessionId, { cacheDays: opts.cacheDays }).catch(() => null);
+  if (!goldenScores) return { ok: !opts.requireScores };
+  const replay = await opts.judgeTraceFn(replayTrace, { explicit: true, model: opts.model, cacheDays: opts.cacheDays });
+  const regression = Math.max(
+    goldenScores.judge_overall_quality - replay.scores.judge_overall_quality,
+    goldenScores.judge_release_readiness - replay.scores.judge_release_readiness,
+  );
+  return { ok: regression <= opts.maxRegression, regression, replayScores: replay.scores };
+}
+
+export async function verifyMutation(mutation: ConfigMutation, config?: RalphConfig): Promise<RatchetVerification> {
+  const traceDir = config?.traceDir ?? TRACE_DIR;
+  const personaDir = config?.personaDir ?? join(BASE_DIR, "agents/personas");
+  const routing = loadModelRouting().ratchet ?? {};
+  const minCoverage = routing.min_golden_coverage ?? 3;
+  const maxCostMultiplier = routing.max_cost_multiplier ?? 2;
+  const maxJudgeRegression = routing.max_judge_regression ?? 0.1;
+  const judgeModel = routing.judge_ratchet_model ?? "quality";
+  const cacheDays = routing.judge_cache_days ?? 7;
+  const requireScores = routing.require_langfuse_scores ?? false;
+  const journalPath = config?.journalPath ?? defaultJournalPath();
+  const dryRun = config?.dryRun ?? false;
+  const replayRunner = config?.replayRunner ?? defaultReplayRunner;
+  const judgeTraceFn = config?.judgeTraceFn ?? judgeTrace;
+  const getJudgeScoresFn = config?.getJudgeScoresFn ?? getExistingJudgeScores;
+  const { targetType, target } = suggestionTarget(mutation);
+
+  if (targetType !== "persona" || mutation.action === "investigate") {
+    const result: RatchetVerification = {
+      accepted: false,
+      status: "needs_verification",
+      reason: `Ratchet apply currently supports concrete persona mutations only; got ${targetType}.${mutation.action}`,
+      tested: [],
+      coverage: 0,
+      journalPath,
+    };
+    writeJournal(journalPath, { mutation, verdict: result.status, reason: result.reason });
+    return result;
+  }
+
+  const file = resolveMutationFile(mutation, personaDir);
+  if (!file) {
+    const reason = `Target persona file not found for ${targetType}:${target}`;
+    writeJournal(journalPath, { mutation, verdict: "invalid", reason });
+    return { accepted: false, status: "invalid", reason, tested: [], coverage: 0, journalPath };
+  }
+
+  const goldens = selectRatchetGoldens(mutation, traceDir, minCoverage);
+  if (goldens.length < minCoverage) {
+    const reason = `Insufficient passing golden coverage (${goldens.length}/${minCoverage}). Run mae golden generate.`;
+    writeJournal(journalPath, { mutation, verdict: "needs_verification", reason, coverage: goldens.length });
+    return { accepted: false, status: "needs_verification", reason, tested: [], coverage: goldens.length, journalPath };
+  }
+
+  let before: string;
+  try {
+    before = readFileSync(file, "utf-8");
+  } catch {
+    const reason = `Target persona file not found for ${targetType}:${target}`;
+    writeJournal(journalPath, { mutation, verdict: "invalid", reason });
+    return { accepted: false, status: "invalid", reason, tested: [], coverage: goldens.length, journalPath };
+  }
+  const after = applyMutation(before, mutation);
+  if (before === after) {
+    const reason = "Mutation produced no file change.";
+    writeJournal(journalPath, { mutation, verdict: "no_change", reason, coverage: goldens.length });
+    return { accepted: false, status: "no_change", reason, tested: [], coverage: goldens.length, journalPath };
+  }
+
+  let accepted = false;
+  const tested: RatchetTraceResult[] = [];
+  try {
+    validatePersonaRaw(after);
+    writeFileSync(file, after);
+
+    for (const golden of goldens) {
+      const replayed = await replayRunner(golden, mutation);
+      const failedChecks = requiredDeterministicFailures(replayed);
+      const costOk = golden.totalCost === undefined || replayed.totalCost === undefined || golden.totalCost === 0
+        ? true
+        : replayed.totalCost <= golden.totalCost * maxCostMultiplier;
+      const judge = await judgeRegression(golden, replayed, {
+        model: judgeModel,
+        maxRegression: maxJudgeRegression,
+        cacheDays,
+        requireScores,
+        judgeTraceFn,
+        getJudgeScoresFn,
+      });
+      const comparison = compareFingerprints(extractFingerprint(golden), extractFingerprint(replayed));
+      tested.push({
+        goldenSessionId: golden.sessionId,
+        replaySessionId: replayed.sessionId,
+        deterministicPassed: failedChecks.length === 0,
+        failedChecks,
+        costOk,
+        judgeRegression: judge.regression,
+        fingerprintSimilarity: comparison.similarity,
+      });
+      if (failedChecks.length > 0 || !costOk || !judge.ok) {
+        throw new Error(`Ratchet rejected on ${golden.sessionId}`);
+      }
+    }
+
+    accepted = true;
+    const status: MutationResult["status"] = dryRun ? "dry_run" : "accepted";
+    const reason = dryRun ? "Ratchet passed; dry-run restored the snapshot." : "Ratchet passed deterministic golden replay checks.";
+    if (dryRun) writeFileSync(file, before);
+    writeJournal(journalPath, { mutation, verdict: status, reason, coverage: goldens.length, tested });
+    return { accepted: !dryRun, status, reason, tested, coverage: goldens.length, journalPath };
+  } catch (err: unknown) {
+    writeFileSync(file, before);
+    const reason = err instanceof Error ? err.message : String(err);
+    writeJournal(journalPath, { mutation, verdict: "rejected", reason, coverage: goldens.length, tested });
+    return { accepted: false, status: "rejected", reason, tested, coverage: goldens.length, journalPath };
+  } finally {
+    if (!accepted || dryRun) {
+      try { writeFileSync(file, before); } catch { /* best-effort restore */ }
+    }
+  }
+}
+
 /** Run the Ralph self-improvement loop. */
 export async function runRalphLoop(config?: RalphConfig): Promise<RalphResult> {
   const traceDir = config?.traceDir ?? TRACE_DIR;
@@ -387,6 +627,7 @@ export async function runRalphLoop(config?: RalphConfig): Promise<RalphResult> {
   const includeGolden = config?.includeGolden ?? !explicitTraceMode;
   const model = config?.model ?? "quality";
   const isDryRun = config?.dryRun ?? false;
+  const shouldApply = config?.apply ?? false;
   const acceptUnproven = config?.acceptUnproven ?? false;
   const evaluator = config?.evaluator ?? evaluateTraces;
   const evolver = config?.evolver ?? proposeConfigMutations;
@@ -402,6 +643,7 @@ export async function runRalphLoop(config?: RalphConfig): Promise<RalphResult> {
     includeGolden,
     model,
     dryRun: isDryRun,
+    apply: shouldApply,
     acceptUnproven,
   });
 
@@ -461,31 +703,50 @@ export async function runRalphLoop(config?: RalphConfig): Promise<RalphResult> {
       })()
       : "";
 
-    log.info(`SUGGESTED: ${targetType}:${target} — ${mutation.reasoning}`);
+    log.info(`${shouldApply ? "VERIFYING" : "SUGGESTED"}: ${targetType}:${target} — ${mutation.reasoning}`);
 
-    results.push({
+    const baseResult: MutationResult = {
       persona: mutation.persona,
       change: mutation.reasoning,
       accepted: false,
       scoreBefore,
       scoreAfter: scoreBefore,
       status: "suggested",
-      reason: "Suggestion only; no files were changed. Requires replay/golden verification before apply.",
+      reason: shouldApply ? "Pending ratchet verification." : "Suggestion only; no files were changed. Requires replay/golden verification before apply.",
       targetType,
       target,
-      file: mutation.file,
+      file: mutation.file ?? (targetType === "persona" ? `agents/personas/${personaSlug(target || mutation.persona)}.md` : undefined),
       field: mutation.field,
       action: mutation.action,
       content: mutation.content,
       verification: mutation.verification,
       diffPreview,
+    };
+
+    if (!shouldApply) {
+      results.push(baseResult);
+      continue;
+    }
+
+    const verification = await verifyMutation(mutation, {
+      ...config,
+      traceDir,
+      personaDir,
+      dryRun: isDryRun,
+    });
+    results.push({
+      ...baseResult,
+      accepted: verification.accepted,
+      status: verification.status,
+      reason: verification.reason,
+      verification: `${verification.coverage} golden trace(s) tested; journal: ${verification.journalPath}`,
     });
   }
 
-  const accepted = 0;
-  const rejected = 0;
+  const accepted = results.filter((result) => result.accepted).length;
+  const rejected = results.filter((result) => result.status === "rejected" || result.status === "invalid").length;
 
-  log.info(`Ralph loop complete: ${results.length} suggestion(s), no files changed`);
+  log.info(`Ralph loop complete: ${results.length} mutation(s), accepted=${accepted}, rejected=${rejected}, apply=${shouldApply}`);
 
   return {
     iterations: results.length,
