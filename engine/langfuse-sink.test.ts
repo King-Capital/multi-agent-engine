@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "fs";
 import { createLangfuseSink } from "./langfuse-sink";
 import type { LogEntry } from "./logger";
 
 const originalFetch = globalThis.fetch;
 const originalWrite = process.stderr.write;
+const expectedRelease = readFileSync(new URL("../VERSION", import.meta.url), "utf8").trim();
 
 interface FetchCall {
   url: string;
@@ -95,7 +97,7 @@ describe("langfuse sink", () => {
     const end = events.find((event) => event.type === "trace-create" && event.body.output);
     expect(start.body.userId).toBe("rico");
     expect(start.body.environment).toBe("development");
-    expect(start.body.release).toBe("1.0.4");
+    expect(start.body.release).toBe(expectedRelease);
     expect(start.body.tags).toEqual(["build-verify", "echo"]);
     expect(start.body.input).toEqual({
       goal: "Build feature",
