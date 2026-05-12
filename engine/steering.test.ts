@@ -3,13 +3,13 @@ import { sendUserMessage } from "./messaging";
 
 describe("steering commands (#147)", () => {
   describe("message routing", () => {
-    test("regular message is delivered to registered sender", () => {
+    test("regular message stays with orchestrator and is not delivered to arbitrary agent", () => {
       const received: string[] = [];
       const senders = new Map<string, (msg: string) => void>();
       senders.set("sess-1:agent-1", (msg) => received.push(msg));
 
       sendUserMessage(senders, "sess-1", "focus on the auth module");
-      expect(received).toContain("focus on the auth module");
+      expect(received).toEqual([]);
     });
 
     test("@mention routes to specific agent", () => {

@@ -3,8 +3,10 @@ import { createLogger } from "./logger";
 const log = createLogger("messaging");
 
 /**
- * Route a user message to the correct agent by @mention matching,
- * or broadcast to the first available sender in the session.
+ * Route only explicit @mentions to agents.
+ *
+ * Freeform dashboard steer messages are handled by the orchestrator loop and
+ * should not be injected into whichever worker happens to be active.
  */
 export function sendUserMessage(
   messageSenders: Map<string, (msg: string) => void>,
@@ -40,13 +42,7 @@ export function sendUserMessage(
     log.warn("No active agent matching @mention", { session_id: sessionId, mention_preview: message.slice(0, 50) });
   }
 
-  // Broadcast to first available sender
-  for (const [key, sender] of messageSenders) {
-    if (key.startsWith(sessionId)) {
-      sender(message);
-      return;
-    }
-  }
+  log.info("Freeform steer message left with orchestrator", { session_id: sessionId, preview: message.slice(0, 80) });
 }
 
 /**

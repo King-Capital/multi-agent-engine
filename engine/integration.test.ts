@@ -168,7 +168,7 @@ describe("steering", () => {
     expect(received[0]!.message).toBe("focus on error handling");
   });
 
-  test("broadcasts to first agent when no @target", () => {
+  test("does not inject freeform steer messages into an arbitrary active agent", () => {
     const orch = new Orchestrator("");
     const received: string[] = [];
     
@@ -181,8 +181,7 @@ describe("steering", () => {
 
     orch.sendUserMessage("session-1", "how's progress?");
 
-    expect(received.length).toBe(1);
-    expect(received[0]).toBe("how's progress?");
+    expect(received).toEqual([]);
   });
 
   test("acknowledges frontend steer messages immediately and passes them to the orchestrator loop", async () => {

@@ -469,6 +469,7 @@ interface StreamTabProps {
 	streamError: string | null;
 	message: string;
 	sendError: string | null;
+	pendingAckId?: string | null;
 	onMessageChange: (v: string) => void;
 	onSend: () => void;
 	selectedAgentId?: string | null;
@@ -731,6 +732,7 @@ function StreamTab({
 	streamError,
 	message,
 	sendError,
+	pendingAckId,
 	onMessageChange,
 	onSend,
 	selectedAgentId,
@@ -791,6 +793,11 @@ function StreamTab({
 			return true;
 		});
 	}, [historyEvents, liveEvents]);
+
+	const ackEvent = React.useMemo(() => {
+		if (!pendingAckId) return null;
+		return allEvents.find((ev) => ev.event_type === "message" && ev.data?.ack_for === pendingAckId) ?? null;
+	}, [allEvents, pendingAckId]);
 
 	// Skip non-visual events entirely
 	const SKIP_TYPES = new Set([
@@ -949,6 +956,11 @@ function StreamTab({
 			</div>
 			<div className="border-t border-zinc-800 p-3 space-y-2">
 				{sendError && <p className="text-xs text-red-400">{sendError}</p>}
+				{pendingAckId && (
+					<p className={cn("text-xs", ackEvent ? "text-emerald-400" : "text-zinc-500")}>
+						{ackEvent ? "Orchestrator ACK received" : "Steer sent; waiting for Orchestrator ACK"}
+					</p>
+				)}
 				{/* Session control buttons */}
 				{sessionStatus !== "completed" && (
 					<div className="flex items-center gap-2">
@@ -1063,6 +1075,7 @@ export function SessionTabs({
 	const [tab, setTab] = React.useState("stream");
 	const [message, setMessage] = React.useState("");
 	const [sendError, setSendError] = React.useState<string | null>(null);
+	const [pendingAckId, setPendingAckId] = React.useState<string | null>(null);
 
 	// Use shared SSE from context
 	const { events: liveEvents, error: streamError } = useSessionSSE();
@@ -1079,7 +1092,8 @@ export function SessionTabs({
 		if (!message.trim()) return;
 		setSendError(null);
 		try {
-			await api.sendMessage(session.id, message.trim());
+			const result = await api.sendMessage(session.id, message.trim());
+			setPendingAckId(result.message_id);
 			setMessage("");
 		} catch (err) {
 			setSendError(
@@ -1175,6 +1189,7 @@ export function SessionTabs({
 									streamError={streamError}
 									message={message}
 									sendError={sendError}
+									pendingAckId={pendingAckId}
 									onMessageChange={setMessage}
 									onSend={() => void handleSend()}
 									selectedAgentId={selectedAgentId}
