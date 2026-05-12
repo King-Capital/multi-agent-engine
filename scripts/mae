@@ -325,8 +325,33 @@ do_update() {
 
   # Update the CLI script itself
   if [[ -f "$MAE_BIN" ]]; then
-    cp "$root/scripts/mae" "$MAE_BIN"
-    chmod +x "$MAE_BIN"
+    local target_bin="$MAE_BIN"
+    local symlink_depth=0
+    while [[ -L "$target_bin" ]]; do
+      symlink_depth=$((symlink_depth + 1))
+      if [[ "$symlink_depth" -gt 10 ]]; then
+        echo "Too many symlinks while resolving $MAE_BIN"
+        exit 1
+      fi
+      local link_target
+      link_target="$(readlink "$target_bin")"
+      if [[ "$link_target" == /* ]]; then
+        target_bin="$link_target"
+      else
+        target_bin="$(cd "$(dirname "$target_bin")" && pwd)/$link_target"
+      fi
+    done
+
+    local tmp_bin
+    tmp_bin="$(mktemp "$(dirname "$target_bin")/.mae.XXXXXX")"
+    cleanup_tmp_bin() {
+      [[ -n "${tmp_bin:-}" && -e "$tmp_bin" ]] && rm -f "$tmp_bin"
+    }
+    trap cleanup_tmp_bin RETURN
+    install -m 0755 "$root/scripts/mae" "$tmp_bin"
+    mv -f "$tmp_bin" "$target_bin"
+    tmp_bin=""
+    trap - RETURN
     echo "CLI updated."
   fi
 
