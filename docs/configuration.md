@@ -62,7 +62,7 @@ Legacy gateway aliases (still supported):
 |----------|----------|---------|-------------|
 | `LANGFUSE_PUBLIC_KEY` | For Langfuse | -- | Langfuse public key |
 | `LANGFUSE_SECRET_KEY` | For Langfuse | -- | Langfuse secret key |
-| `LANGFUSE_HOST` | No | `http://10.71.20.73:3000` | Langfuse server URL |
+| `LANGFUSE_HOST` | No | `http://localhost:3000` | Langfuse server URL |
 
 Langfuse is enabled automatically when both keys are set. When not set, it is silently disabled.
 
@@ -139,7 +139,7 @@ aliases:
   quality: opus        # Claude Opus 4.6 -- max intelligence
   main: sonnet         # Claude Sonnet 4.6 -- balanced worker
   fast: sonnet         # Sonnet with no thinking -- speed optimized
-  pro: gpt-5.5         # GPT 5.5 via Codex -- cross-model partner
+  pro: gpt-5.5         # GPT 5.5 via configured LLM gateway -- cross-model partner
   gpt: gpt-5.5
   gpt-mini: gpt-5.4
 ```

@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'dashboard/**'
+      - 'dashboard-next/**'
+      - '.github/workflows/dashboard-ci.yml'
 
 permissions:
   contents: read
@@ -16,11 +18,13 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Generate templ
-        working-directory: dashboard
-        run: templ generate ./templates/
+      - name: Build React SPA
+        working-directory: dashboard-next
+        run: |
+          bun install
+          bun run build
 
-      - name: Build
+      - name: Build Go API
         working-directory: dashboard
         run: go build -o mae-dashboard .
 

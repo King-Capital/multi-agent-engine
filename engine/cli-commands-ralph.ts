@@ -32,7 +32,7 @@ Usage:
 
 Requires:
   LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY
-  LANGFUSE_HOST                       Defaults to http://10.71.20.73:3000
+  LANGFUSE_HOST                       Defaults to http://localhost:3000
   LANGFUSE_LITELLM_BASE_URL           Or MAE_LLM_GATEWAY_URL/LITELLM_URL/LITELLM_API_BASE
   LANGFUSE_LITELLM_API_KEY            Or MAE_LLM_GATEWAY_KEY/LITELLM_API_KEY
 

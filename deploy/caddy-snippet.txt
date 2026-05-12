@@ -1,3 +1,3 @@
-ai-agents.rodaddy.live {
-    reverse_proxy 10.71.20.72:8400
+mae.example.com {
+    reverse_proxy dashboard-host:8400
 }

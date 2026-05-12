@@ -11,7 +11,7 @@ if (process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY) {
   addSink(createLangfuseSink({
     publicKey: process.env.LANGFUSE_PUBLIC_KEY,
     secretKey: process.env.LANGFUSE_SECRET_KEY,
-    host: process.env.LANGFUSE_HOST ?? "http://10.71.20.73:3000",
+    host: process.env.LANGFUSE_HOST ?? "http://localhost:3000",
   }));
 }
 

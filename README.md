@@ -27,14 +27,16 @@ Current release candidate: **v1.0.0_RC1**.
 
 The `VERSION` file intentionally stays on `1.0.0_RC1` for the RC line. The auto-version workflow only bumps stable SemVer values like `1.0.0`; while the project is on an RC version, release bumps are manual.
 
+This RC ships the Pi adapter, the A2A adapter, and the echo dry-run adapter. Claude Code and Codex adapters are planned work and should not be documented as shipped until they have end-to-end smoke coverage.
+
 ## ✨ Features
 
-- **Multi-Model Orchestration** -- Route tasks across Claude, Codex, Pi, and custom adapters with per-agent model tier control
+- **Multi-Model Orchestration** -- Route tasks through Pi, A2A-compatible services, or dry-run echo adapters with per-agent model tier control
 - **10 Chain Types** -- From quick reviews to full-SDLC pipelines with plan → build → parallel validate → swarm review
 - **Cross-Model Verification** -- Parallel teams run on *different* model families, catching blind spots no single model finds
-- **Real-Time Dashboard** -- Go/HTMX/SSE dashboard with live agent activity, run history, and pipeline visualization
+- **Real-Time Dashboard** -- Go API + React dashboard with SSE live agent activity, run history, and pipeline visualization
 - **Red Team / Blue Team** -- Adversarial + correctness review running in parallel, synthesized by an orchestrator
-- **Pi SDK Integration** -- First-class adapter for the Pi coding agent alongside Claude Code and Codex
+- **Pi SDK Integration** -- First-class adapter for the Pi coding agent, with A2A support for protocol-compatible agents
 - **Sandbox Pooling** -- Agents execute in isolated sandboxes with pooled resource management
 - **Pipeline State & Resume** -- Chains checkpoint state so interrupted runs can resume from the last completed step
 - **Cost Tracking** -- Per-run token usage and cost breakdown across all model tiers
@@ -73,7 +75,7 @@ The `VERSION` file intentionally stays on `1.0.0_RC1` for the RC line. The auto-
     │  adversarial vs. correctness review in parallel.        │
     └─────────────────────────────────────────────────────────┘
 
-    Dashboard (Go/templ/HTMX) ──────▶ SSE event stream
+    Dashboard (Go API + React SPA) ─▶ SSE event stream
 ```
 
 ### Distributed Deployment
@@ -100,9 +102,9 @@ The engine CLI and dashboard can run on **different hosts**. The CLI streams eve
 | [Bun](https://bun.sh) | Engine CLI (all hosts) | See bun.sh |
 | [just](https://github.com/casey/just) | Justfile shortcuts (optional) | `brew install just` |
 | [Go](https://go.dev) (1.22+) | Dashboard server only | `brew install go` |
-| [templ](https://templ.guide) | Dashboard templates only | `go install github.com/a-h/templ/cmd/templ@latest` |
+| [Node.js](https://nodejs.org/) | Dashboard React build only | See nodejs.org |
 
-> **CLI-only hosts** only need `bun`. Go and templ are only needed on the dashboard server.
+> **CLI-only hosts** only need `bun`. Go is only needed on the dashboard server. Node.js is only needed when rebuilding the React dashboard assets.
 
 ### Install & Run
 
@@ -196,7 +198,7 @@ Any host with `bun` can run agent teams and stream results to the central dashbo
 
 ## 📊 Dashboard
 
-The real-time dashboard is a Go server using **templ** (type-safe templates), **HTMX**, **Alpine.js**, and **SSE** for live updates.
+The real-time dashboard is a Go API server with an embedded **React SPA** from `dashboard-next/src/` and **SSE** for live updates. Legacy templ files remain in `dashboard/templates/` but are not the active UI.
 
 | Feature | Detail |
 |---------|--------|
@@ -227,9 +229,8 @@ Cross-model pairs are configured in `configs/model-routing.yaml` to ensure build
 
 | Adapter | Description |
 |---------|-------------|
-| `claude-code` | Delegates to Claude Code CLI |
-| `codex` | Delegates to OpenAI Codex CLI |
 | `pi` | Delegates to Pi coding agent |
+| `a2a` | Delegates to remote A2A-compatible agents |
 | `echo` | Dry-run adapter -- prints what would happen |
 
 ---
@@ -279,10 +280,9 @@ Cross-model pairs are configured in `configs/model-routing.yaml` to ensure build
 | **Engine** | Bun / TypeScript |
 | **CLI** | Bun-compiled standalone binary |
 | **Dashboard** | Go 1.22+ / chi router |
-| **Templates** | templ (type-safe Go templates) |
-| **Dashboard UI** | HTMX + Alpine.js + SSE |
+| **Dashboard UI** | React SPA + SSE |
 | **Config** | YAML (teams, chains, model routing, damage control) |
-| **Adapters** | Claude Code, Codex, Pi, Echo (dry-run) |
+| **Adapters** | Pi, A2A, Echo (dry-run) |
 | **Testing** | bun:test |
 
 ---

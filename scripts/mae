@@ -5,7 +5,7 @@ set -euo pipefail
 # Install: curl -fsSL https://raw.githubusercontent.com/King-Capital/multi-agent-engine/main/scripts/mae | bash -s install
 # Or:      mae install
 
-MAE_VERSION="0.2.34"
+MAE_VERSION="1.0.0_RC1"
 MAE_REPO="King-Capital/multi-agent-engine"
 MAE_GIT_URL="git@github.com:${MAE_REPO}.git"
 MAE_INSTALL_DIR="${MAE_HOME:-$HOME/.mae}"
@@ -19,9 +19,9 @@ if [[ -f "$MAE_CONFIG" ]]; then
 fi
 
 # Apply defaults for anything not set by config or env
-MAE_DASHBOARD_URL="${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}"
-DATABASE_URL="${DATABASE_URL:-postgres://mae:mae@10.71.20.72:5432/mae?sslmode=disable}"
-MAE_API_URL="${MAE_API_URL:-http://10.71.20.72:8400}"
+MAE_DASHBOARD_URL="${MAE_DASHBOARD_URL:-http://localhost:8400}"
+DATABASE_URL="${DATABASE_URL:-postgres://mae:mae@localhost:5432/mae?sslmode=disable}"
+MAE_API_URL="${MAE_API_URL:-http://localhost:8400}"
 export MAE_DASHBOARD_URL DATABASE_URL MAE_API_URL
 
 # ── Locate MAE root ──────────────────────────────────────────────────
@@ -96,25 +96,25 @@ do_install() {
     echo "[3/4] Config exists at $MAE_CONFIG (keeping current)"
   else
     echo "[3/4] Create config: $MAE_CONFIG"
-    echo "      MAE_DASHBOARD_URL = http://10.71.20.72:8400"
-    echo "      DATABASE_URL      = postgres://mae:mae@10.71.20.72:5432/mae"
-    echo "      MAE_API_URL       = http://10.71.20.72:8400"
+    echo "      MAE_DASHBOARD_URL = http://localhost:8400"
+    echo "      DATABASE_URL      = postgres://mae:mae@localhost:5432/mae"
+    echo "      MAE_API_URL       = http://localhost:8400"
     if ! $dry_run; then
       cat > "$MAE_CONFIG" << 'CONF'
 # MAE Configuration -- edit these values for your environment
 # Sourced by the mae CLI on every invocation
 
 # Dashboard / Go API server
-MAE_DASHBOARD_URL="http://10.71.20.72:8400"
+MAE_DASHBOARD_URL="http://localhost:8400"
 
 # PostgreSQL connection (used by Go dashboard)
-DATABASE_URL="postgres://mae:mae@10.71.20.72:5432/mae?sslmode=disable"
+DATABASE_URL="postgres://mae:mae@localhost:5432/mae?sslmode=disable"
 
 # API URL for dashboard-next Vite proxy
-MAE_API_URL="http://10.71.20.72:8400"
+MAE_API_URL="http://localhost:8400"
 
-# Default adapter (pi, claude-code, codex, a2a, echo)
-# MAE_DEFAULT_ADAPTER="claude-code"
+# Default adapter (pi, a2a, echo)
+# MAE_DEFAULT_ADAPTER="pi"
 
 # API auth token (set if dashboard requires auth)
 # MAE_API_TOKEN=""
@@ -288,8 +288,8 @@ Agents:
   mae new-agent <name> <role> <team>   Scaffold a new agent persona
 
 Options:
-  --adapter <name>         Use specific adapter (pi, claude-code, codex, a2a, echo)
-  --dashboard <url>        Dashboard URL (default: \$MAE_DASHBOARD_URL or http://10.71.20.72:8400)
+  --adapter <name>         Use specific adapter (pi, a2a, echo)
+  --dashboard <url>        Dashboard URL (default: \$MAE_DASHBOARD_URL or http://localhost:8400)
   --dry-run                Use echo adapter (no real agents, test the flow)
   --cwd <path>             Working directory for agents
   --a2a-url <url>          Remote A2A agent endpoint
@@ -299,17 +299,17 @@ Examples:
   mae task "Add input validation to the login form"
   mae chain full-stack-specialized "Build user settings page"
   mae run review "git diff HEAD~3"
-  mae task "Fix the auth bug" --adapter claude-code
-  mae task "review this PR" --adapter a2a --a2a-url http://10.71.20.71:41271
+  mae task "Fix the auth bug" --adapter pi
+  mae task "review this PR" --adapter a2a --a2a-url http://agent-host:41271
   mae info
   mae session list
 
 Config:
   ~/.mae/config            Sourced on every invocation (created by 'mae install')
   Defaults:
-    MAE_DASHBOARD_URL      http://10.71.20.72:8400
-    DATABASE_URL           postgres://mae:mae@10.71.20.72:5432/mae
-    MAE_API_URL            http://10.71.20.72:8400
+    MAE_DASHBOARD_URL      http://localhost:8400
+    DATABASE_URL           postgres://mae:mae@localhost:5432/mae
+    MAE_API_URL            http://localhost:8400
 
 Environment (override config):
   MAE_DASHBOARD_URL   Dashboard API

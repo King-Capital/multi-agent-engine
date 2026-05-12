@@ -136,7 +136,7 @@ function configuredJudgeModels(): string[] {
 }
 
 export function buildLangfuseProvisionPlan(): LangfuseProvisionPlan {
-  const host = process.env.LANGFUSE_HOST ?? "http://10.71.20.73:3000";
+  const host = process.env.LANGFUSE_HOST ?? "http://localhost:3000";
   const baseUrl = process.env.LANGFUSE_LITELLM_BASE_URL
     ?? process.env.MAE_LLM_GATEWAY_URL
     ?? process.env.LITELLM_URL

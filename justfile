@@ -81,7 +81,11 @@ dashboard:
 
 # Rebuild the dashboard binary
 dashboard-build:
-    cd dashboard && templ generate ./templates/ && go build -o dashboard-bin .
+    cd dashboard-next && bun install
+    cd dashboard-next && bun run build
+    rm -rf dashboard-next-dist
+    cp -R dashboard-next/dist dashboard-next-dist
+    cd dashboard && go build -o dashboard-bin .
 
 # Seed test data into the dashboard
 dashboard-seed:

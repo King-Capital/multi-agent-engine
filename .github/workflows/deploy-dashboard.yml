@@ -29,10 +29,6 @@ jobs:
           bun install
           ./node_modules/.bin/vite build
 
-      - name: Generate templ
-        working-directory: dashboard
-        run: templ generate ./templates/
-
       - name: Build Go binary
         working-directory: dashboard
         run: go build -o mae-dashboard .

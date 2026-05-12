@@ -140,7 +140,6 @@ echo -e "  ${ARROW} ${BOLD}Step 0:${RESET} Checking prerequisites"
 prereq_ok=true
 check_prereq "bun" "bun" || prereq_ok=false
 check_prereq "go" "go" || prereq_ok=false
-check_prereq "templ" "templ" || prereq_ok=false
 echo ""
 
 if [[ "$prereq_ok" != "true" ]]; then
@@ -152,7 +151,7 @@ if [[ "$prereq_ok" != "true" ]]; then
   exit 1
 fi
 
-RESULTS+=("${CHECK}|Prerequisites (bun, go, templ)|0s|PASS")
+RESULTS+=("${CHECK}|Prerequisites (bun, go)|0s|PASS")
 PASS_COUNT=$(( PASS_COUNT + 1 ))
 
 # --- Step 1: bun install ---
@@ -164,8 +163,8 @@ run_step 2 "Engine: tsc --noEmit (type check)" "bunx tsc --noEmit" "${REPO_ROOT}
 # --- Step 3: Unit tests ---
 run_step 3 "Engine: bun test (unit tests)" "bun test" "${REPO_ROOT}/engine"
 
-# --- Step 4: templ generate ---
-run_step 4 "Dashboard: templ generate" "templ generate ./templates/" "${REPO_ROOT}/dashboard"
+# --- Step 4: dashboard SPA build ---
+run_step 4 "Dashboard: React SPA build" "bun install && bun run build" "${REPO_ROOT}/dashboard-next"
 
 # --- Step 5: go build ---
 run_step 5 "Dashboard: go build" "go build -o /dev/null ." "${REPO_ROOT}/dashboard"
