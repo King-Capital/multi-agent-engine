@@ -13,6 +13,7 @@
 import type { LogSink, LogEntry } from "./logger";
 import { mkdirSync, appendFileSync, existsSync } from "fs";
 import { join } from "path";
+import { sanitizeAgentInput } from "./security";
 
 export const TRACE_DIR =
   process.env.MAE_TRACE_DIR ?? join(process.env.HOME ?? "/tmp", ".mae", "traces");
@@ -36,6 +37,8 @@ type TraceType =
  * Map a log entry's component + message to a trace schema event type.
  */
 function mapLogToTraceType(entry: LogEntry): TraceType {
+  if (isTraceType(entry.trace_type)) return entry.trace_type;
+
   const comp = (entry.component ?? "").toLowerCase();
   const msg = (entry.msg ?? "").toLowerCase();
 
@@ -90,6 +93,14 @@ function mapLogToTraceType(entry: LogEntry): TraceType {
   }
 
   return "log";
+}
+
+function isTraceType(value: unknown): value is TraceType {
+  return typeof value === "string" && [
+    "session.start", "session.end", "agent.start", "agent.end", "agent.error",
+    "chain.step.start", "chain.step.end", "tool.call", "llm.call",
+    "self_heal", "verify", "orch.decision", "log",
+  ].includes(value);
 }
 
 /**
@@ -151,10 +162,16 @@ function extractTraceFields(entry: LogEntry, traceType: TraceType): Record<strin
     case "chain.step.start":
     case "chain.step.end":
       if (entry.step !== undefined) fields.step = entry.step;
-      if (entry.name !== undefined) fields.step_name = entry.name;
+      if (entry.name !== undefined) {
+        fields.name = entry.name;
+        fields.step_name = entry.name;
+      }
       if (entry.team !== undefined) fields.team = entry.team;
       if (entry.status !== undefined) fields.status = entry.status;
       if (entry.duration_ms !== undefined) fields.duration_ms = entry.duration_ms;
+      if (entry.reason !== undefined) fields.reason = sanitizeAgentInput(String(entry.reason)).slice(0, 500);
+      if (entry.error_type !== undefined) fields.error_type = entry.error_type;
+      if (entry.error_preview !== undefined) fields.error_preview = String(entry.error_preview).slice(0, 500);
       break;
 
     case "tool.call":
