@@ -11,6 +11,11 @@ describe("scripts/mae install wrapper", () => {
     expect(wrapper).toContain('sync_install_version "$root"');
   });
 
+  test("engine postinstall performs first-update version sync", () => {
+    const packageJson = readFileSync(new URL("./package.json", import.meta.url), "utf8");
+    expect(packageJson).toContain('"postinstall": "bun ../scripts/sync-install-version.ts"');
+  });
+
   test("offers qmd setup for indexed repo search", () => {
     expect(wrapper).toContain("mae setup qmd [--name <collection>] [--embed]");
     expect(wrapper).toContain("qmd collection add \"$root\" --name \"$collection\"");
