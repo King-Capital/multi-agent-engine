@@ -176,6 +176,7 @@ export interface SessionState {
   task: string;
   workingDir: string;
   status: "active" | "paused" | "completed" | "error";
+  abortSignal?: AbortSignal;
   agents: Map<string, AgentState>;
   tillDone: TillDoneItem[];
   events: SessionEvent[];
@@ -305,6 +306,7 @@ export interface DelegateOptions {
   teamName: string;
   teamColor: string;
   timeoutMs?: number;
+  abortSignal?: AbortSignal;
   onStreamEvent?: (event: StreamEvent) => void;
   sendMessage?: (fn: (msg: string) => void) => void;
 }

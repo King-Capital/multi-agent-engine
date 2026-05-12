@@ -98,6 +98,7 @@ export async function delegateWithHealing(ctx: SelfHealContext): Promise<Delegat
   logOutput(opts.sessionDir, opts.persona.name, 1, result);
 
   if (!isFailed(result)) return result;
+  if (opts.abortSignal?.aborted) return result;
 
   if (isModelUnavailable(result)) {
     const fallbackModel = getUnavailableModelFallback(opts.model);
@@ -127,6 +128,7 @@ export async function delegateWithHealing(ctx: SelfHealContext): Promise<Delegat
       logOutput(opts.sessionDir, opts.persona.name, 2, result);
 
       if (!isFailed(result)) return result;
+      if (opts.abortSignal?.aborted) return result;
     }
   }
 
@@ -175,6 +177,7 @@ export async function delegateWithHealing(ctx: SelfHealContext): Promise<Delegat
   logOutput(opts.sessionDir, opts.persona.name, 2, result);
 
   if (!isFailed(result)) return result;
+  if (opts.abortSignal?.aborted) return result;
 
   // Attempt 3: Upgrade model
   const upgradedModel = getEscalationModel(opts.model);
@@ -197,6 +200,7 @@ export async function delegateWithHealing(ctx: SelfHealContext): Promise<Delegat
     logOutput(opts.sessionDir, opts.persona.name, 3, result);
 
     if (!isFailed(result)) return result;
+    if (opts.abortSignal?.aborted) return result;
   }
 
   // Attempt 4: This is handled by the orchestrator (lead takes over)

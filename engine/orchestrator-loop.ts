@@ -222,6 +222,7 @@ export class OrchestratorLoop {
           teamName: "Orchestrator",
           teamColor: "#36f9f6",
           timeoutMs: REASONING_TIMEOUT_MS,
+          abortSignal: this.opts.session.abortSignal,
         }),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error("Orchestrator reasoning timeout")), REASONING_TIMEOUT_MS)),

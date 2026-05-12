@@ -46,6 +46,41 @@ export function sendUserMessage(
 }
 
 /**
+ * Broadcast explicit control messages such as !stop to every active agent in a
+ * session. This intentionally bypasses normal freeform routing so cancellation
+ * commands still reach workers.
+ */
+export function broadcastControlMessage(
+  messageSenders: Map<string, (msg: string) => void>,
+  sessionId: string,
+  message: string,
+): number {
+  const prefix = `${sessionId}:`;
+  let delivered = 0;
+
+  for (const [key, sender] of messageSenders) {
+    if (!key.startsWith(prefix)) continue;
+    try {
+      sender(message);
+    } catch (err) {
+      log.warn("Control message sender failed", {
+        session_id: sessionId,
+        agent: key.slice(prefix.length),
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    delivered++;
+  }
+
+  log.info("Broadcast control message to active agents", {
+    session_id: sessionId,
+    delivered,
+    preview: message.slice(0, 80),
+  });
+  return delivered;
+}
+
+/**
  * Start listening for user messages via SSE stream from the dashboard.
  * Returns an AbortController to stop listening.
  */

@@ -138,6 +138,18 @@ describe("adapter instrumentation", () => {
     expect(streamEvents.map((event) => event.type)).toEqual(["tool_call", "tool_result"]);
   });
 
+  test("Pi adapter returns cancelled result when session aborts before spawn", async () => {
+    const adapter = new PiAdapter();
+    const controller = new AbortController();
+    controller.abort("test stop");
+
+    const result = await adapter.delegate(makeDelegateOpts({ abortSignal: controller.signal }));
+
+    expect(result.grade).toBe("FAILED");
+    expect(result.findings).toContain("cancelled");
+    expect(result.output).toContain("cancelled before start");
+  });
+
   test("Echo adapter emits agent.start, llm.call, and agent.end", async () => {
     const adapter = new EchoAdapter();
     const result = await adapter.delegate(makeDelegateOpts());

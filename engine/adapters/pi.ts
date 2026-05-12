@@ -5,6 +5,7 @@ import type { PlatformAdapter, DelegateOptions, DelegateResult, StreamEvent, Gra
 import { createLogger } from "../logger";
 import { sanitizeAgentInput } from "../security";
 import { trackPromptVersion } from "../langfuse-prompts";
+import { withPiRepoContext } from "../pi-repo-context";
 
 const log = createLogger("pi-adapter");
 
@@ -74,6 +75,17 @@ export class PiAdapter implements PlatformAdapter {
   async delegate(opts: DelegateOptions): Promise<DelegateResult> {
     const agentId = `pi-${opts.persona.name.toLowerCase().replace(/\s+/g, "-")}`;
     const sessionId = opts.sessionDir?.split(/[\\/]/).pop() ?? undefined;
+    if (opts.abortSignal?.aborted) {
+      return {
+        agentId,
+        agentName: opts.persona.name,
+        output: "ERROR: Agent cancelled before start",
+        grade: "FAILED",
+        findings: ["cancelled"],
+        costUsd: 0,
+        tokensUsed: 0,
+      };
+    }
     const promptMeta = trackPromptVersion(opts.persona.name, opts.systemPrompt, {
       workingDir: opts.workingDir,
       sourceRoot: process.cwd(),
@@ -137,9 +149,13 @@ export class PiAdapter implements PlatformAdapter {
     let totalTokens = 0;
     let cacheReadTokens = 0;
     let finalText = "";
+    const userPrompt = await withPiRepoContext(opts.userPrompt, opts.workingDir);
 
     return new Promise<DelegateResult>((resolve) => {
       let resolved = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let reader: { cancel: () => Promise<void> } | null = null;
+      let abortHandler: (() => void) | null = null;
       const safeResolve = (result: DelegateResult) => {
         if (resolved) return;
         resolved = true;
@@ -154,7 +170,8 @@ export class PiAdapter implements PlatformAdapter {
           tokens: result.tokensUsed,
           output_preview: sanitizeAgentInput(result.output ?? "").slice(0, 500),
         });
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
+        if (abortHandler) opts.abortSignal?.removeEventListener("abort", abortHandler);
         resolve(result);
       };
 
@@ -191,11 +208,37 @@ export class PiAdapter implements PlatformAdapter {
       let stderrText = "";
       const stderrPromise = new Response(proc.stderr).text().then(t => { stderrText = t; }).catch(() => {});
 
-      const timer = setTimeout(async () => {
+      const cancelAgent = (reason: string) => {
+        if (resolved) return;
+        log.warn("Cancelling pi-rpc agent", { agent_id: agentId, session_id: sessionId, reason });
+        this.sendCmd(proc, { type: "abort" }, agentId);
+        try { reader?.cancel(); } catch {}
+        try { const stdin = proc.stdin; if (stdin && "end" in stdin) (stdin as any).end(); } catch {}
+        try { proc.kill(); } catch {}
+        setTimeout(() => {
+          if (!resolved) {
+            try { proc.kill(9); } catch {}
+          }
+        }, 2_000);
+        safeResolve({
+          agentId,
+          agentName: opts.persona.name,
+          output: finalText || `ERROR: Agent cancelled: ${reason}`,
+          grade: finalText ? this.extractGrade(finalText) : "FAILED",
+          findings: finalText ? this.extractFindings(finalText) : ["cancelled"],
+          costUsd: totalCost,
+          tokensUsed: totalTokens,
+        });
+      };
+
+      abortHandler = () => cancelAgent("session stop");
+      opts.abortSignal?.addEventListener("abort", abortHandler, { once: true });
+
+      timer = setTimeout(async () => {
         log.error("Agent timed out", { agent_id: agentId, timeout_ms: timeout });
         // Step 1: send abort RPC + cancel reader
         this.sendCmd(proc, { type: "abort" }, agentId);
-        try { reader.cancel(); } catch {}
+        try { reader?.cancel(); } catch {}
         try { const stdin = proc.stdin; if (stdin && "end" in stdin) (stdin as any).end(); } catch {}
         // Step 2: wait 5s, then SIGTERM
         await Bun.sleep(5000);
@@ -222,7 +265,7 @@ export class PiAdapter implements PlatformAdapter {
         opts.sendMessage((msg: string) => {
           const normalized = msg.trim().toLowerCase();
           if (normalized === "!stop" || normalized === "stop" || normalized === "abort") {
-            this.sendCmd(proc, { type: "abort" }, agentId);
+            cancelAgent("steer stop");
             return;
           }
           this.sendCmd(proc, { type: "follow_up", message: msg }, agentId);
@@ -230,17 +273,18 @@ export class PiAdapter implements PlatformAdapter {
       }
 
       // Send the initial prompt
-      this.sendCmd(proc, { type: "prompt", message: opts.userPrompt }, agentId);
+      this.sendCmd(proc, { type: "prompt", message: userPrompt }, agentId);
 
       // Stream stdout JSONL
-      const reader = proc.stdout.getReader();
+      const stdoutReader = proc.stdout.getReader();
+      reader = stdoutReader;
       const decoder = new TextDecoder();
       let buffer = "";
 
       const processStream = async () => {
         try {
           while (true) {
-            const { done, value } = await reader.read();
+            const { done, value } = await stdoutReader.read();
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
 
@@ -370,7 +414,7 @@ export class PiAdapter implements PlatformAdapter {
 
         // Stream is hung — force resolve
         log.warn("Agent exited but stream still open, force-resolving", { agent_id: agentId, exit_code: exitCode });
-        try { reader.cancel(); } catch {}
+        try { reader?.cancel(); } catch {}
 
         const stderr = stderrText;
 
