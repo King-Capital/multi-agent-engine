@@ -242,6 +242,29 @@ describe("trace-recorder", () => {
     recorder.close?.();
   });
 
+  test("stores bounded full agent output alongside preview", () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+    const sessionId = "test-agent-output";
+
+    recorder.write(makeEntry({
+      session_id: sessionId,
+      component: "pi-adapter",
+      msg: "Agent completed",
+      trace_type: "agent.end",
+      output_preview: "short preview",
+      output: "final report\n" + "x".repeat(25_000),
+    }));
+
+    const content = readFileSync(join(TEST_TRACE_DIR, `${sessionId}.jsonl`), "utf-8");
+    const event = JSON.parse(content.trim());
+
+    expect(event.type).toBe("agent.end");
+    expect(event.output_preview).toBe("short preview");
+    expect(event.output).toStartWith("final report");
+    expect(event.output.length).toBe(20_000);
+    recorder.close?.();
+  });
+
   test("bounds step reason metadata", () => {
     const recorder = createTraceRecorder(TEST_TRACE_DIR);
     const sessionId = "test-step-reason";

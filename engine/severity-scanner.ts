@@ -1,13 +1,14 @@
 export type Severity = "P0" | "P1" | "P2" | "P3" | null;
 
-// Known limitation: These patterns are intentionally broad and may produce false positives.
-// The design philosophy is "better to over-pause than miss a real P0". Agent output that
-// happens to contain words like "CRITICAL" or "SECURITY" in non-finding context can trigger
-// a false pause. This is acceptable for safety but may need tuning for specific workflows.
+// Keep patterns specific enough that final audit reports can mention priority/severity
+// headings without pausing an otherwise useful run. Still pause on explicit finding
+// labels and concrete exploit-class language.
 
 const P0_PATTERNS = [
-  /\bP0\s*:/i,
-  /\bCRITICAL\b/i,
+  /\bP0\s*[:—-]/i,
+  /\bSEVERITY\s*[:=]\s*(P0|CRITICAL)\b/i,
+  /\bCRITICAL\s*[:—-]\s*.+/i,
+  /\bCRITICAL\s+(VULNERABILITY|SECURITY|RISK|BUG|ISSUE|FINDING)\b/i,
   /\bSECURITY\s*(VULNERABILITY|ISSUE|BUG|FLAW)\b/i,
   /\bRCE\b/,
   /\bSQL\s*INJECTION\b/i,
@@ -15,14 +16,15 @@ const P0_PATTERNS = [
 ];
 
 const P1_PATTERNS = [
-  /\bP1\s*:/i,
-  /\bHIGH\s*SEVERITY\b/i,
+  /\bP1\s*[:—-]/i,
+  /\bSEVERITY\s*[:=]\s*(P1|HIGH)\b/i,
+  /\bHIGH\s+SEVERITY\s+(ISSUE|FINDING|BUG|RISK)\b/i,
   /\bBREAKING\s*CHANGE\b/i,
   /\bDATA\s*LOSS\b/i,
 ];
 
-const P2_PATTERN = /\bP2\s*:/i;
-const P3_PATTERN = /\bP3\s*:/i;
+const P2_PATTERN = /\bP2\s*[:—-]/i;
+const P3_PATTERN = /\bP3\s*[:—-]/i;
 
 export function scanSeverity(text: string): Severity {
   if (P0_PATTERNS.some((p) => p.test(text))) return "P0";
@@ -52,8 +54,8 @@ export function shouldAutoPause(severity: Severity, sessionId?: string): boolean
 export function extractFindingExcerpt(text: string, severity: Severity): string {
   if (!severity) return "";
   const pattern = severity === "P0"
-    ? /^.*\b(P0|CRITICAL|SECURITY).*$/im
-    : /^.*\bP1.*$/im;
+    ? /^.*\b(P0|CRITICAL|SECURITY|RCE|SQL\s*INJECTION|COMMAND\s*INJECTION).*$/im
+    : /^.*\b(P1|HIGH\s+SEVERITY|BREAKING\s+CHANGE|DATA\s+LOSS).*$/im;
   const match = text.match(pattern);
   return match ? match[0].trim().slice(0, 500) : text.slice(0, 200);
 }

@@ -1,6 +1,7 @@
 import { $ } from "bun";
 import { join } from "path";
 import { tmpdir } from "os";
+import { cpSync, existsSync, rmSync } from "fs";
 
 export async function isGitRepo(dir: string): Promise<boolean> {
   try {
@@ -8,6 +9,28 @@ export async function isGitRepo(dir: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+const DEFAULT_CONTEXT_PATHS = [".goal-runs"];
+
+function contextPaths(): string[] {
+  const configured = process.env.MAE_WORKTREE_CONTEXT_PATHS;
+  if (!configured) return DEFAULT_CONTEXT_PATHS;
+  return configured
+    .split(/[,:]/)
+    .map((path) => path.trim())
+    .filter(Boolean);
+}
+
+function copyContextPaths(baseDir: string, wtPath: string): void {
+  for (const relPath of contextPaths()) {
+    if (relPath.startsWith("/") || relPath.includes("..")) continue;
+    const src = join(baseDir, relPath);
+    if (!existsSync(src)) continue;
+    const dest = join(wtPath, relPath);
+    rmSync(dest, { recursive: true, force: true });
+    cpSync(src, dest, { recursive: true, force: true });
   }
 }
 
@@ -19,6 +42,7 @@ export async function createWorktree(baseDir: string, id: string): Promise<strin
   await $`git -C ${baseDir} worktree remove ${wtPath} --force`.quiet().nothrow();
   await $`git -C ${baseDir} branch -D ${branch}`.quiet().nothrow();
   await $`git -C ${baseDir} worktree add ${wtPath} -b ${branch}`.quiet();
+  copyContextPaths(baseDir, wtPath);
   return wtPath;
 }
 

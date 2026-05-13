@@ -6,6 +6,7 @@ const MAX_TRACKED_FILES = 80;
 
 const HIDDEN_ALLOWLIST = new Set([
   ".github",
+  ".goal-runs",
   ".gitignore",
   ".planning",
   ".reports",
@@ -13,7 +14,6 @@ const HIDDEN_ALLOWLIST = new Set([
 
 const SKIP_ENTRIES = new Set([
   ".git",
-  ".goal-runs",
   "node_modules",
   "dist",
   "build",
@@ -114,6 +114,7 @@ export async function buildPiRepoContext(workingDir: string): Promise<string> {
     "File discovery guidance:",
     "- If `qmd` is installed and this repo has a qmd collection, search it first with `qmd search <terms> -c <collection> --files` or retrieve known files with `qmd get <collection>/<path>`.",
     "- Use glob patterns such as **/*.ts or exact read paths for repo discovery.",
+    "- Gitignored MAE scratch context may live under `.goal-runs/`; use exact paths or shell `find .goal-runs -type f` if tool discovery misses dot-prefixed directories.",
     "- Do not treat `find <directory>` returning only a few entries as evidence that a repo is empty.",
     "- This manifest was computed by MAE from the host filesystem before the Pi agent started.",
     "</mae_repo_context>",

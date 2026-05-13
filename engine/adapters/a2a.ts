@@ -26,6 +26,7 @@ import { sanitizeAgentInput } from "../security";
 import { trackPromptVersion } from "../langfuse-prompts";
 
 const log = createLogger("a2a-adapter");
+const MAX_TRACE_OUTPUT_CHARS = 20_000;
 
 // --- A2A Protocol Types ---
 
@@ -190,6 +191,7 @@ export class A2AAdapter implements PlatformAdapter {
         tokens: result.tokensUsed ?? 0,
         duration_ms: Date.now() - startedAt,
         output_preview: sanitizeAgentInput(result.output ?? "").slice(0, 500),
+        output: sanitizeAgentInput(result.output ?? "").slice(0, MAX_TRACE_OUTPUT_CHARS),
       });
       return result;
     };

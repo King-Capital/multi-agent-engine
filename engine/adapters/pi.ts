@@ -8,6 +8,7 @@ import { trackPromptVersion } from "../langfuse-prompts";
 import { withPiRepoContext } from "../pi-repo-context";
 
 const log = createLogger("pi-adapter");
+const MAX_TRACE_OUTPUT_CHARS = 20_000;
 
 export class PiAdapter implements PlatformAdapter {
   name = "pi";
@@ -169,6 +170,7 @@ export class PiAdapter implements PlatformAdapter {
           cost: result.costUsd,
           tokens: result.tokensUsed,
           output_preview: sanitizeAgentInput(result.output ?? "").slice(0, 500),
+          output: sanitizeAgentInput(result.output ?? "").slice(0, MAX_TRACE_OUTPUT_CHARS),
         });
         if (timer) clearTimeout(timer);
         if (abortHandler) opts.abortSignal?.removeEventListener("abort", abortHandler);
