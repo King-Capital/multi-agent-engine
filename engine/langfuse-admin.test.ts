@@ -30,9 +30,9 @@ describe("langfuse-admin", () => {
   test("explains self-hosted allowlist fix for blocked LiteLLM hosts", () => {
     const message = explainLlmConnectionFailure(
       '400: {"message":"Invalid baseURL: Blocked IP address detected"}',
-      "https://litellm.rodaddy.live/v1",
+      "https://litellm.example.com/v1",
     );
 
-    expect(message).toContain("LANGFUSE_LLM_CONNECTION_WHITELISTED_HOST=litellm.rodaddy.live");
+    expect(message).toContain("LANGFUSE_LLM_CONNECTION_WHITELISTED_HOST=litellm.example.com");
   });
 });

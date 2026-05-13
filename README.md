@@ -120,7 +120,7 @@ cd engine && bun install && cd ..
 just build
 
 # Point at the dashboard server (set in ~/.mae/config or shell profile)
-export MAE_DASHBOARD_URL="$MAE_DASHBOARD_URL"  # e.g. http://your-dashboard:8400
+export MAE_DASHBOARD_URL="http://your-dashboard-host:8400"
 
 # Optional: expose a small run-specific scratch folder to worker worktrees.
 # Use a narrow path; MAE does not copy the entire .goal-runs tree by default.
@@ -139,8 +139,8 @@ just dashboard-build && just dashboard
 ### Remote Dashboard
 
 ```bash
-# Add to ~/.zshrc or ~/.bashrc for persistence
-export MAE_DASHBOARD_URL="http://your-dashboard:8400"  # Set in ~/.mae/config
+# Add to ~/.zshrc, ~/.bashrc, or ~/.mae/config for persistence
+export MAE_DASHBOARD_URL="http://your-dashboard-host:8400"
 
 # Or pass per-invocation
 bun engine/cli.ts task "your task" --dashboard "$MAE_DASHBOARD_URL"

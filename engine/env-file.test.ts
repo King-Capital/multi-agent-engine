@@ -20,12 +20,12 @@ describe("loadEnvFile", () => {
 
     const env: Record<string, string | undefined> = {
       EXISTING: "already-set",
-      MAE_DASHBOARD_URL: "http://10.71.20.72:8400",
+      MAE_DASHBOARD_URL: "http://your-dashboard-host:8400",
     };
     loadEnvFile(path, env);
 
     expect(env.MAE_API_TOKEN).toBe("from-file");
-    expect(env.MAE_DASHBOARD_URL).toBe("http://10.71.20.72:8400");
+    expect(env.MAE_DASHBOARD_URL).toBe("http://your-dashboard-host:8400");
     expect(env.MAE_LLM_GATEWAY_URL).toBe("http://localhost:4000");
     expect(env.EXISTING).toBe("already-set");
 
@@ -45,11 +45,11 @@ describe("loadEnvFile", () => {
     chmodSync(path, 0o000);
 
     const env: Record<string, string | undefined> = {
-      MAE_DASHBOARD_URL: "http://10.71.20.72:8400",
+      MAE_DASHBOARD_URL: "http://your-dashboard-host:8400",
     };
     loadEnvFile(path, env);
 
-    expect(env.MAE_DASHBOARD_URL).toBe("http://10.71.20.72:8400");
+    expect(env.MAE_DASHBOARD_URL).toBe("http://your-dashboard-host:8400");
 
     chmodSync(path, 0o600);
     rmSync(dir, { recursive: true, force: true });

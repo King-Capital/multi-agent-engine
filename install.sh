@@ -22,8 +22,8 @@ err()  { echo "  [mae] ERROR: $*" >&2; exit 1; }
 DASHBOARD_URL=""
 GATEWAY_URL=""
 A2A_URL="${MAE_A2A_URL:-}"
-MAE_A2A_DEFAULT_HOST="${MAE_A2A_DEFAULT_HOST:-10.71.20.120}"
-MAE_A2A_DEFAULT_PORT="${MAE_A2A_DEFAULT_PORT:-3210}"
+MAE_A2A_DEFAULT_HOST="${MAE_A2A_DEFAULT_HOST:-}"
+MAE_A2A_DEFAULT_PORT="${MAE_A2A_DEFAULT_PORT:-41271}"
 LANGFUSE_HOST_VALUE="${LANGFUSE_HOST:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -114,8 +114,8 @@ CONF
 # A2A endpoint (if this host has a local or remote A2A service)
 CONF
     write_optional_shell_var MAE_API_TOKEN "${MAE_API_TOKEN:-}"
-    write_shell_var MAE_A2A_DEFAULT_HOST "$MAE_A2A_DEFAULT_HOST"
-    write_shell_var MAE_A2A_DEFAULT_PORT "$MAE_A2A_DEFAULT_PORT"
+    write_optional_shell_var MAE_A2A_DEFAULT_HOST "$MAE_A2A_DEFAULT_HOST"
+    write_optional_shell_var MAE_A2A_DEFAULT_PORT "$MAE_A2A_DEFAULT_PORT"
     write_optional_shell_var MAE_A2A_URL "$A2A_URL"
     write_optional_shell_var MAE_A2A_TOKEN "${MAE_A2A_TOKEN:-}"
     cat <<CONF

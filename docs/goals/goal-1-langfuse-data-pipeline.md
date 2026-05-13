@@ -43,8 +43,8 @@ The trace-recorder (engine/trace-recorder.ts) has extraction logic for `llm.call
 **Bottom line: the sink can't send data to Langfuse that never enters the logging pipeline.**
 
 ### Infrastructure
-- Langfuse v3 at 10.71.20.73:3000 (running)
-- LiteLLM proxy at 10.71.1.33:4000
+- Langfuse v3 at `LANGFUSE_HOST` (running)
+- LLM gateway at `MAE_LLM_GATEWAY_URL`
 - Score configs provisioned: session_completion, agent_grade, cost_efficiency, worker_success_rate, chain_step_completion, judge_overall_quality, judge_release_readiness
 - VERSION file at repo root for release tagging
 
@@ -374,8 +374,8 @@ Use subagents to parallelize. Main thread orchestrates and verifies.
 
 ## Constraints
 - Bun + TypeScript only. bun:test for tests.
-- All LLM calls go through LiteLLM at 10.71.1.33:4000
-- Langfuse at 10.71.20.73:3000 — credentials in Vaultwarden "Langfuse - MAE"
+- All LLM calls go through the LLM gateway at `MAE_LLM_GATEWAY_URL`
+- Langfuse at `LANGFUSE_HOST` — credentials via env vars `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`
 - Structured logging via logger.ts only — no console.log
 - Don't change the trace-recorder.ts mapping logic — it's correct, it just needs data
 - Don't change any adapter's external behavior (DelegateResult shape, stream events) — only add logging

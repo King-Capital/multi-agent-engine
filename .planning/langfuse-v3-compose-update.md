@@ -1,6 +1,6 @@
 # Langfuse v3 — Updated Docker Compose
 
-> The original spec had 2 services. Langfuse v3 requires 6. Update the compose on CT 273.
+> The original spec had 2 services. Langfuse v3 requires 6. Update the compose on the Langfuse host.
 
 ## Why 6 Services
 
@@ -36,7 +36,7 @@ S3_REGION=auto
 NEXTAUTH_SECRET=GENERATED
 SALT=GENERATED
 ENCRYPTION_KEY=GENERATED (must be exactly 64 hex chars = 32 bytes)
-NEXTAUTH_URL=http://10.71.20.73:3000
+NEXTAUTH_URL=http://your-langfuse-host:3000
 TELEMETRY_ENABLED=false
 LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES=true
 ```

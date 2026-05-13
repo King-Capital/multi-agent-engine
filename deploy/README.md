@@ -64,7 +64,7 @@ For hosts that only need to **run the engine** (not the dashboard), setup is lig
 ### Prerequisites
 
 - bun (any recent version)
-- git with SSH access to King-Capital org
+- git with access to this repository
 - Network access to `$MAE_DASHBOARD_HOST`:8400
 
 ### Steps

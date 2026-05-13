@@ -2,9 +2,9 @@
 
 ## What Works
 - **Release state:** `main` is clean and synced to `v1.0.4`; live dashboard health reports DB connected and `version: 1.0.4`.
-- **Installed hosts:** local wrapper, Skippy (`10.71.1.21`), and King (`king@10.71.20.120`) are installed at `v1.0.4`; Skippy and King health are `HEALTHY`.
-- **Adapters:** Skippy and King have `echo`, `pi`, and `a2a` available. A2A is configured to MonkeyProof A2A at `http://10.71.20.120:3210`.
-- **Langfuse:** Skippy and King health checks show Langfuse connected at `http://10.71.20.73:3000`.
+- **Installed hosts:** local wrapper and two remote hosts are installed at `v1.0.4`; remote health is `HEALTHY`.
+- **Adapters:** Remote hosts have `echo`, `pi`, and `a2a` available. A2A is configured to MonkeyProof A2A endpoint.
+- **Langfuse:** Remote health checks show Langfuse connected at `LANGFUSE_HOST`.
 - **Installer/update path:** `mae update` wrapper self-update is atomic and symlink-chain aware after PR #242.
 - **Stale session lifecycle:** stale `active`, `waiting`, and `paused` sessions auto-close as `completed`; running/idle agents close as done/completed after PR #243.
 - **Dashboard deploy:** GitHub `Deploy Dashboard`, `Deploy Engine`, and `Notify Workspace` runs for `v1.0.4` passed.

@@ -39,12 +39,12 @@ at your-domain.example.com, 54 tests passing.
 
 ## Phase 3 — A2A Protocol Integration
 
-**Goal:** MAE agents are first-class A2A citizens, Bilby can join sessions.
+**Goal:** MAE agents are first-class A2A citizens, and external A2A agents can join sessions.
 
 - [ ] A2A adapter implementing PlatformAdapter interface
 - [ ] Agent card generation: `/.well-known/agent-card.json` for each spawned agent
 - [ ] Agent discovery: query remote A2A endpoints to find available agents
-- [ ] Bilby interop: MAE can delegate tasks to external A2A agents
+- [ ] External-agent interop: MAE can delegate tasks to external A2A agents
 - [ ] External agent registration: any A2A-compatible agent can join MAE sessions
 - [ ] Task routing via A2A protocol (not just HTTP POST)
 - [ ] Dashboard shows A2A agents alongside native agents
@@ -64,9 +64,9 @@ at your-domain.example.com, 54 tests passing.
 - [ ] Meta-skills: `meta-agent`, `meta-skill`, `meta-prompt` generators
 - [ ] Reference: library.yaml (skeleton in place)
 
-## Phase 5 — Steer Architecture (Mac Mini Control)
+## Phase 5 — Steer Architecture (Agent Host Control)
 
-**Goal:** Replace OpenClaw with 4 lightweight CLIs for Skippy's Mac Mini.
+**Goal:** Support lightweight CLI control for local and remote agent hosts.
 
 - [ ] Listen: FastAPI job server with YAML persistence
 - [ ] Direct: Client CLI for sending prompts to Listen
@@ -121,8 +121,8 @@ at your-domain.example.com, 54 tests passing.
 1. **Phase 1** (Live Observability) — makes everything else debuggable
 2. **Phase 2** (CC Agent Teams) — native integration, biggest capability jump
 3. **Phase 6** (Production Hardening) — GH runner, health checks, monitoring
-4. **Phase 3** (A2A) — Bilby interop, external agent support
+4. **Phase 3** (A2A) — external-agent interop
 5. **Phase 4** (Library) — skill management and self-improvement
 6. **Phase 7** (Multi-User) — other users start using it
-7. **Phase 5** (Steer) — Mac Mini control (depends on OpenClaw migration decision)
+7. **Phase 5** (Steer) — host control for local and remote agent machines
 8. **Phase 8** (Agent Intelligence) — long-term, builds on everything else

@@ -1,7 +1,7 @@
 # Task Spec Template
 #
 # Standard job contract format for MAE agent tasks.
-# Pattern from IndyDevDan's Mac Mini Agents video.
+# Pattern from IndyDevDan's local agent-host control video.
 # https://www.youtube.com/watch?v=LOazLNQnB80
 #
 # Every agent task should follow this structure.

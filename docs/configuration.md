@@ -55,6 +55,8 @@ Legacy gateway aliases (still supported):
 |----------|-------------|
 | `MAE_A2A_URL` | Default A2A agent endpoint URL |
 | `MAE_A2A_TOKEN` | Bearer token for A2A authentication |
+| `MAE_A2A_DEFAULT_HOST` | Host used by `mae setup a2a --standard` |
+| `MAE_A2A_DEFAULT_PORT` | Port used by `mae setup a2a --standard`; defaults to `41271` |
 
 ### Langfuse
 

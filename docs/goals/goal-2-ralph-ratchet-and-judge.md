@@ -306,8 +306,8 @@ Use subagents. Main thread orchestrates.
 - Bun + TypeScript only. bun:test for tests.
 - Don't modify ralph-evaluator.ts or ralph-evolver.ts — they're stable
 - Don't modify replay.ts scoring logic — use as-is
-- All LLM calls go through LiteLLM at 10.71.1.33:4000
-- Langfuse at 10.71.20.73:3000 — credentials in Vaultwarden "Langfuse - MAE"
+- All LLM calls go through the LLM gateway at `MAE_LLM_GATEWAY_URL`
+- Langfuse at `LANGFUSE_HOST` — credentials via env vars `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`
 - Structured logging via logger.ts only — no console.log
 - Follow existing code patterns
 - Security: sanitize all inputs (no secrets, no env vars in logs or Langfuse)

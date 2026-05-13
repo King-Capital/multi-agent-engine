@@ -34,8 +34,8 @@ MAE_API_TOKEN="${MAE_API_TOKEN:-}"
 MAE_DEFAULT_ADAPTER="${MAE_DEFAULT_ADAPTER:-}"
 MAE_A2A_URL="${MAE_A2A_URL:-}"
 MAE_A2A_TOKEN="${MAE_A2A_TOKEN:-}"
-MAE_A2A_DEFAULT_HOST="${MAE_A2A_DEFAULT_HOST:-10.71.20.120}"
-MAE_A2A_DEFAULT_PORT="${MAE_A2A_DEFAULT_PORT:-3210}"
+MAE_A2A_DEFAULT_HOST="${MAE_A2A_DEFAULT_HOST:-}"
+MAE_A2A_DEFAULT_PORT="${MAE_A2A_DEFAULT_PORT:-41271}"
 LANGFUSE_PUBLIC_KEY="${LANGFUSE_PUBLIC_KEY:-}"
 LANGFUSE_SECRET_KEY="${LANGFUSE_SECRET_KEY:-}"
 LANGFUSE_HOST="${LANGFUSE_HOST:-}"
@@ -256,7 +256,7 @@ CONF
 
 # Default A2A endpoint (for remote agent delegation)
 CONF
-        write_shell_var MAE_A2A_DEFAULT_HOST "$MAE_A2A_DEFAULT_HOST"
+        write_optional_shell_var MAE_A2A_DEFAULT_HOST "$MAE_A2A_DEFAULT_HOST"
         write_shell_var MAE_A2A_DEFAULT_PORT "$MAE_A2A_DEFAULT_PORT"
         write_optional_shell_var MAE_A2A_URL "$MAE_A2A_URL"
         write_optional_shell_var MAE_A2A_TOKEN "$MAE_A2A_TOKEN"
@@ -349,8 +349,8 @@ do_setup() {
     a2a)
       local url="${MAE_A2A_URL:-}"
       local token="${MAE_A2A_TOKEN:-}"
-      local host="${MAE_A2A_DEFAULT_HOST:-10.71.20.120}"
-      local port="${MAE_A2A_DEFAULT_PORT:-3210}"
+      local host="${MAE_A2A_DEFAULT_HOST:-}"
+      local port="${MAE_A2A_DEFAULT_PORT:-41271}"
       local set_default=false
       local test_endpoint=true
       local use_standard=false
@@ -414,13 +414,14 @@ do_setup() {
 mae setup a2a [--standard] [--host <host>] [--port <port>] [--url <endpoint>] [--token <token>] [--default-adapter] [--no-test]
 
 Writes A2A configuration into ~/.mae/config and verifies discovery by default.
-Default standard endpoint: http://10.71.20.120:3210
+The standard endpoint is built from MAE_A2A_DEFAULT_HOST and MAE_A2A_DEFAULT_PORT.
+Set them in ~/.mae/config using the names shown in .env.example, or pass --host/--port.
 
 Examples:
   mae setup a2a --standard
-  mae setup a2a --host 10.71.20.120
-  mae setup a2a --url http://10.71.20.120:3210
-  mae setup a2a --url http://10.71.20.120:3210 --default-adapter
+  mae setup a2a --host "$MAE_A2A_DEFAULT_HOST" --port "$MAE_A2A_DEFAULT_PORT"
+  mae setup a2a --url "$MAE_A2A_URL"
+  mae setup a2a --url "$MAE_A2A_URL" --default-adapter
   mae setup a2a --url http://agent-host:41271 --token "$A2A_TOKEN"
 HELP
             exit 0
@@ -434,12 +435,23 @@ HELP
       done
 
       if [[ -z "$url" && ( "$use_standard" == true || ! -t 0 ) ]]; then
+        if [[ -z "$host" ]]; then
+          echo "MAE_A2A_DEFAULT_HOST is required for --standard."
+          echo "Set MAE_A2A_DEFAULT_HOST in ~/.mae/config (see .env.example) or pass --host."
+          exit 1
+        fi
         url="http://${host}:${port}"
       fi
       if [[ -z "$url" && -t 0 ]]; then
-        echo "Press Enter to use standard endpoint http://${host}:${port}"
+        if [[ -n "$host" ]]; then
+          echo "Press Enter to use standard endpoint http://${host}:${port}"
+        else
+          echo "No standard A2A host configured. Set MAE_A2A_DEFAULT_HOST in ~/.mae/config or enter a full endpoint URL."
+        fi
         read -r -p "A2A endpoint URL: " url
-        url="${url:-http://${host}:${port}}"
+        if [[ -z "$url" && -n "$host" ]]; then
+          url="http://${host}:${port}"
+        fi
       fi
       if [[ -z "$url" ]]; then
         echo "A2A endpoint URL required."
@@ -544,9 +556,9 @@ Commands:
 
 Examples:
   mae setup a2a --standard
-  mae setup a2a --host 10.71.20.120
-  mae setup a2a --url http://10.71.20.120:3210
-  mae setup a2a --url http://10.71.20.120:3210 --default-adapter
+  mae setup a2a --host "$MAE_A2A_DEFAULT_HOST" --port "$MAE_A2A_DEFAULT_PORT"
+  mae setup a2a --url "$MAE_A2A_URL"
+  mae setup a2a --url "$MAE_A2A_URL" --default-adapter
   mae setup qmd --embed
 HELP
       ;;
@@ -741,8 +753,8 @@ Environment (override config):
   MAE_REQUIRE_PI      Require 'pi' during install (default: 1; set 0 for echo/A2A-only)
   MAE_BIN             CLI install path (default: \$HOME/.local/bin/mae)
   MAE_API_TOKEN       API auth token
-  MAE_A2A_DEFAULT_HOST Standard A2A host (default: 10.71.20.120)
-  MAE_A2A_DEFAULT_PORT Standard A2A port (default: 3210)
+  MAE_A2A_DEFAULT_HOST Standard A2A host (unset; see .env.example)
+  MAE_A2A_DEFAULT_PORT Standard A2A port (default: 41271)
   MAE_A2A_URL         Default A2A endpoint
   MAE_A2A_TOKEN       A2A bearer token
   LANGFUSE_PUBLIC_KEY Langfuse public key
