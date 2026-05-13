@@ -138,4 +138,4 @@ User `mae` (UID 3007, collab+builds, zsh, sudo, ~/Development/)
 
 ## Runner Firewall
 
-CT 106/107 iptables allows `$MAE_SANDBOX_SUBNET.80/29` (covers .80-.87). If expanding past .87, update `/etc/iptables/rules.v4` on both runners.
+Runner iptables allows `$MAE_SANDBOX_SUBNET.80/29` (covers .80-.87). If expanding past .87, update iptables rules on the runner hosts.

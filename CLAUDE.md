@@ -9,7 +9,7 @@
 - **Dashboard:** Go + React SPA (`dashboard-next/src/`). Legacy templ files in `dashboard/templates/` — don't use.
 - **Config:** YAML files in `configs/` and `agents/teams/`.
 - **CLI:** Built via `bun build engine/cli.ts --target=bun --outfile=./agent`. Installed at `~/.local/bin/mae`.
-- **Observability:** Langfuse v3 at CT 273 (10.71.20.73:3000). Auto-connects when `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY` are set.
+- **Observability:** Langfuse v3. Auto-connects when `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY` are set. Host configured via `LANGFUSE_HOST` env var.
 
 ## Directory Structure
 
@@ -97,7 +97,7 @@ multi-agent-engine/
 | Structured Logger | `engine/logger.ts` | JSONL to stderr + pluggable sinks |
 | Trace Recorder | `engine/trace-recorder.ts` | Per-session JSONL at `~/.mae/traces/` |
 | Langfuse Sink | `engine/langfuse-sink.ts` | Sends traces to Langfuse for visualization |
-| Langfuse | CT 273 (10.71.20.73:3000) | Trace UI, prompt versioning, evaluation, datasets |
+| Langfuse | `LANGFUSE_HOST` env var | Trace UI, prompt versioning, evaluation, datasets |
 | Replay System | `engine/replay.ts` | Session scoring, behavioral fingerprinting |
 | Ralph Loop | `engine/ralph-loop.ts` | Overnight self-improvement via trace analysis |
 

@@ -486,7 +486,7 @@ The `validateAgentOutput()` function exists to detect credentials in output but 
 **File:** `adapters/a2a.ts`
 **Severity:** MEDIUM
 
-All A2A `fetch()` calls use default TLS settings. For internal network agents (the example shows `http://10.71.20.71:41271`), plaintext HTTP is used — bearer tokens transmitted in cleartext. No certificate pinning or custom CA support for HTTPS endpoints.
+All A2A `fetch()` calls use default TLS settings. For internal network agents (the example shows `http://your-a2a-host:41271`), plaintext HTTP is used — bearer tokens transmitted in cleartext. No certificate pinning or custom CA support for HTTPS endpoints.
 
 ---
 
@@ -822,7 +822,7 @@ Even the existing `mergeWorktree()` helper would not solve this as written, beca
 The CLI examples show:
 
 ```txt
-agent task "review auth" --adapter a2a --a2a-url http://10.71.20.71:41271
+agent task "review auth" --adapter a2a --a2a-url http://your-a2a-host:41271
 ```
 
 But `setDefaultEndpoint({ url: a2aUrl })` stores the base URL. During `delegate()`, the adapter fetches the agent card, but it does **not** update the endpoint to use `card.url`.
@@ -830,13 +830,13 @@ But `setDefaultEndpoint({ url: a2aUrl })` stores the base URL. During `delegate(
 So delegation posts JSON-RPC to:
 
 ```txt
-http://10.71.20.71:41271
+http://your-a2a-host:41271
 ```
 
 instead of the advertised endpoint, e.g.:
 
 ```txt
-http://10.71.20.71:41271/a2a/jsonrpc
+http://your-a2a-host:41271/a2a/jsonrpc
 ```
 
 The tests hide this by manually setting the endpoint to `${MOCK_URL}/a2a/jsonrpc`.
@@ -1414,7 +1414,7 @@ If the child process writes enough data to `stderr`, the stderr pipe can fill, c
 The CLI help suggests:
 
 ```bash
-agent task "review auth" --adapter a2a --a2a-url http://10.71.20.71:41271
+agent task "review auth" --adapter a2a --a2a-url http://your-a2a-host:41271
 ```
 
 `setDefaultEndpoint()` stores that base URL. During delegation, the adapter fetches the agent card, but it does not update the endpoint URL to `card.url`.
@@ -2245,7 +2245,7 @@ A malicious or buggy agent chain can continue accumulating cost, especially with
 The CLI examples suggest:
 
 ```txt
---a2a-url http://10.71.20.71:41271
+--a2a-url http://your-a2a-host:41271
 ```
 
 But `setDefaultEndpoint()` stores that as the JSON-RPC endpoint. During delegation, the adapter fetches the agent card but does not update the default endpoint to `card.url`. So it may POST JSON-RPC to the base URL instead of the card-provided RPC URL.

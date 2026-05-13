@@ -6,7 +6,7 @@
 ## Done
 
 - PR #241 merged and deployed: optional/config-aware A2A health, MAE config export propagation, LiteLLM/Pi env mapping, Pi timeout/stop behavior, nudge helpers disabled by default.
-- A2A configured and verified on Skippy and King using MonkeyProof A2A at `http://10.71.20.120:3210`.
+- A2A configured and verified on remote hosts using MonkeyProof A2A endpoint.
 - PR #242 merged and deployed as `v1.0.3`: `mae update` wrapper now updates atomically and preserves symlink installs.
 - Five-perspective review swarm ran on the wrapper update; chained symlink regression was found, fixed, and re-reviewed clean for high/medium issues.
 - PR #243 merged and deployed as `v1.0.4`: stale open sessions now auto-close as done/completed, with running/idle agents marked done/completed in memory and PG.

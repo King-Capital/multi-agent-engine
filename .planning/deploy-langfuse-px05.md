@@ -1,6 +1,6 @@
-# Deploy Langfuse on proxmox05
+# Deploy Langfuse
 
-> Hand this to an infra session. Use `/deploy-service` skill.
+> Hand this to an infra session.
 
 ## What
 
@@ -9,19 +9,16 @@ Purpose: trace visualization, evaluation, prompt versioning for MAE.
 
 ## Where
 
-- **Node:** proxmox05 (10.71.1.9) — Ryzen 9 7940HS, 64GB, ZFS
-- **CTID:** Pick next available in 270-280 range (MAE infra block)
-- **IP:** Assign from VLAN 20 (10.71.20.x)
+- **Host:** Your server (any Linux host with Docker support)
 - **Port:** 3000 (Langfuse default)
-- **DNS:** langfuse.internal or langfuse.lan (Pi-hole)
-- **Reverse proxy:** Caddy on CT 100 (if desired, not required for LAN)
+- **DNS:** langfuse.internal or langfuse.lan (optional, local DNS)
+- **Reverse proxy:** Caddy or nginx (optional, not required for LAN)
 
-## LXC Spec
+## Host Requirements
 
-- **Template:** debian-12 or ubuntu-24.04
+- **OS:** debian-12 or ubuntu-24.04
 - **Resources:** 4 cores, 4GB RAM, 20GB disk (Langfuse is lightweight)
-- **Nesting:** Yes (Docker inside LXC)
-- **Network:** dual NIC (VLAN 1 + VLAN 20) per standard
+- **Docker:** Required (Docker inside VM/LXC/bare metal)
 
 ## Install Steps
 
@@ -50,7 +47,7 @@ services:
       - DATABASE_URL=postgresql://langfuse:langfuse@db:5432/langfuse
       - NEXTAUTH_SECRET=GENERATE_A_SECRET_HERE
       - SALT=GENERATE_A_SALT_HERE
-      - NEXTAUTH_URL=http://10.71.20.XX:3000
+      - NEXTAUTH_URL=http://your-langfuse-host:3000
       - TELEMETRY_ENABLED=false
       - LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES=true
     depends_on:
@@ -86,8 +83,8 @@ sed -i "s|GENERATE_A_SALT_HERE|${SALT}|" docker-compose.yml
 
 ### 5. Update NEXTAUTH_URL with actual IP
 ```bash
-# Replace 10.71.20.XX with the assigned IP
-sed -i "s|10.71.20.XX|ACTUAL_IP|" docker-compose.yml
+# Replace your-langfuse-host with the assigned IP/hostname
+sed -i "s|your-langfuse-host|ACTUAL_IP|" docker-compose.yml
 ```
 
 ### 6. Start
@@ -115,11 +112,11 @@ Create a project called "MAE". Note the public/secret API keys.
 ```
 LANGFUSE_PUBLIC_KEY=pk-...
 LANGFUSE_SECRET_KEY=sk-...
-LANGFUSE_HOST=http://10.71.20.XX:3000
+LANGFUSE_HOST=http://your-langfuse-host:3000
 ```
 
 ### DNS (Pi-hole)
-Add: `langfuse.lan` → assigned IP on both Pi-holes (CT 104 + CT 206)
+Add: `langfuse.lan` → assigned IP in your local DNS
 
 ### HOSTMAP
 Update infrastructure/HOSTMAP.md with new CT entry.

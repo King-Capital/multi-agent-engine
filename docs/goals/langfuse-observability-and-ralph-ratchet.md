@@ -35,8 +35,8 @@ What is broken or missing (confirmed in live Langfuse UI):
 10. **Span I/O empty** — Agent spans have `input` as a 500-char preview but never have `output`. Worker and review spans have zero I/O.
 
 ### Infrastructure Available
-- Langfuse v3 at 10.71.20.73:3000 (running, accessible)
-- LiteLLM proxy at 10.71.1.33:4000 (all LLM calls route through here)
+- Langfuse v3 at `LANGFUSE_HOST` (running, accessible)
+- LLM gateway at `MAE_LLM_GATEWAY_URL` (all LLM calls route through here)
 - Score configs already provisioned: session_completion, agent_grade, cost_efficiency, worker_success_rate, chain_step_completion, judge_overall_quality, judge_release_readiness
 - Annotation queues configured: Session Review, Agent Quality, Failure Triage
 - Datasets configured: mae-golden-sessions, mae-failure-cases, mae-prompt-experiments
@@ -51,7 +51,7 @@ What is broken or missing (confirmed in live Langfuse UI):
 On `trace-create` (line 52), add:
 - `userId`: `entry.user_id ?? entry.initiator ?? "mae-engine"`
 - `release`: read from VERSION file at startup (e.g., "1.0.4")
-- `environment`: `process.env.MAE_ENV ?? "development"` (set to "production" on CT 272)
+- `environment`: `process.env.MAE_ENV ?? "development"` (set to "production" on production host)
 - `tags`: `[entry.chain, entry.adapter].filter(Boolean)`
 - `input`: structured object `{ goal: entry.goal ?? entry.name, task: entry.task, chain: entry.chain }` — never undefined
 - `output` (on session end): structured object `{ status, cost_usd, duration_ms, steps_completed, steps_total, agents_used, errors, final_output_preview }`
@@ -250,8 +250,8 @@ Use subagents to parallelize work and keep the main context window lean. The mai
 - Bun + TypeScript only. bun:test for tests.
 - Don't modify ralph-evaluator.ts or ralph-evolver.ts
 - Don't modify replay.ts scoring logic — use as-is
-- All LLM calls go through LiteLLM at 10.71.1.33:4000
-- Langfuse at 10.71.20.73:3000 — credentials in Vaultwarden "Langfuse - MAE"
+- All LLM calls go through the LLM gateway at `MAE_LLM_GATEWAY_URL`
+- Langfuse at `LANGFUSE_HOST` — credentials via env vars `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY`
 - Structured logging via logger.ts only — no console.log
 - Follow existing code patterns in the codebase
 - Security: sanitize all inputs sent to Langfuse (no secrets, no env vars, no file paths with sensitive info)

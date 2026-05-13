@@ -32,7 +32,7 @@ describe("isInternalUrl", () => {
   });
 
   test("detects 10.x private range", () => {
-    expect(isInternalUrl("http://10.71.20.72:8400")).toBe(true);
+    expect(isInternalUrl("http://10.0.0.1:8400")).toBe(true);
   });
 
   test("detects 192.168.x private range", () => {
