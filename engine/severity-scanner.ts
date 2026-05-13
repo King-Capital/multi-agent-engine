@@ -11,8 +11,14 @@ const P0_PATTERNS = [
   /\bCRITICAL\s+(VULNERABILITY|SECURITY|RISK|BUG|ISSUE|FINDING)\b/i,
   /\bSECURITY\s*(VULNERABILITY|ISSUE|BUG|FLAW)\b/i,
   /\bRCE\b/,
+  /\bREMOTE\s+CODE\s+EXECUTION\b/i,
   /\bSQL\s*INJECTION\b/i,
   /\bCOMMAND\s*INJECTION\b/i,
+  /\bAUTH(?:ENTICATION|ORIZATION)?\s+BYPASS\b/i,
+  /\bPRIVILEGE\s+ESCALATION\b/i,
+  /\bSECRET\s+EXPOSURE\b/i,
+  /\bCREDENTIAL\s+LEAK\b/i,
+  /\bDATA\s+EXFILTRATION\b/i,
 ];
 
 const P1_PATTERNS = [
@@ -25,10 +31,24 @@ const P1_PATTERNS = [
 
 const P2_PATTERN = /\bP2\s*[:—-]/i;
 const P3_PATTERN = /\bP3\s*[:—-]/i;
+const FILE_LINE_PATTERN = /^[\w./-]+\.(?:ts|tsx|js|jsx|go|py|md|yaml|yml|json|toml|sh):\d+\b/i;
+
+function hasStructuredStandaloneFinding(text: string, labels: string[]): boolean {
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]?.trim() ?? "";
+    if (!labels.some((label) => new RegExp(`^${label}$`, "i").test(line))) continue;
+    const following = lines.slice(i + 1, i + 5).map((next) => next.trim()).filter(Boolean);
+    if (following.some((next) => FILE_LINE_PATTERN.test(next))) return true;
+  }
+  return false;
+}
 
 export function scanSeverity(text: string): Severity {
   if (P0_PATTERNS.some((p) => p.test(text))) return "P0";
+  if (hasStructuredStandaloneFinding(text, ["CRITICAL"])) return "P0";
   if (P1_PATTERNS.some((p) => p.test(text))) return "P1";
+  if (hasStructuredStandaloneFinding(text, ["HIGH"])) return "P1";
   if (P2_PATTERN.test(text)) return "P2";
   if (P3_PATTERN.test(text)) return "P3";
   return null;

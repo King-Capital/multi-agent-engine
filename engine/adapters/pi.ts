@@ -6,9 +6,9 @@ import { createLogger } from "../logger";
 import { sanitizeAgentInput } from "../security";
 import { trackPromptVersion } from "../langfuse-prompts";
 import { withPiRepoContext } from "../pi-repo-context";
+import { writeAgentOutputArtifact } from "../trace-artifacts";
 
 const log = createLogger("pi-adapter");
-const MAX_TRACE_OUTPUT_CHARS = 20_000;
 
 export class PiAdapter implements PlatformAdapter {
   name = "pi";
@@ -75,7 +75,7 @@ export class PiAdapter implements PlatformAdapter {
 
   async delegate(opts: DelegateOptions): Promise<DelegateResult> {
     const agentId = `pi-${opts.persona.name.toLowerCase().replace(/\s+/g, "-")}`;
-    const sessionId = opts.sessionDir?.split(/[\\/]/).pop() ?? undefined;
+    const sessionId = opts.sessionDir?.split(/[\\/]/).pop() ?? "unknown-session";
     if (opts.abortSignal?.aborted) {
       return {
         agentId,
@@ -160,6 +160,7 @@ export class PiAdapter implements PlatformAdapter {
       const safeResolve = (result: DelegateResult) => {
         if (resolved) return;
         resolved = true;
+        const outputArtifact = writeAgentOutputArtifact(sessionId, agentId, result.output ?? "");
         log.info("Agent completed", {
           trace_type: "agent.end",
           session_id: sessionId,
@@ -170,7 +171,7 @@ export class PiAdapter implements PlatformAdapter {
           cost: result.costUsd,
           tokens: result.tokensUsed,
           output_preview: sanitizeAgentInput(result.output ?? "").slice(0, 500),
-          output: sanitizeAgentInput(result.output ?? "").slice(0, MAX_TRACE_OUTPUT_CHARS),
+          ...outputArtifact,
         });
         if (timer) clearTimeout(timer);
         if (abortHandler) opts.abortSignal?.removeEventListener("abort", abortHandler);
@@ -542,6 +543,7 @@ export class PiAdapter implements PlatformAdapter {
         onStream?.({
           type: "assistant_text",
           content: ame.content as string,
+          final: true,
         });
       }
     }

@@ -34,7 +34,7 @@ export function buildStreamHandler(opts: StreamHandlerOpts): (evt: StreamEvent) 
       emitter.costUpdate(sessionId, agentId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
     } else if (streamEvt.type === "assistant_text" && streamEvt.content) {
       trackToolCall(agentId, "assistant_text");
-      if (pausedSessions && session && session.status === "active") {
+      if (pausedSessions && session && session.status === "active" && !streamEvt.final) {
         const severity = scanSeverity(streamEvt.content);
         if (severity && shouldAutoPause(severity, sessionId)) {
           pausedSessions.add(sessionId);

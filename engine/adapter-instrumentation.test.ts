@@ -159,7 +159,9 @@ describe("adapter instrumentation", () => {
     expect(entries[0]!.session_id).toBe("mae-test-session");
     expect(entries[1]!.total_tokens).toBe(100);
     expect(entries[2]!.cost).toBe(0.001);
-    expect(entries[2]!.output).toContain("[Echo]");
+    expect(entries[2]!.output).toBeUndefined();
+    expect(typeof entries[2]!.output_hash).toBe("string");
+    expect(typeof entries[2]!.output_artifact).toBe("string");
   });
 
   test("A2A adapter emits best-effort agent lifecycle logs with zero tokens when unavailable", async () => {
@@ -170,6 +172,8 @@ describe("adapter instrumentation", () => {
     expect(entries.map((entry) => entry.trace_type)).toEqual(["agent.start", "agent.end"]);
     expect(entries[1]!.tokens).toBe(0);
     expect(entries[1]!.cost).toBe(0);
-    expect(entries[1]!.output).toBeDefined();
+    expect(entries[1]!.output).toBeUndefined();
+    expect(typeof entries[1]!.output_hash).toBe("string");
+    expect(typeof entries[1]!.output_artifact).toBe("string");
   });
 });

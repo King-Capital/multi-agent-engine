@@ -15,6 +15,14 @@ describe("scanSeverity", () => {
     expect(scanSeverity("| # | Severity | Title |\n| 1 | Critical | Launcher default |")).toBeNull();
   });
 
+  test("detects standalone CRITICAL followed by file line", () => {
+    expect(scanSeverity("CRITICAL\nengine/foo.ts:10\nAuth bypass in route guard")).toBe("P0");
+  });
+
+  test("detects standalone HIGH followed by file line", () => {
+    expect(scanSeverity("HIGH\nengine/foo.ts:10\nMissing timeout can stall run")).toBe("P1");
+  });
+
   test("detects SECURITY VULNERABILITY", () => {
     expect(scanSeverity("Found a security vulnerability in auth")).toBe("P0");
   });
@@ -29,6 +37,13 @@ describe("scanSeverity", () => {
 
   test("detects COMMAND INJECTION", () => {
     expect(scanSeverity("Command injection via shell exec")).toBe("P0");
+  });
+
+  test("detects critical exploit classes without literal CRITICAL", () => {
+    expect(scanSeverity("Auth bypass in admin route")).toBe("P0");
+    expect(scanSeverity("Privilege escalation via role confusion")).toBe("P0");
+    expect(scanSeverity("Secret exposure in trace logs")).toBe("P0");
+    expect(scanSeverity("Data exfiltration through artifact copy")).toBe("P0");
   });
 
   test("detects P1: prefix", () => {
