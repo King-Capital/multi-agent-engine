@@ -6,8 +6,13 @@ describe("scanSeverity", () => {
     expect(scanSeverity("- P0: SQL injection in login handler")).toBe("P0");
   });
 
-  test("detects CRITICAL keyword", () => {
+  test("detects CRITICAL finding", () => {
     expect(scanSeverity("This is a CRITICAL vulnerability")).toBe("P0");
+  });
+
+  test("does not pause on plain audit severity headings", () => {
+    expect(scanSeverity("### Critical\n\nC1 -- launcher defaults are broad")).toBeNull();
+    expect(scanSeverity("| # | Severity | Title |\n| 1 | Critical | Launcher default |")).toBeNull();
   });
 
   test("detects SECURITY VULNERABILITY", () => {

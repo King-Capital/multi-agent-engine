@@ -17,6 +17,7 @@ import { sanitizeAgentInput } from "./security";
 
 export const TRACE_DIR =
   process.env.MAE_TRACE_DIR ?? join(process.env.HOME ?? "/tmp", ".mae", "traces");
+const MAX_AGENT_OUTPUT_CHARS = 20_000;
 
 type TraceType =
   | "session.start"
@@ -151,6 +152,7 @@ function extractTraceFields(entry: LogEntry, traceType: TraceType): Record<strin
       if (entry.cost_usd !== undefined) fields.cost = entry.cost_usd;
       if (entry.tokens !== undefined) fields.tokens = entry.tokens;
       if (entry.output_preview !== undefined) fields.output_preview = String(entry.output_preview).slice(0, 500);
+      if (entry.output !== undefined) fields.output = sanitizeAgentInput(String(entry.output)).slice(0, MAX_AGENT_OUTPUT_CHARS);
       break;
 
     case "agent.error":

@@ -4,6 +4,7 @@ import { sanitizeAgentInput } from "../security";
 import { trackPromptVersion } from "../langfuse-prompts";
 
 const log = createLogger("echo-adapter");
+const MAX_TRACE_OUTPUT_CHARS = 20_000;
 
 export class EchoAdapter implements PlatformAdapter {
   name = "echo";
@@ -77,6 +78,7 @@ export class EchoAdapter implements PlatformAdapter {
       cost: result.costUsd,
       tokens: result.tokensUsed,
       output_preview: sanitizeAgentInput(result.output).slice(0, 500),
+      output: sanitizeAgentInput(result.output).slice(0, MAX_TRACE_OUTPUT_CHARS),
     });
 
     return result;
