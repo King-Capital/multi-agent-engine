@@ -111,8 +111,8 @@ curl -sk -X DELETE "$PVE/nodes/proxmox05/lxc/801" \
 
 ## SSH
 
-Sandboxes inherit authorized_keys from golden image. All pre-authorized:
-Rico, Air (skippy), bilby, cc-king, cc-kevin, cc-geetesh, ct106/107 runners, Skippy-the-Magnificent-one
+Sandboxes inherit authorized_keys from the golden image. Configure authorized users,
+agent identities, and CI runners per deployment.
 
 ## Updating Golden Image
 

@@ -43,7 +43,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - Sub-agent bridge for cross-agent communication (#111)
 - Deterministic lint-first feedback loop (#113)
-- Pi as OpenClaw backend feasibility study + Bilby config (#112)
+- Pi backend feasibility study + example agent config (#112)
 
 ### Fixed
 - Clean stream output and SSE connection fixes (#111)

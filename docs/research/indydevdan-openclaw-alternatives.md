@@ -1,9 +1,9 @@
-# Mac Mini Agents: OpenClaw is a NIGHTMARE... Use these SKILLS instead
+# Local Agent Control Alternatives
 
 **Source:** https://www.youtube.com/watch?v=LOazLNQnB80
 **Extracted:** 2026-05-05 | 158 frames analyzed
 
-## OpenClaw Issues
+## Platform Issues
 
 - **Security**: 400K lines of vibe-coded code, RCE vulnerabilities, supply chain poisoning, malicious skills in registry
 - **Vibe code**: Generates infinite code without understanding
@@ -13,7 +13,7 @@
 
 ## Steer Architecture (Replacement)
 
-4 Python CLI apps + 2 skills replace entire OpenClaw platform:
+4 Python CLI apps + 2 skills provide a lightweight local-agent control platform:
 
 ```
 Trigger Layer:     Cron | Build | Direct | Agent
@@ -57,9 +57,9 @@ mac-mini-agent/
 
 ## Applicable to Our Setup
 
-1. Drive CLI for Skippy's Mac Mini (tmux session/run/send/logs/poll/fanout)
+1. Drive CLI for a local agent host (tmux session/run/send/logs/poll/fanout)
 2. Listen/Direct pattern maps to MAE orchestration engine
-3. SKILL.md files over OpenClaw skill registry (Jeraptha already validates)
+3. SKILL.md files over a broad skill registry
 4. Task spec format (Instructions/Tasks/Deliverables) as standard job contract
 5. Proof-of-work: screenshot/log capture in agent lifecycle
 6. Time-boxed execution with mandatory summarize-and-deliver

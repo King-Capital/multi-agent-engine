@@ -1,18 +1,18 @@
-# Pi as OpenClaw Backend Runtime -- Feasibility Study
+# Pi as Coding Backend Runtime -- Feasibility Study
 
 **Issue:** #104
-**Approach:** Bilby first, then Skippy
+**Approach:** pilot agent first, then primary agent
 
 ## Executive Summary
 
 Pi (v0.74.0, @earendil-works/pi-coding-agent) is a model-agnostic coding agent
 with a 4-tool architecture (bash, read, write, grep/find), extension system,
 and RPC mode for programmatic control. This doc evaluates whether it can
-replace Claude Code as the coding runtime behind OpenClaw.
+serve as the coding runtime behind MAE.
 
 ## Architecture Comparison
 
-### OpenClaw (current)
+### Existing coding runtime
 - **Runtime:** Claude Code (Anthropic-locked)
 - **Tools:** exec, read, write, browser, message, memory, sessions, web_search, web_fetch
 - **Hooks/Gates:** Pre/post tool execution gates (ob-gate, sop-gate, heartbeat-gate, etc.)
@@ -30,7 +30,7 @@ replace Claude Code as the coding runtime behind OpenClaw.
 
 ## Tool Mapping
 
-| OpenClaw Tool | Pi Equivalent | Gap |
+| Existing Runtime Tool | Pi Equivalent | Gap |
 |---------------|---------------|-----|
 | exec (shell) | bash | ✅ Direct match |
 | read | read | ✅ Direct match |
@@ -48,7 +48,7 @@ replace Claude Code as the coding runtime behind OpenClaw.
 
 ## Hook/Gate Mapping
 
-| OpenClaw Gate | Pi Extension Equivalent | Status |
+| Runtime Gate | Pi Extension Equivalent | Status |
 |---------------|------------------------|--------|
 | ob-gate | pi-open-brain (auto-recall) | ✅ Built |
 | sop-gate | Extension: check OB before process tasks | 📋 TODO |
@@ -60,60 +60,60 @@ replace Claude Code as the coding runtime behind OpenClaw.
 ## What Pi Does Better
 
 1. **Model freedom** -- Use opus for deep work, GPT-5.5 for verification, Gemini for cheap passes. No vendor lock-in.
-2. **Extension ecosystem** -- TypeScript extensions are simpler than OpenClaw hooks. No YAML config needed.
+2. **Extension ecosystem** -- TypeScript extensions are simple to package and test. No YAML hook config needed.
 3. **Startup time** -- Pi starts in <2s vs CC's 5-10s cold start.
 4. **Cost control** -- MODEL_PRICING + budget enforcement at the orchestrator level.
-5. **Multi-agent native** -- RPC mode + pi-subagents. CC needs OpenClaw to orchestrate.
+5. **Multi-agent native** -- RPC mode + pi-subagents. Single-agent runtimes need MAE to orchestrate.
 
 ## What Pi Is Missing
 
-1. **Browser automation** -- OpenClaw has full Playwright-based browser control. Pi has nothing.
-2. **Image analysis** -- OpenClaw can analyze screenshots. Pi can't.
-3. **Channel routing** -- OpenClaw routes to Discord/Telegram/iMessage/etc. Pi is CLI-only.
-4. **Session management** -- OpenClaw manages persistent sessions, thread-bound spawns, etc.
-5. **Line-level edit** -- OpenClaw's edit tool modifies specific line ranges. Pi overwrites entire files.
-6. **Approval workflow** -- OpenClaw has native approval cards. Pi has confirm() in interactive mode only.
+1. **Browser automation** -- Some coding runtimes have full Playwright-based browser control. Pi has nothing built in.
+2. **Image analysis** -- Some coding runtimes can analyze screenshots. Pi can't.
+3. **Channel routing** -- Pi is CLI-only.
+4. **Session management** -- Persistent sessions and thread-bound spawns need orchestration outside Pi.
+5. **Line-level edit** -- Some coding runtimes modify specific line ranges. Pi overwrites entire files.
+6. **Approval workflow** -- Pi has confirm() in interactive mode only.
 
 ## Migration Plan
 
-### Phase 1: Bilby on Pi (Test)
-- [ ] Create Bilby Pi config (~/.pi/agent/settings.json)
-- [ ] Port Bilby's system prompt to Pi agents.md
+### Phase 1: Pilot Agent on Pi
+- [ ] Create pilot Pi config (~/.pi/agent/settings.json)
+- [ ] Port the pilot system prompt to Pi agents.md
 - [ ] Install required extensions (pi-open-brain, pi-safety-gate, pi-context-workflow)
 - [ ] Configure LiteLLM models in Pi's models.json
-- [ ] Run Bilby's typical workflows (code review, bug fix, feature build)
+- [ ] Run typical workflows (code review, bug fix, feature build)
 - [ ] Document gaps and workarounds
 - [ ] Run for 1 week, collect metrics
 
 ### Phase 2: Evaluate Results
 - [ ] Compare: completion quality, cost, speed, reliability
 - [ ] List showstoppers (if any)
-- [ ] Decide: migrate Skippy or abort
+- [ ] Decide: migrate the primary agent or abort
 
-### Phase 3: Skippy on Pi (if Phase 2 passes)
-- [ ] Port Skippy's full config (SOUL.md, USER.md, AGENTS.md, TOOLS.md)
-- [ ] pi-skippy-soul extension (already built)
-- [ ] Integrate with OpenClaw as backend (Pi RPC ← OpenClaw session manager)
-- [ ] Keep OpenClaw for channel routing, sessions, memory
+### Phase 3: Primary Agent on Pi (if Phase 2 passes)
+- [ ] Port the primary agent config
+- [ ] Persona-loading extension
+- [ ] Integrate with MAE as backend through Pi RPC
+- [ ] Keep channel routing, sessions, and memory in the outer orchestration layer
 - [ ] Pi handles: code execution, tool calls, model routing
 
 ## The Hybrid Architecture
 
-The likely outcome isn't "replace OpenClaw with Pi" but "Pi as OpenClaw's coding backend":
+The likely outcome is Pi as a coding backend behind a broader orchestration layer:
 
 ```
-User → Discord/Telegram/iMessage
-  → OpenClaw (channel routing, sessions, memory, browser)
+User
+  → Orchestration layer (routing, sessions, memory, browser when available)
     → Pi (coding agent, tool execution, model routing)
       → LiteLLM (Anthropic/OpenAI/Gemini)
 ```
 
-OpenClaw stays for what it's good at (channels, memory, browser, approvals).
-Pi replaces Claude Code for what IT's good at (coding, multi-model, extensions).
+The outer layer keeps routing, memory, browser, and approval workflows.
+Pi handles coding, tool execution, model routing, and extensions.
 
 ## Decision Matrix
 
-| Capability | Keep OpenClaw | Move to Pi | Notes |
+| Capability | Keep Outer Layer | Move to Pi | Notes |
 |-----------|:---:|:---:|-------|
 | Channel routing | ✅ | | Discord, Telegram, iMessage |
 | Session management | ✅ | | Persistent sessions, threads |
@@ -127,4 +127,3 @@ Pi replaces Claude Code for what IT's good at (coding, multi-model, extensions).
 | Multi-agent orchestration | | ✅ | MAE + Pi RPC |
 | Cost tracking | | ✅ | MODEL_PRICING |
 | Safety gates | | ✅ | pi-safety-gate |
-

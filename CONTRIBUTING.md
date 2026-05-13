@@ -15,7 +15,6 @@ Thanks for your interest in contributing to MAE! This document covers everything
 
 - [Bun](https://bun.sh/) (latest) -- TypeScript runtime for the engine
 - [Go](https://go.dev/) 1.22+ -- for the dashboard
-- [templ](https://templ.guide/) -- Go HTML templating (dashboard views)
 - [just](https://github.com/casey/just) -- command runner (see `Justfile`)
 
 ### Install Dependencies
@@ -27,8 +26,8 @@ cd engine && bun install
 # Dashboard (Go)
 cd dashboard && go mod download
 
-# Generate templ templates
-templ generate
+# Dashboard UI (React SPA)
+cd ../dashboard-next && bun install
 ```
 
 ## Running Tests
@@ -39,6 +38,9 @@ bun test
 
 # Dashboard build check
 cd dashboard && go build ./...
+
+# Dashboard UI build
+cd ../dashboard-next && bun run build
 
 # Go vet (lint)
 go vet ./...
@@ -77,7 +79,8 @@ Examples:
 | Component | Language | Location |
 |-----------|----------|----------|
 | Engine (orchestrator, CLI, adapters) | TypeScript | `engine/` |
-| Dashboard (web UI, API) | Go + templ | `dashboard/` |
+| Dashboard API | Go | `dashboard/` |
+| Dashboard UI | React + TypeScript | `dashboard-next/src/` |
 | Configuration (agents, chains, routing) | YAML | `configs/`, `agents/teams/` |
 | Scripts & CI | Bash | `scripts/`, `.github/` |
 

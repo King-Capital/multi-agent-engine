@@ -42,7 +42,7 @@ library:
 ## Architecture
 
 - **Single Source of Truth**: Multiple projects reference same library.yaml pointing to one Source Repo.
-- **Cross-device sync**: One config keeps Dev Laptop, Mac Mini Agent, and Cloud Sandbox in sync.
+- **Cross-device sync**: One config keeps dev laptops, local agent hosts, and cloud sandboxes in sync.
 - **Role-scoped libraries**: `idd-library-engineer`, `idd-library-support`, `idd-library-sales` -- persona-specific skill sets.
 
 ## Applicable to MAE
