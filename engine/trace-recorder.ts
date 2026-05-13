@@ -14,10 +14,9 @@ import type { LogSink, LogEntry } from "./logger";
 import { mkdirSync, appendFileSync, existsSync } from "fs";
 import { join } from "path";
 import { sanitizeAgentInput } from "./security";
+import { TRACE_DIR } from "./trace-artifacts";
 
-export const TRACE_DIR =
-  process.env.MAE_TRACE_DIR ?? join(process.env.HOME ?? "/tmp", ".mae", "traces");
-const MAX_AGENT_OUTPUT_CHARS = 20_000;
+export { TRACE_DIR };
 
 type TraceType =
   | "session.start"
@@ -152,7 +151,9 @@ function extractTraceFields(entry: LogEntry, traceType: TraceType): Record<strin
       if (entry.cost_usd !== undefined) fields.cost = entry.cost_usd;
       if (entry.tokens !== undefined) fields.tokens = entry.tokens;
       if (entry.output_preview !== undefined) fields.output_preview = String(entry.output_preview).slice(0, 500);
-      if (entry.output !== undefined) fields.output = sanitizeAgentInput(String(entry.output)).slice(0, MAX_AGENT_OUTPUT_CHARS);
+      if (entry.output_hash !== undefined) fields.output_hash = entry.output_hash;
+      if (entry.output_artifact !== undefined) fields.output_artifact = entry.output_artifact;
+      if (entry.output_bytes !== undefined) fields.output_bytes = entry.output_bytes;
       break;
 
     case "agent.error":

@@ -37,7 +37,7 @@
 ```jsonl
 {"ts":"...","type":"agent.start","id":"agent-w1","parent_id":"step-2","session_id":"...","agent_id":"pi-frontend-dev","persona":"frontend-dev","model":"claude-sonnet-4-6","team":"engineering","role":"worker","prompt_hash":"def456","tools":["read","write","edit","bash"],"extensions":["damage-control"],"domain_write":["src/frontend/**"]}
 
-{"ts":"...","type":"agent.end","id":"...","parent_id":"step-2","session_id":"...","agent_id":"pi-frontend-dev","grade":"VERIFIED|PARTIAL|FAILED","output_hash":"...","output_preview":"First 500 chars...","duration_ms":45000,"cost":0.45,"tokens":{"prompt":8000,"completion":3000,"cache_read":5000}}
+{"ts":"...","type":"agent.end","id":"...","parent_id":"step-2","session_id":"...","agent_id":"pi-frontend-dev","grade":"VERIFIED|PARTIAL|FAILED","output_hash":"...","output_artifact":"session-id/artifacts/agent-output-abc123.txt","output_preview":"First 500 chars...","duration_ms":45000,"cost":0.45,"tokens":{"prompt":8000,"completion":3000,"cache_read":5000}}
 ```
 
 ### Tool Calls — Behavioral Fingerprint
@@ -101,10 +101,12 @@
 ### Trace Files
 ```
 ~/.mae/traces/{session_id}.jsonl       # One file per session
+~/.mae/traces/{session_id}/artifacts/  # Full per-agent output artifacts
 ~/.mae/traces/index.db                  # SQLite index for fast lookup
 ```
 
 Configurable via `MAE_TRACE_DIR` environment variable.
+Agent output artifacts are bounded by `MAE_AGENT_OUTPUT_ARTIFACT_CHARS` (default `20000`).
 
 ### SQLite Index Schema
 ```sql

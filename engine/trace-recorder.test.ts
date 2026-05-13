@@ -242,7 +242,7 @@ describe("trace-recorder", () => {
     recorder.close?.();
   });
 
-  test("stores bounded full agent output alongside preview", () => {
+  test("stores agent output artifact metadata without full output", () => {
     const recorder = createTraceRecorder(TEST_TRACE_DIR);
     const sessionId = "test-agent-output";
 
@@ -252,7 +252,9 @@ describe("trace-recorder", () => {
       msg: "Agent completed",
       trace_type: "agent.end",
       output_preview: "short preview",
-      output: "final report\n" + "x".repeat(25_000),
+      output_hash: "abc123",
+      output_artifact: `${sessionId}/artifacts/agent-output-abc123.txt`,
+      output_bytes: 1234,
     }));
 
     const content = readFileSync(join(TEST_TRACE_DIR, `${sessionId}.jsonl`), "utf-8");
@@ -260,8 +262,10 @@ describe("trace-recorder", () => {
 
     expect(event.type).toBe("agent.end");
     expect(event.output_preview).toBe("short preview");
-    expect(event.output).toStartWith("final report");
-    expect(event.output.length).toBe(20_000);
+    expect(event.output_hash).toBe("abc123");
+    expect(event.output_artifact).toBe(`${sessionId}/artifacts/agent-output-abc123.txt`);
+    expect(event.output_bytes).toBe(1234);
+    expect(event.output).toBeUndefined();
     recorder.close?.();
   });
 

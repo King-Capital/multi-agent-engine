@@ -287,6 +287,7 @@ export interface StreamEvent {
   toolResult?: string;
   status?: string;
   content?: string;
+  final?: boolean;
   costUsd?: number;
   tokensUsed?: number;
   cacheReadTokens?: number;

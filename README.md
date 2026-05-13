@@ -122,6 +122,10 @@ just build
 # Point at the dashboard server (set in ~/.mae/config or shell profile)
 export MAE_DASHBOARD_URL="$MAE_DASHBOARD_URL"  # e.g. http://your-dashboard:8400
 
+# Optional: expose a small run-specific scratch folder to worker worktrees.
+# Use a narrow path; MAE does not copy the entire .goal-runs tree by default.
+export MAE_WORKTREE_CONTEXT_PATHS=".goal-runs/current-run"
+
 # Run your first task -- plan, build, and review
 just task "add input validation to the signup handler"
 
@@ -143,6 +147,8 @@ bun engine/cli.ts task "your task" --dashboard "$MAE_DASHBOARD_URL"
 ```
 
 Any host with `bun` can run agent teams and stream results to the central dashboard.
+
+For dogfood/audit runs, `MAE_WORKTREE_CONTEXT_PATHS` accepts comma- or colon-separated relative paths. Each path is copied into worker git worktrees with symlinks skipped and size/file-count caps applied.
 
 ---
 

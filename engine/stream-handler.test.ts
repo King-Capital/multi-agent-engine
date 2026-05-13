@@ -74,4 +74,25 @@ describe("buildStreamHandler", () => {
     expect(session.status).toBe("completed");
     expect(events).toEqual([]);
   });
+
+  test("does not auto-pause final assistant report text before session completion", () => {
+    const { emitter, events } = makeEmitter();
+    const pausedSessions = new Set<string>();
+    const session = makeSession("active");
+    const handler = buildStreamHandler({
+      emitter,
+      sessionId: session.id,
+      agentId: "agent-1",
+      trackToolCall: () => {},
+      messageSenders: new Map(),
+      pausedSessions,
+      session,
+    });
+
+    handler({ type: "assistant_text", final: true, content: "CRITICAL\nengine/foo.ts:10\nHistorical finding in final report" });
+
+    expect(pausedSessions.has(session.id)).toBe(false);
+    expect(session.status).toBe("active");
+    expect(events).toEqual([]);
+  });
 });

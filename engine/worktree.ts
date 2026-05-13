@@ -1,7 +1,10 @@
 import { $ } from "bun";
-import { join } from "path";
+import { dirname, join, relative } from "path";
 import { tmpdir } from "os";
-import { cpSync, existsSync, rmSync } from "fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync } from "fs";
+import { createLogger } from "./logger";
+
+const log = createLogger("worktree");
 
 export async function isGitRepo(dir: string): Promise<boolean> {
   try {
@@ -12,7 +15,9 @@ export async function isGitRepo(dir: string): Promise<boolean> {
   }
 }
 
-const DEFAULT_CONTEXT_PATHS = [".goal-runs"];
+const DEFAULT_CONTEXT_PATHS = [".goal-runs/context"];
+const MAX_CONTEXT_BYTES = Number(process.env.MAE_WORKTREE_CONTEXT_MAX_BYTES ?? 5_000_000);
+const MAX_CONTEXT_FILES = Number(process.env.MAE_WORKTREE_CONTEXT_MAX_FILES ?? 200);
 
 function contextPaths(): string[] {
   const configured = process.env.MAE_WORKTREE_CONTEXT_PATHS;
@@ -23,14 +28,75 @@ function contextPaths(): string[] {
     .filter(Boolean);
 }
 
+function isInsideBase(baseDir: string, path: string): boolean {
+  const rel = relative(baseDir, path);
+  return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
+}
+
+function measurePathSafe(src: string, realBase: string, budget: { bytes: number; files: number }): void {
+  const stat = lstatSync(src);
+  if (stat.isSymbolicLink()) return;
+  if (!isInsideBase(realBase, realpathSync(src))) return;
+
+  if (stat.isDirectory()) {
+    for (const entry of readdirSync(src)) {
+      measurePathSafe(join(src, entry), realBase, budget);
+      if (budget.bytes > MAX_CONTEXT_BYTES || budget.files > MAX_CONTEXT_FILES) return;
+    }
+    return;
+  }
+
+  if (!stat.isFile()) return;
+  budget.bytes += stat.size;
+  budget.files += 1;
+}
+
+function copyPathSafe(src: string, dest: string, realBase: string): void {
+  const stat = lstatSync(src);
+  if (stat.isSymbolicLink()) return;
+  if (!isInsideBase(realBase, realpathSync(src))) return;
+
+  if (stat.isDirectory()) {
+    mkdirSync(dest, { recursive: true });
+    for (const entry of readdirSync(src)) {
+      copyPathSafe(join(src, entry), join(dest, entry), realBase);
+    }
+    return;
+  }
+
+  if (!stat.isFile()) return;
+  mkdirSync(dirname(dest), { recursive: true });
+  copyFileSync(src, dest);
+}
+
 function copyContextPaths(baseDir: string, wtPath: string): void {
+  const realBase = realpathSync(baseDir);
   for (const relPath of contextPaths()) {
     if (relPath.startsWith("/") || relPath.includes("..")) continue;
     const src = join(baseDir, relPath);
     if (!existsSync(src)) continue;
     const dest = join(wtPath, relPath);
-    rmSync(dest, { recursive: true, force: true });
-    cpSync(src, dest, { recursive: true, force: true });
+    try {
+      const budget = { bytes: 0, files: 0 };
+      measurePathSafe(src, realBase, budget);
+      if (budget.bytes > MAX_CONTEXT_BYTES || budget.files > MAX_CONTEXT_FILES) {
+        log.warn("Skipped oversized worktree context path", {
+          path: relPath,
+          bytes: budget.bytes,
+          files: budget.files,
+          max_bytes: MAX_CONTEXT_BYTES,
+          max_files: MAX_CONTEXT_FILES,
+        });
+        continue;
+      }
+      rmSync(dest, { recursive: true, force: true });
+      copyPathSafe(src, dest, realBase);
+    } catch (err) {
+      log.warn("Skipped worktree context copy", {
+        path: relPath,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 }
 

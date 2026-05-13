@@ -24,9 +24,9 @@ import type {
 import { createLogger } from "../logger";
 import { sanitizeAgentInput } from "../security";
 import { trackPromptVersion } from "../langfuse-prompts";
+import { writeAgentOutputArtifact } from "../trace-artifacts";
 
 const log = createLogger("a2a-adapter");
-const MAX_TRACE_OUTPUT_CHARS = 20_000;
 
 // --- A2A Protocol Types ---
 
@@ -169,7 +169,7 @@ export class A2AAdapter implements PlatformAdapter {
 
   async delegate(opts: DelegateOptions): Promise<DelegateResult> {
     const agentId = `a2a-${opts.persona.name.toLowerCase().replace(/\s+/g, "-")}`;
-    const sessionId = opts.sessionDir?.split(/[\\/]/).pop() ?? undefined;
+    const sessionId = opts.sessionDir?.split(/[\\/]/).pop() ?? "unknown-session";
     const endpoint = this.resolveEndpoint(opts.persona.name, opts.teamName);
     const startedAt = Date.now();
     const promptMeta = trackPromptVersion(opts.persona.name, opts.systemPrompt, {
@@ -179,6 +179,7 @@ export class A2AAdapter implements PlatformAdapter {
     });
 
     const finish = (result: DelegateResult): DelegateResult => {
+      const outputArtifact = writeAgentOutputArtifact(sessionId, agentId, result.output ?? "");
       log.info("Agent completed", {
         trace_type: "agent.end",
         session_id: sessionId,
@@ -191,7 +192,7 @@ export class A2AAdapter implements PlatformAdapter {
         tokens: result.tokensUsed ?? 0,
         duration_ms: Date.now() - startedAt,
         output_preview: sanitizeAgentInput(result.output ?? "").slice(0, 500),
-        output: sanitizeAgentInput(result.output ?? "").slice(0, MAX_TRACE_OUTPUT_CHARS),
+        ...outputArtifact,
       });
       return result;
     };

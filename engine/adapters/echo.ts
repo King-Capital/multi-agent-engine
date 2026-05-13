@@ -2,9 +2,9 @@ import type { PlatformAdapter, DelegateOptions, DelegateResult } from "../types"
 import { createLogger } from "../logger";
 import { sanitizeAgentInput } from "../security";
 import { trackPromptVersion } from "../langfuse-prompts";
+import { writeAgentOutputArtifact } from "../trace-artifacts";
 
 const log = createLogger("echo-adapter");
-const MAX_TRACE_OUTPUT_CHARS = 20_000;
 
 export class EchoAdapter implements PlatformAdapter {
   name = "echo";
@@ -15,7 +15,7 @@ export class EchoAdapter implements PlatformAdapter {
 
   async delegate(opts: DelegateOptions): Promise<DelegateResult> {
     const agentId = `echo-${opts.persona.name.toLowerCase().replace(/\s+/g, "-")}`;
-    const sessionId = opts.sessionDir?.split(/[\\/]/).pop() ?? undefined;
+    const sessionId = opts.sessionDir?.split(/[\\/]/).pop() ?? "unknown-session";
     const promptMeta = trackPromptVersion(opts.persona.name, opts.systemPrompt, {
       workingDir: opts.workingDir,
       sourceRoot: process.cwd(),
@@ -68,6 +68,7 @@ export class EchoAdapter implements PlatformAdapter {
       prompt_context_stack: promptMeta.prompt_context_stack,
     });
 
+    const outputArtifact = writeAgentOutputArtifact(sessionId, agentId, result.output);
     log.info("Agent completed", {
       trace_type: "agent.end",
       session_id: sessionId,
@@ -78,7 +79,7 @@ export class EchoAdapter implements PlatformAdapter {
       cost: result.costUsd,
       tokens: result.tokensUsed,
       output_preview: sanitizeAgentInput(result.output).slice(0, 500),
-      output: sanitizeAgentInput(result.output).slice(0, MAX_TRACE_OUTPUT_CHARS),
+      ...outputArtifact,
     });
 
     return result;
