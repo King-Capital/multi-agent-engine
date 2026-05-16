@@ -273,6 +273,7 @@ export interface ModelRoutingConfig {
   aliases?: Record<string, string>;
   models?: Record<string, { primary: string }>;
   roleDefaults: Record<string, RoleDefault>;
+  modelOverrides?: Record<string, { thinking?: ThinkingLevel }>;
   crossModelPairs?: { builder: string; verifier: string }[];
   budgets?: { max_per_session_usd: number; warn_at_usd: number; max_per_agent_usd: number; max_total_tokens: number; budget_action?: "warn" | "pause" };
   concurrency?: ConcurrencyConfig;

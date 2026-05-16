@@ -120,8 +120,17 @@ export function listenForUserMessages(
 
   const connect = () => {
     if (abort.signal.aborted) return;
-    fetch(url, { signal: abort.signal }).then(async (res) => {
-      if (!res.ok || !res.body) return;
+    const apiToken = process.env.MAE_API_TOKEN;
+    const headers = apiToken ? { Authorization: `Bearer ${apiToken}` } : undefined;
+    fetch(url, { signal: abort.signal, headers }).then(async (res) => {
+      if (!res.ok || !res.body) {
+        if (!abort.signal.aborted) {
+          log.warn("SSE connection returned non-OK response, retrying", { session_id: sessionId, status: res.status, retry_delay_ms: retryDelay });
+          scheduleReconnect(retryDelay);
+          retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
+        }
+        return;
+      }
       const reader = res.body.getReader();
       activeReader = reader;
       const decoder = new TextDecoder();

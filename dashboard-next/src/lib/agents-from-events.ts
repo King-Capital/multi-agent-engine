@@ -38,6 +38,8 @@ export function buildAgentsFromEvents(dbEvents: DBEvent[]): LiveAgent[] {
         context_max: 0,
         started_at: (payload.timestamp as string) ?? evt.created_at ?? new Date().toISOString(),
         elapsed_ms: 0,
+        last_activity_at: (payload.timestamp as string) ?? evt.created_at ?? new Date().toISOString(),
+        current_activity: "spawned",
       });
     } else if (eventType === "agent_done") {
       const existing = agentMap.get(agentId);
@@ -47,6 +49,8 @@ export function buildAgentsFromEvents(dbEvents: DBEvent[]): LiveAgent[] {
         const tokens = typeof payload.tokens_used === "number" ? payload.tokens_used : data.tokens_used;
         if (typeof cost === "number") existing.cost_usd = cost;
         if (typeof tokens === "number") existing.tokens_used = tokens;
+        existing.last_activity_at = (payload.timestamp as string) ?? evt.created_at ?? existing.last_activity_at;
+        existing.current_activity = "done";
       }
     } else if (eventType === "cost_update") {
       const existing = agentMap.get(agentId);
@@ -54,10 +58,29 @@ export function buildAgentsFromEvents(dbEvents: DBEvent[]): LiveAgent[] {
         if (typeof payload.cost_usd === "number") existing.cost_usd = payload.cost_usd;
         if (typeof payload.tokens_used === "number") existing.tokens_used = payload.tokens_used;
         if (typeof payload.context_tokens === "number") existing.context_tokens = payload.context_tokens;
+        existing.last_activity_at = (payload.timestamp as string) ?? evt.created_at ?? existing.last_activity_at;
+        existing.current_activity = "cost update";
+      }
+    } else if (eventType === "tool_call" || eventType === "tool_result") {
+      const existing = agentMap.get(agentId);
+      if (existing) {
+        existing.last_activity_at = (payload.timestamp as string) ?? evt.created_at ?? existing.last_activity_at;
+        const tool = data.tool ? String(data.tool) : eventType.replace("_", " ");
+        existing.current_activity = tool;
+      }
+    } else if (eventType === "message" || eventType === "agent_message") {
+      const existing = agentMap.get(agentId);
+      if (existing) {
+        existing.last_activity_at = (payload.timestamp as string) ?? evt.created_at ?? existing.last_activity_at;
+        existing.current_activity = "message";
       }
     } else if (eventType === "error") {
       const existing = agentMap.get(agentId);
-      if (existing) existing.status = "error";
+      if (existing) {
+        existing.status = "error";
+        existing.last_activity_at = (payload.timestamp as string) ?? evt.created_at ?? existing.last_activity_at;
+        existing.current_activity = "error";
+      }
     }
   }
 
@@ -78,13 +101,23 @@ export function mergeAgents(pgAgents: LiveAgent[], eventAgents: LiveAgent[]): Li
   for (const a of eventAgents) {
     const existing = merged.get(a.id);
     if (existing) {
-      // Keep PG fields but override cost/tokens/status from events
+      // Event spawn data has better display identity than sparse PG rows.
+      // PG rows can persist only role/status/cost and leave model/team_color as "unknown",
+      // which makes all leads render with the generic blue lead fallback.
       merged.set(a.id, {
         ...existing,
+        name: a.name && a.name !== a.id ? a.name : existing.name,
+        model: a.model && a.model !== "unknown" ? a.model : existing.model,
+        team_name: a.team_name || existing.team_name,
+        team_color: a.team_color || existing.team_color,
+        parent_id: a.parent_id ?? existing.parent_id,
+        persona_path: a.persona_path ?? existing.persona_path,
+        last_activity_at: a.last_activity_at ?? existing.last_activity_at,
+        current_activity: a.current_activity ?? existing.current_activity,
         cost_usd: a.cost_usd > 0 ? a.cost_usd : existing.cost_usd,
         tokens_used: a.tokens_used > 0 ? a.tokens_used : existing.tokens_used,
         context_tokens: a.context_tokens > 0 ? a.context_tokens : existing.context_tokens,
-        status: a.status !== "running" ? a.status : existing.status,
+        status: a.status || existing.status,
       });
     } else {
       merged.set(a.id, a);

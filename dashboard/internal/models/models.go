@@ -29,6 +29,7 @@ const (
 	EventAgentDone    EventType = "agent_done"
 	EventMessage      EventType = "message"
 	EventToolCall     EventType = "tool_call"
+	EventToolResult   EventType = "tool_result"
 	EventTillDone     EventType = "tilldone"
 	EventCostUpdate   EventType = "cost_update"
 	EventDomainBlock  EventType = "domain_block"

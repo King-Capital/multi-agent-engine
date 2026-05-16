@@ -16,6 +16,9 @@ import type {
   DiffFile,
   LiveEvent,
   LiveAgent,
+  AuthResponse,
+  ApiTokenMeta,
+  CreateApiTokenResponse,
 } from "./types";
 
 // ─── Base URL ─────────────────────────────────────────────────────────────────
@@ -30,10 +33,13 @@ export const API_BASE_URL = (
 
 // ─── Core fetch helpers ───────────────────────────────────────────────────────
 
-async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (!headers.has("Accept")) headers.set("Accept", "application/json");
   const res = await fetch(`${API_BASE_URL}${path}`, {
-    signal,
-    headers: { Accept: "application/json" },
+    ...init,
+    headers,
+    credentials: "include",
   });
   if (!res.ok) {
     const err = new Error(`API ${path} → ${res.status} ${res.statusText}`);
@@ -43,6 +49,22 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return request<T>(path, { signal });
+}
+
+async function postJSON<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+async function deleteJSON<T>(path: string): Promise<T> {
+  return request<T>(path, { method: "DELETE" });
+}
+
 /** Generic fetch returning JSON — exported for components that need raw access */
 export async function apiFetch<T>(path: string, signal?: AbortSignal): Promise<T> {
   return get<T>(path, signal);
@@ -50,7 +72,7 @@ export async function apiFetch<T>(path: string, signal?: AbortSignal): Promise<T
 
 /** Fetch raw text (e.g. Prometheus /metrics endpoint) */
 export async function apiText(path: string, signal?: AbortSignal): Promise<string> {
-  const res = await fetch(`${API_BASE_URL}${path}`, { signal });
+  const res = await fetch(`${API_BASE_URL}${path}`, { signal, credentials: "include" });
   if (!res.ok) throw new Error(`API ${path} → ${res.status}`);
   return res.text();
 }
@@ -58,6 +80,17 @@ export async function apiText(path: string, signal?: AbortSignal): Promise<strin
 // ─── Typed API surface ────────────────────────────────────────────────────────
 
 export const api = {
+  login: (username: string, password: string) =>
+    postJSON<AuthResponse>("/api/auth/login", { username, password }),
+  logout: () => postJSON<{ status: string }>("/api/auth/logout"),
+  me: () => get<AuthResponse>("/api/auth/me"),
+  adminTokens: () => get<ApiTokenMeta[]>("/api/admin/tokens"),
+  createAdminToken: (user_id: number, name: string) =>
+    postJSON<CreateApiTokenResponse>("/api/admin/tokens", { user_id, name }),
+  revokeAdminToken: (id: number) => deleteJSON<{ status: string }>(`/api/admin/tokens/${id}`),
+
+  users: (signal?: AbortSignal) => get<import("./types").DBUser[]>("/api/users", signal),
+
   // Sessions list
   sessions: (signal?: AbortSignal) =>
     get<DBSession[]>("/api/pg/sessions", signal),
@@ -76,9 +109,9 @@ export const api = {
       id: a.agent_id ?? a.id?.toString() ?? "unknown",
       name: a.persona ?? a.agent_id ?? "Agent",
       role: a.role ?? "worker",
-      model: a.adapter ?? "unknown",
-      team_name: a.role === "orchestrator" ? "Orchestrator" : "Team",
-      team_color: a.role === "orchestrator" ? "#36f9f6" : "#00d4ff",
+      model: "unknown",
+      team_name: a.role === "orchestrator" ? "Orchestrator" : "",
+      team_color: a.role === "orchestrator" ? "#36f9f6" : "",
       parent_id: undefined,
       status: a.status ?? "pending",
       persona_path: undefined,
@@ -149,6 +182,7 @@ export const api = {
       {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        credentials: "include",
         body,
       },
     );
@@ -200,7 +234,7 @@ export function subscribeToSession(
       : `/api/sessions/${encodeURIComponent(sessionId)}/stream`;
 
   const url = `${API_BASE_URL}${path}`;
-  const es = new EventSource(url);
+  const es = new EventSource(url, { withCredentials: true });
 
   const parseAndEmit = (data: string) => {
     try {

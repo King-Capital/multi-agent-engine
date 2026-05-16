@@ -115,7 +115,20 @@ export class Orchestrator {
       return;
     }
     const ackMetadata = messageId ? { ack_for: messageId } : {};
-    void this.emitter.message(sessionId, "orch-1", "Orchestrator", "user", "ACK: received steer message.", ackMetadata);
+    const normalizedMessage = message.trim().toLowerCase();
+    if (normalizedMessage === "ping") {
+      void this.emitter.message(sessionId, "orch-1", "Orchestrator", "user", "pong", ackMetadata);
+      return;
+    }
+
+    void this.emitter.message(
+      sessionId,
+      "orch-1",
+      "Orchestrator",
+      "user",
+      "ACK: received steer message; orchestrator reasoning cycle started.",
+      ackMetadata,
+    );
     if (this.orchestratorLoop) {
       void this.orchestratorLoop.handleUserMessage(message).catch(err =>
         log.error("Loop handleUserMessage failed", { error: err instanceof Error ? err.message : String(err) }));

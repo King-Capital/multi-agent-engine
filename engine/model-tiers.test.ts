@@ -40,10 +40,20 @@ describe("model tier enforcement (#148)", () => {
   });
 
   describe("preferred alias override", () => {
-    test("lead with preferred alias uses alias model but enforces high thinking", () => {
+    test("lead with preferred quality alias uses alias model and high thinking", () => {
       const result = resolveModelForRole("lead", "quality");
       expect(result.model).toBe(resolveModel("quality"));
       expect(result.thinking).toBe("high");
+    });
+
+    test("gpt-5.5 aliases use low thinking regardless of role default", () => {
+      const leadResult = resolveModelForRole("lead", "pro");
+      const workerResult = resolveModelForRole("worker", "pro");
+
+      expect(leadResult.model).toBe("gpt-5.5");
+      expect(leadResult.thinking).toBe("low");
+      expect(workerResult.model).toBe("gpt-5.5");
+      expect(workerResult.thinking).toBe("low");
     });
 
     test("worker with quality alias gets opus model but medium thinking", () => {

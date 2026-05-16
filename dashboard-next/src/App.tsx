@@ -37,7 +37,8 @@ import {
 	YAxis,
 } from "recharts";
 import { api } from "@/lib/api";
-import type { DBSession } from "@/lib/types";
+import { loadCurrentUser, logout } from "@/lib/auth";
+import type { DBSession, DBUser } from "@/lib/types";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { usePolling } from "@/hooks/usePolling";
 import { SessionSSEProvider } from "@/hooks/useSessionSSE";
@@ -53,6 +54,8 @@ import { ResizablePanel } from "@/components/ResizablePanel";
 import { SessionSidebar } from "@/components/SessionSidebar";
 import { AgentTreePanel } from "@/components/AgentTreePanel";
 import { SessionTabs } from "@/components/SessionTabs";
+import { LoginPage } from "@/components/LoginPage";
+import { AdminTokenPanel } from "@/components/AdminTokenPanel";
 
 // ─── Stats panel (shown when no session selected) ────────────────────────────
 
@@ -384,14 +387,44 @@ function SessionDetailPage() {
 
 // ─── Root App with Router ─────────────────────────────────────────────────────
 
-export default function App() {
+function AuthenticatedApp({ user, onLogout }: { user: DBUser; onLogout: () => void }) {
 	return (
-		<BrowserRouter>
-			<ErrorBoundary>
+		<>
+			<div className="fixed right-3 top-3 z-50 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-1 text-xs text-zinc-300 backdrop-blur">
+				<span>{user.display_name}</span>
+				{user.role === "admin" ? <a className="text-cyan-300 hover:text-cyan-100" href="/admin">Admin</a> : null}
+				<button className="text-zinc-500 hover:text-zinc-200" onClick={onLogout}>Logout</button>
+			</div>
 			<Routes>
 				<Route path="/" element={<SessionListPage />} />
 				<Route path="/session/:id" element={<SessionDetailPage />} />
+				<Route path="/admin" element={<AdminTokenPanel currentUser={user} />} />
 			</Routes>
+		</>
+	);
+}
+
+export default function App() {
+	const [user, setUser] = React.useState<DBUser | null>(null);
+	const [loading, setLoading] = React.useState(true);
+
+	React.useEffect(() => {
+		loadCurrentUser().then(setUser).finally(() => setLoading(false));
+	}, []);
+
+	async function handleLogout() {
+		await logout().catch(() => undefined);
+		setUser(null);
+	}
+
+	if (loading) {
+		return <div className="min-h-screen bg-grid flex items-center justify-center text-zinc-400">Loading…</div>;
+	}
+
+	return (
+		<BrowserRouter>
+			<ErrorBoundary>
+				{user ? <AuthenticatedApp user={user} onLogout={handleLogout} /> : <LoginPage onLogin={setUser} />}
 			</ErrorBoundary>
 		</BrowserRouter>
 	);

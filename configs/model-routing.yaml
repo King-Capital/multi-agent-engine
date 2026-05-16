@@ -67,6 +67,9 @@ roleDefaults:
   scout:
     tier: fast
     thinking: off
+modelOverrides:
+  gpt-5.5:
+    thinking: low
 crossModelPairs:
   - builder: opus
     verifier: gpt-5.5

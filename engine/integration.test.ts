@@ -212,9 +212,41 @@ describe("steering", () => {
     await Bun.sleep(10);
 
     expect(messages).toEqual([
-      { content: "ACK: received steer message.", metadata: { ack_for: "msg-123" } },
+      { content: "ACK: received steer message; orchestrator reasoning cycle started.", metadata: { ack_for: "msg-123" } },
     ]);
     expect(loopMessages).toEqual(["focus on the API contract first"]);
+  });
+
+  test("ping steer messages return pong without starting reasoning", async () => {
+    const orch = new Orchestrator("");
+    const messages: Array<{ content: string; metadata: Record<string, unknown> }> = [];
+    const loopMessages: string[] = [];
+    const orchAny = orch as any;
+    orchAny.emitter = {
+      message: async (
+        _sessionId: string,
+        _agentId: string,
+        _agentName: string,
+        _channel: string,
+        content: string,
+        metadata: Record<string, unknown> = {},
+      ) => {
+        messages.push({ content, metadata });
+      },
+    };
+    orchAny.orchestratorLoop = {
+      handleUserMessage: async (content: string) => {
+        loopMessages.push(content);
+      },
+    };
+
+    orch.sendUserMessage("session-1", " ping ", "msg-ping");
+    await Bun.sleep(10);
+
+    expect(messages).toEqual([
+      { content: "pong", metadata: { ack_for: "msg-ping" } },
+    ]);
+    expect(loopMessages).toEqual([]);
   });
 
   test("pause and resume commands update session state and PG status", async () => {
