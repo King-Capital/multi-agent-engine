@@ -226,13 +226,15 @@ export async function prepareTeamStep(
   const members = teamConfig.members.map((m) => `- ${m.name}: ${m["consult-when"] ?? "general tasks"}`).join("\n");
   const prefilledAssignments = teamConfig.members.map((m) => {
     const focus = m["consult-when"] ?? "general tasks";
-    return `\n### ASSIGNMENT: ${m.name}\nFocus: ${focus}\nFiles: [list target files/directories]\nExpected output: findings with file path, line number, severity (P0-P3), description, fix`;
+    return `\n### ASSIGNMENT: ${m.name}\nFocus: ${focus}\nOne task only: [one narrow, concrete review task this worker can do very well]\nFiles: [specific target files/directories]\nExpected output: findings with file path, line number, severity (P0-P3), description, fix`;
   });
   const leadPrompt = [
     `Task: ${task}`,
     previousOutput ? `\nContext from previous step:\n${previousOutput}` : "",
     `\nYour team:\n${members}`,
     `\nYour ONLY job: produce worker assignments. Do NOT do the review yourself.`,
+    `Assign every worker exactly one narrow task. Do not give broad multi-part review blobs.`,
+    `Start all workers immediately by filling every assignment below; each worker owns its task until complete.`,
     `Scan the directory structure (ls, find) to identify target files, then fill in the assignments below.`,
     `Keep it fast — 5 tool calls max. The workers will do the deep analysis.`,
     ...prefilledAssignments,

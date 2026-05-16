@@ -215,6 +215,17 @@ The real-time dashboard is a Go API server with an embedded **React SPA** from `
 
 **Access:** Set `MAE_DASHBOARD_URL` in `~/.mae/config` and open in your browser.
 
+### Dashboard authentication
+
+The dashboard protects all `/api/*`, `/htmx/*`, and `/metrics` endpoints by default. Public paths are limited to the SPA shell/assets, `/api/health`, and `/api/auth/login`.
+
+- Browser users sign in through the React login page. Successful login creates an HttpOnly `mae_session` cookie backed by the `auth_sessions` table.
+- API clients use `Authorization: Bearer <token>`. New admin-managed tokens live in `api_tokens`; legacy `users.api_token` values still load for compatibility.
+- Admin users can open `/admin` to create/revoke API tokens. Newly generated token secrets are shown once; store bootstrap credentials and generated operational tokens in Vaultwarden (for the public deployment, item: `MAE Dashboard bootstrap credentials - ai-agents.rodaddy.live`).
+- First-run bootstrap: set `MAE_BOOTSTRAP_USERNAME=<existing admin username>` and `MAE_BOOTSTRAP_PASSWORD=<temporary strong password>` before starting the dashboard. Startup sets that user's password only when `password_hash` is empty, so later restarts will not overwrite a rotated password. Remove the env vars after login and rotate/store the final password in Vaultwarden.
+- Legacy `users.api_token` bearer tokens still work for migration compatibility, but they are not visible in `/admin`, do not track `last_used_at`, and cannot be revoked there. Prefer creating replacement `api_tokens` from `/admin`, updating clients, then removing legacy tokens from `users.api_token`.
+- If the database is unavailable, auth-required endpoints fail closed instead of falling back to anonymous API access.
+
 ---
 
 ## 🧭 Model Routing

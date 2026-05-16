@@ -61,6 +61,23 @@ function RoleBadge({ role }: { role: string }) {
 
 // ─── Agent row ────────────────────────────────────────────────────────────────
 
+function formatActivity(agent: LiveAgent): string {
+	if (agent.current_activity) return agent.current_activity;
+	return agent.role === "orchestrator" ? "coordinator" : "idle";
+}
+
+function formatModel(agent: LiveAgent): string | null {
+	if (!agent.model || agent.model === "unknown") return null;
+	return agent.model;
+}
+
+function activityAge(agent: LiveAgent): string | null {
+	if (!agent.last_activity_at || agent.status !== "running") return null;
+	const seconds = Math.max(0, Math.floor((Date.now() - new Date(agent.last_activity_at).getTime()) / 1000));
+	if (seconds < 60) return `${seconds}s ago`;
+	return `${Math.floor(seconds / 60)}m ago`;
+}
+
 function AgentRow({
 	agent,
 	depth,
@@ -75,6 +92,8 @@ function AgentRow({
 	onClick: () => void;
 }) {
 	const teamColor = agentColor(agent.role, agent.team_color);
+	const age = activityAge(agent);
+	const model = formatModel(agent);
 
 	return (
 		<button
@@ -108,12 +127,24 @@ function AgentRow({
 					{agent.role === "orchestrator" ? "O" : agent.role === "lead" ? "L" : "W"}
 				</span>
 
-				{/* Name + model */}
+				{/* Name + model/activity */}
 				<div className="flex-1 min-w-0">
 					<div className="text-xs font-semibold text-zinc-200 break-words leading-tight">
 						{agent.name}
 					</div>
-					<div className="truncate text-[10px] text-zinc-500">{agent.model && agent.model !== "unknown" ? agent.model : (agent.role === "orchestrator" ? "coordinator" : agent.model)}</div>
+					<div className="flex items-center gap-1.5 min-w-0 text-[10px]">
+						{model ? (
+							<span
+								className="font-mono rounded px-1 py-0.5 shrink-0"
+								style={{ backgroundColor: `${teamColor}20`, color: teamColor }}
+							>
+								{model}
+							</span>
+						) : null}
+						<span className="truncate text-zinc-500">
+							{formatActivity(agent)}{age ? ` · ${age}` : ""}
+						</span>
+					</div>
 				</div>
 
 				{/* Cost / Tokens bubble */}
@@ -233,6 +264,16 @@ export function AgentTreePanel({
 	const { subscribe } = useSessionSSE();
 
 	React.useEffect(() => {
+		const markActivity = (agentId: string, activity: string) => {
+			setAgents((prev) =>
+				prev.map((a) =>
+					a.id === agentId
+						? { ...a, last_activity_at: new Date().toISOString(), current_activity: activity }
+						: a,
+				),
+			);
+		};
+
 		const unsub = subscribe((event: LiveEvent) => {
 			const d = event.data ?? {};
 			if (event.event_type === "agent_spawn") {
@@ -252,16 +293,42 @@ export function AgentTreePanel({
 					context_max: 0,
 					started_at: event.timestamp ?? new Date().toISOString(),
 					elapsed_ms: 0,
+					last_activity_at: event.timestamp ?? new Date().toISOString(),
+					current_activity: "spawned",
 				};
-				setAgents((prev) =>
-					prev.some((a) => a.id === newAgent.id) ? prev : [...prev, newAgent],
-				);
+				setAgents((prev) => {
+					const existing = prev.find((a) => a.id === newAgent.id);
+					if (!existing) return [...prev, newAgent];
+					return prev.map((a) =>
+						a.id === newAgent.id
+							? {
+									...a,
+									name: newAgent.name,
+									role: newAgent.role,
+									model: newAgent.model && newAgent.model !== "unknown" ? newAgent.model : a.model,
+									team_name: newAgent.team_name || a.team_name,
+									team_color: newAgent.team_color || a.team_color,
+									parent_id: newAgent.parent_id ?? a.parent_id,
+									persona_path: newAgent.persona_path ?? a.persona_path,
+									status: newAgent.status,
+									last_activity_at: newAgent.last_activity_at,
+									current_activity: newAgent.current_activity,
+								}
+							: a,
+					);
+				});
 			} else if (event.event_type === "agent_done") {
 				setAgents((prev) =>
 					prev.map((a) =>
 						a.id === event.agent_id ? { ...a, status: "done" } : a,
 					),
 				);
+			} else if (event.event_type === "tool_call") {
+				markActivity(event.agent_id, String(d.tool ?? "tool call"));
+			} else if (event.event_type === "tool_result") {
+				markActivity(event.agent_id, String(d.tool ?? "tool result"));
+			} else if (event.event_type === "message" || event.event_type === "agent_message") {
+				markActivity(event.agent_id, "message");
 			} else if (event.event_type === "cost_update") {
 				setAgents((prev) =>
 					prev.map((a) =>
@@ -271,6 +338,8 @@ export function AgentTreePanel({
 									cost_usd: event.cost_usd ?? a.cost_usd,
 									tokens_used: event.tokens_used ?? a.tokens_used,
 									context_tokens: event.context_tokens ?? a.context_tokens,
+									last_activity_at: event.timestamp ?? new Date().toISOString(),
+									current_activity: "cost update",
 								}
 							: a,
 					),

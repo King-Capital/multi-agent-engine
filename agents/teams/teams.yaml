@@ -174,6 +174,159 @@ teams:
           Challenge design choices. Check accessibility, consistency,
           edge cases (empty states, overflow, RTL).
 
+  # --- Canonical Code Swarm Review Teams ---
+
+  - team-name: Correctness Review
+    team-color: "#22d3ee"
+    consult-when: >
+      Canonical PR/code swarm correctness role. Verifies logic, regressions,
+      type/runtime safety, API contracts, and edge cases.
+    lead:
+      name: Correctness Lead
+      path: agents/personas/correctness-lead.md
+      model: pro
+      color: "#22d3ee"
+    members:
+      - name: Correctness Logic Reviewer
+        path: agents/personas/correctness-reviewer.md
+        model: pro
+        color: "#06b6d4"
+        consult-when: >
+          One task: verify changed logic and runtime behavior against caller expectations.
+      - name: Type Contract Reviewer
+        path: agents/personas/api-designer.md
+        model: pro
+        color: "#0891b2"
+        consult-when: >
+          One task: verify public interfaces, type contracts, exports, and API compatibility.
+      - name: Test Coverage Reviewer
+        path: agents/personas/testing-engineer.md
+        model: pro
+        color: "#0e7490"
+        consult-when: >
+          One task: verify tests cover the changed behavior and cannot pass accidentally.
+
+  - team-name: Adversarial Review
+    team-color: "#f43f5e"
+    consult-when: >
+      Canonical PR/code swarm adversarial role. Breaks assumptions, finds
+      hidden failure modes, brittle tests, race/order issues, and implicit coupling.
+    lead:
+      name: Adversarial Lead
+      path: agents/personas/adversarial-lead.md
+      model: quality
+      color: "#f43f5e"
+    members:
+      - name: Assumption Breaker
+        path: agents/personas/adversarial-reviewer.md
+        model: quality
+        color: "#e11d48"
+        consult-when: >
+          One task: break the main design assumption behind the change.
+      - name: Edge Case Hunter
+        path: agents/personas/testing-engineer.md
+        model: quality
+        color: "#be123c"
+        consult-when: >
+          One task: find boundary inputs, ordering issues, and failure modes tests may miss.
+      - name: Coupling Reviewer
+        path: agents/personas/antagonist.md
+        model: quality
+        color: "#9f1239"
+        consult-when: >
+          One task: find hidden coupling, stale state, and integration assumptions.
+
+  - team-name: Quality Review
+    team-color: "#a3e635"
+    consult-when: >
+      Canonical PR/code swarm quality role. Reviews maintainability,
+      simplicity, readability, duplication, test quality, and code hygiene.
+    lead:
+      name: Quality Lead
+      path: agents/personas/quality-lead.md
+      model: pro
+      color: "#a3e635"
+    members:
+      - name: Maintainability Reviewer
+        path: agents/personas/quality-reviewer.md
+        model: pro
+        color: "#84cc16"
+        consult-when: >
+          One task: assess maintainability, naming, structure, and readability.
+      - name: Simplicity Reviewer
+        path: agents/personas/reviewer.md
+        model: pro
+        color: "#65a30d"
+        consult-when: >
+          One task: find unnecessary complexity, duplication, and overbroad changes.
+      - name: Test Quality Reviewer
+        path: agents/personas/testing-engineer.md
+        model: pro
+        color: "#4d7c0f"
+        consult-when: >
+          One task: assess test clarity, fixture quality, and assertion strength.
+
+  - team-name: Security Review
+    team-color: "#fb7185"
+    consult-when: >
+      Canonical PR/code swarm security role. Reviews auth, injection, SSRF,
+      secrets, unsafe network/file/process operations, and privilege boundaries.
+    lead:
+      name: Security Lead
+      path: agents/personas/security-lead.md
+      model: quality
+      color: "#fb7185"
+    members:
+      - name: Auth Boundary Reviewer
+        path: agents/personas/red-team.md
+        model: quality
+        color: "#ff4466"
+        consult-when: >
+          One task: verify auth/authz, privilege boundaries, and session assumptions.
+      - name: Input Attack Reviewer
+        path: agents/personas/security-engineer.md
+        model: quality
+        color: "#fb7185"
+        consult-when: >
+          One task: check injection, SSRF, path/file/process/network input risks.
+      - name: Secrets Config Reviewer
+        path: agents/personas/infra-engineer.md
+        model: quality
+        color: "#f43f5e"
+        consult-when: >
+          One task: check secrets, config, dependency, and deployment security risks.
+
+  - team-name: Domain Review
+    team-color: "#f59e0b"
+    consult-when: >
+      Canonical PR/code swarm domain-specialist role. Reviews repo-specific
+      business logic, operating constraints, trading/deploy/data/API semantics,
+      and downstream integration correctness.
+    lead:
+      name: Domain Lead
+      path: agents/personas/domain-lead.md
+      model: pro
+      color: "#f59e0b"
+    members:
+      - name: Domain Semantics Reviewer
+        path: agents/personas/domain-reviewer.md
+        model: pro
+        color: "#fbbf24"
+        consult-when: >
+          One task: identify the domain lens and verify business/domain semantics.
+      - name: Operations Fit Reviewer
+        path: agents/personas/devops-engineer.md
+        model: pro
+        color: "#f59e0b"
+        consult-when: >
+          One task: verify deployment, operations, observability, and runbook fit.
+      - name: Integration Reviewer
+        path: agents/personas/backend-engineer.md
+        model: pro
+        color: "#d97706"
+        consult-when: >
+          One task: verify downstream consumers, adjacent repos, API/data flow, and rollout fit.
+
   # --- Swarm Teams (Review) ---
 
   - team-name: Red Team

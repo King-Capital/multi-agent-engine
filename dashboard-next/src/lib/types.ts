@@ -31,6 +31,28 @@ export interface DBUser {
   created_at: string;
 }
 
+export interface AuthResponse {
+  user: DBUser;
+}
+
+export interface ApiTokenMeta {
+  id: number;
+  user_id: number;
+  username: string;
+  name: string;
+  token_prefix: string;
+  last4: string;
+  created_at: string;
+  last_used_at?: string;
+  expires_at?: string;
+  revoked_at?: string;
+}
+
+export interface CreateApiTokenResponse {
+  token: string;
+  meta: ApiTokenMeta;
+}
+
 export interface DBSession {
   id: string;
   user_id?: number | null;
@@ -284,6 +306,8 @@ export interface LiveAgent {
   context_max: number;
   started_at: string;
   elapsed_ms: number;
+  last_activity_at?: string;
+  current_activity?: string;
 }
 
 // ─── Prometheus metrics ───────────────────────────────────────────────────────

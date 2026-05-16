@@ -31,13 +31,14 @@ function looksLikeMaeRoot(path: string): boolean {
 }
 
 function resolveBaseDir(): string {
+  if (looksLikeMaeRoot(process.cwd())) return process.cwd();
   if (process.env.MAE_ROOT) return process.env.MAE_ROOT;
 
   const candidates = [
+    process.cwd(),
     join(import.meta.dir, ".."),
     import.meta.dir,
     HOME_MAE_DIR,
-    process.cwd(),
   ].filter((path): path is string => Boolean(path));
 
   for (const candidate of candidates) {
@@ -253,6 +254,15 @@ export function resolveModel(alias: string): string {
   return alias;
 }
 
+function applyModelOverride(
+  config: ModelRoutingConfig,
+  model: string,
+  thinking: ThinkingLevel,
+): { model: string; thinking: ThinkingLevel } {
+  const override = config.modelOverrides?.[model];
+  return { model, thinking: override?.thinking ?? thinking };
+}
+
 export function resolveModelForRole(
   role: AgentRole,
   preferredAlias?: string,
@@ -261,20 +271,20 @@ export function resolveModelForRole(
   const roleDefault = config.roleDefaults?.[role];
 
   if (!roleDefault) {
-    return { model: resolveModel(preferredAlias ?? "main"), thinking: "medium" };
+    return applyModelOverride(config, resolveModel(preferredAlias ?? "main"), "medium");
   }
 
   const tier = config.tiers?.[roleDefault.tier];
   if (!tier) {
-    return { model: resolveModel(preferredAlias ?? "main"), thinking: roleDefault.thinking };
+    return applyModelOverride(config, resolveModel(preferredAlias ?? "main"), roleDefault.thinking);
   }
 
   if (preferredAlias) {
     const resolved = resolveModel(preferredAlias);
-    return { model: resolved, thinking: roleDefault.thinking };
+    return applyModelOverride(config, resolved, roleDefault.thinking);
   }
 
-  return { model: tier.default, thinking: roleDefault.thinking };
+  return applyModelOverride(config, tier.default, roleDefault.thinking);
 }
 
 // --- Cross-Model Pair Enforcement ---
