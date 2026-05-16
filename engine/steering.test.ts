@@ -29,6 +29,17 @@ describe("steering commands (#147)", () => {
       expect(received["a2"]!.length).toBeGreaterThan(0);
     });
 
+    test("structured target routes to exact agent id", () => {
+      const received: Record<string, string[]> = { a1: [], a2: [] };
+      const senders = new Map<string, (msg: string) => void>();
+      senders.set("sess-1:agent-1", (msg) => received["a1"]!.push(msg));
+      senders.set("sess-1:agent-2", (msg) => received["a2"]!.push(msg));
+
+      sendUserMessage(senders, "sess-1", "check token expiry", "agent-2");
+      expect(received["a1"]).toEqual([]);
+      expect(received["a2"]).toEqual(["check token expiry"]);
+    });
+
     test("message to unknown session is a no-op", () => {
       const senders = new Map<string, (msg: string) => void>();
       senders.set("sess-1:agent-1", () => {});
@@ -66,6 +77,28 @@ describe("steering commands (#147)", () => {
       abort.abort();
 
       expect(calls[0]?.headers).toEqual({ Authorization: "Bearer mae_test_token" });
+    });
+
+    test("tracks SSE ids and dedupes replayed user messages", async () => {
+      const calls: Array<{ input: string | URL | Request; init?: RequestInit }> = [];
+      const delivered: string[] = [];
+      let fetchCount = 0;
+      globalThis.fetch = mock(async (input: string | URL | Request, init?: RequestInit) => {
+        calls.push({ input, init });
+        fetchCount++;
+        if (fetchCount === 1) {
+          return new Response("id: 7\nevent: message\ndata: {\"data\":{\"from\":\"user\",\"content\":\"ping\",\"message_id\":\"m1\"}}\n\n");
+        }
+        return new Response("id: 7\nevent: message\ndata: {\"data\":{\"from\":\"user\",\"content\":\"ping\",\"message_id\":\"m1\"}}\n\n");
+      }) as unknown as typeof fetch;
+
+      const abort = listenForUserMessages("https://dashboard.example", "sess-1", (_sessionId, content) => delivered.push(content));
+      await Bun.sleep(3100);
+      abort.abort();
+
+      expect(delivered).toEqual(["ping"]);
+      expect(String(calls[1]?.input)).toContain("last_event_id=7");
+      expect(calls[1]?.init?.headers).toEqual({ "Last-Event-ID": "7" });
     });
   });
 

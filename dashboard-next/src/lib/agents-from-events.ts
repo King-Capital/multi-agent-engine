@@ -20,16 +20,19 @@ export function buildAgentsFromEvents(dbEvents: DBEvent[]): LiveAgent[] {
     if (!agentId) continue;
 
     if (eventType === "agent_spawn") {
+      const teamName = String(data.team_name ?? "");
+      const inferredParent = teamName.toLowerCase() === "synthesis" && agentId !== "orch-1" ? "orch-1" : undefined;
       agentMap.set(agentId, {
         id: agentId,
         name: String(data.agent_name ?? agentId),
         role: String(data.agent_role ?? "worker"),
         model: String(data.model ?? ""),
-        team_name: String(data.team_name ?? ""),
+        team_name: teamName,
         team_color: String(data.team_color ?? "#22d3ee"),
         parent_id:
           (payload.parent_id as string | undefined) ??
-          (data.parent_id as string | undefined),
+          (data.parent_id as string | undefined) ??
+          inferredParent,
         status: "running",
         persona_path: data.persona_path ? String(data.persona_path) : undefined,
         cost_usd: 0,

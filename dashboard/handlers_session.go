@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,26 +44,16 @@ func handlePostEvent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid session_id", http.StatusBadRequest)
 		return
 	}
-	if err := store.Append(evt); err != nil {
-		log.Printf("store error: %v", err)
+	if err := persistEventForSSE(r.Context(), &evt); err != nil {
+		log.Printf("pg event persist error: %v", err)
 		http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
 		return
 	}
 
-	if dbEnabled {
-		go func() {
-			payload, _ := json.Marshal(evt)
-			agentID := evt.AgentID
-			dbEvt := &DBEvent{
-				SessionID: evt.SessionID,
-				AgentID:   &agentID,
-				EventType: string(evt.EventType),
-				Payload:   payload,
-			}
-			if err := RecordEvent(context.Background(), dbEvt); err != nil {
-				log.Printf("pg event persist error: %v", err)
-			}
-		}()
+	if err := store.Append(evt); err != nil {
+		log.Printf("store error: %v", err)
+		http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+		return
 	}
 
 	w.WriteHeader(http.StatusCreated)
@@ -181,6 +172,13 @@ func handleUserMessage(w http.ResponseWriter, r *http.Request) {
 	if messageID == "" {
 		messageID = fmt.Sprintf("msg-%d", time.Now().UnixNano())
 	}
+	targetAgentID := strings.TrimSpace(r.FormValue("target_agent_id"))
+	if targetAgentID == "" {
+		targetAgentID = "orchestrator"
+	} else if !isSafeMessageTarget(targetAgentID) {
+		http.Error(w, "invalid target_agent_id", http.StatusBadRequest)
+		return
+	}
 
 	// Sanitize: strip control characters (keep newline, carriage return, tab)
 	content = strings.Map(func(r rune) rune {
@@ -199,15 +197,52 @@ func handleUserMessage(w http.ResponseWriter, r *http.Request) {
 		EventType: models.EventMessage,
 		Data: models.EventData{
 			From:      "user",
-			To:        "orchestrator",
+			To:        targetAgentID,
 			Content:   content,
 			MessageID: messageID,
 		},
+	}
+	if err := persistEventForSSE(r.Context(), &evt); err != nil {
+		log.Printf("pg user message persist error: %v", err)
+		http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+		return
 	}
 	store.Append(evt)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"message_id": messageID})
+}
+
+func persistEventForSSE(ctx context.Context, evt *models.Event) error {
+	if !dbEnabled {
+		return nil
+	}
+	payload, _ := json.Marshal(evt)
+	agentID := evt.AgentID
+	dbEvt := &DBEvent{
+		SessionID: evt.SessionID,
+		AgentID:   &agentID,
+		EventType: string(evt.EventType),
+		Payload:   payload,
+	}
+	if err := RecordEvent(ctx, dbEvt); err != nil {
+		return err
+	}
+	evt.SSEID = dbEvt.ID
+	return nil
+}
+
+func isSafeMessageTarget(target string) bool {
+	if len(target) > 160 {
+		return false
+	}
+	for _, r := range target {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' || r == ':' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // --- SSE Streaming ---
@@ -235,6 +270,22 @@ func streamEvents(w http.ResponseWriter, r *http.Request, sessionID string) {
 	ch := store.Subscribe(sessionID)
 	defer store.Unsubscribe(sessionID, ch)
 
+	if sessionID != "*" && dbEnabled {
+		lastEventID := int64(0)
+		if header := strings.TrimSpace(r.Header.Get("Last-Event-ID")); header != "" {
+			if parsed, err := strconv.ParseInt(header, 10, 64); err == nil && parsed > 0 {
+				lastEventID = parsed
+			}
+		} else if query := strings.TrimSpace(r.URL.Query().Get("last_event_id")); query != "" {
+			if parsed, err := strconv.ParseInt(query, 10, 64); err == nil && parsed > 0 {
+				lastEventID = parsed
+			}
+		}
+		if err := replaySessionEvents(w, flusher, r, sessionID, lastEventID); err != nil {
+			log.Printf("sse replay error: %v", err)
+		}
+	}
+
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 
@@ -244,8 +295,7 @@ func streamEvents(w http.ResponseWriter, r *http.Request, sessionID string) {
 			if !ok {
 				return
 			}
-			data, _ := json.Marshal(evt)
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.EventType, data)
+			writeSSEEvent(w, "", evt)
 			flusher.Flush()
 		case <-heartbeat.C:
 			fmt.Fprintf(w, ": heartbeat\n\n")
@@ -254,6 +304,41 @@ func streamEvents(w http.ResponseWriter, r *http.Request, sessionID string) {
 			return
 		}
 	}
+}
+
+func replaySessionEvents(w http.ResponseWriter, flusher http.Flusher, r *http.Request, sessionID string, afterID int64) error {
+	rows, err := db.QueryContext(r.Context(),
+		`SELECT id, payload FROM events WHERE session_id = $1 AND id > $2 ORDER BY created_at ASC, id ASC`,
+		sessionID, afterID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var payload []byte
+		if err := rows.Scan(&id, &payload); err != nil {
+			return err
+		}
+		var evt models.Event
+		if err := json.Unmarshal(payload, &evt); err != nil {
+			continue
+		}
+		writeSSEEvent(w, strconv.FormatInt(id, 10), evt)
+		flusher.Flush()
+	}
+	return rows.Err()
+}
+
+func writeSSEEvent(w http.ResponseWriter, id string, evt models.Event) {
+	data, _ := json.Marshal(evt)
+	if id == "" && evt.SSEID > 0 {
+		id = strconv.FormatInt(evt.SSEID, 10)
+	}
+	if id != "" {
+		fmt.Fprintf(w, "id: %s\n", id)
+	}
+	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evt.EventType, data)
 }
 
 func handleHTMXSSE(w http.ResponseWriter, r *http.Request) {
