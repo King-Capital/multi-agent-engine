@@ -7,6 +7,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -501,6 +502,11 @@ func authMiddleware(next http.Handler) http.Handler {
 			http.Error(w, `{"error":"authorization required"}`, http.StatusUnauthorized)
 			return
 		}
+		if requiresCSRFCheck(r) && !hasValidRequestOrigin(r) {
+			w.Header().Set("Content-Type", "application/json")
+			http.Error(w, `{"error":"valid origin required"}`, http.StatusForbidden)
+			return
+		}
 
 		ctx := context.WithValue(r.Context(), userContextKey, user)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -510,6 +516,42 @@ func authMiddleware(next http.Handler) http.Handler {
 func getAuthUser(r *http.Request) *DBUser {
 	u, _ := r.Context().Value(userContextKey).(*DBUser)
 	return u
+}
+
+func requiresCSRFCheck(r *http.Request) bool {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+		return false
+	}
+	return !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ")
+}
+
+func hasValidRequestOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin != "" {
+		return originAllowedForRequest(r, origin)
+	}
+	referer := r.Header.Get("Referer")
+	if referer == "" {
+		return false
+	}
+	return originAllowedForRequest(r, referer)
+}
+
+func originAllowedForRequest(r *http.Request, raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	if strings.EqualFold(parsed.Host, r.Host) {
+		return true
+	}
+	for _, allowed := range allowedOrigins {
+		allowedURL, err := url.Parse(allowed)
+		if err == nil && strings.EqualFold(allowedURL.Scheme, parsed.Scheme) && strings.EqualFold(allowedURL.Host, parsed.Host) {
+			return true
+		}
+	}
+	return false
 }
 
 // --- Rate Limiting ---

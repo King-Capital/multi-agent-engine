@@ -6,6 +6,34 @@ import (
 	"testing"
 )
 
+func TestCSRFOriginChecks(t *testing.T) {
+	t.Parallel()
+
+	t.Run("bearer mutating requests are exempt", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/tokens", nil)
+		req.Header.Set("Authorization", "Bearer mae_test")
+		if requiresCSRFCheck(req) {
+			t.Fatal("bearer-authenticated API request should not require CSRF origin check")
+		}
+	})
+
+	t.Run("cookie mutating requests require same origin", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest(http.MethodPost, "https://ai-agents.rodaddy.live/api/admin/tokens", nil)
+		if !requiresCSRFCheck(req) {
+			t.Fatal("cookie-authenticated mutating request should require CSRF origin check")
+		}
+		if hasValidRequestOrigin(req) {
+			t.Fatal("missing origin/referer should not pass CSRF check")
+		}
+		req.Header.Set("Origin", "https://ai-agents.rodaddy.live")
+		if !hasValidRequestOrigin(req) {
+			t.Fatal("same-origin request should pass CSRF check")
+		}
+	})
+}
+
 func TestIsPublicPath(t *testing.T) {
 	t.Parallel()
 

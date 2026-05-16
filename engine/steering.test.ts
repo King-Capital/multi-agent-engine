@@ -1,5 +1,12 @@
-import { describe, test, expect } from "bun:test";
-import { sendUserMessage, broadcastControlMessage } from "./messaging";
+import { afterEach, describe, test, expect, mock } from "bun:test";
+import { listenForUserMessages, sendUserMessage, broadcastControlMessage } from "./messaging";
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  delete process.env.MAE_API_TOKEN;
+});
 
 describe("steering commands (#147)", () => {
   describe("message routing", () => {
@@ -42,6 +49,23 @@ describe("steering commands (#147)", () => {
       expect(received["a1"]).toEqual(["!stop"]);
       expect(received["a2"]).toEqual(["!stop"]);
       expect(received["other"]).toEqual([]);
+    });
+  });
+
+  describe("dashboard SSE listener", () => {
+    test("uses MAE_API_TOKEN when listening for dashboard user messages", async () => {
+      process.env.MAE_API_TOKEN = "mae_test_token";
+      const calls: RequestInit[] = [];
+      globalThis.fetch = mock(async (_input: string | URL | Request, init?: RequestInit) => {
+        calls.push(init ?? {});
+        return new Response(null, { status: 401 });
+      }) as unknown as typeof fetch;
+
+      const abort = listenForUserMessages("https://dashboard.example", "sess-1", () => {});
+      await Bun.sleep(10);
+      abort.abort();
+
+      expect(calls[0]?.headers).toEqual({ Authorization: "Bearer mae_test_token" });
     });
   });
 
