@@ -316,7 +316,7 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"session failed"}`, http.StatusInternalServerError)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Value: raw, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https", Expires: expires})
+	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Value: raw, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: true, Expires: expires})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(authResponse{User: u.DBUser})
 }
@@ -325,7 +325,7 @@ func handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
 		_ = RevokeAuthSession(r.Context(), c.Value)
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: true, MaxAge: -1})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }

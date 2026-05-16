@@ -219,7 +219,7 @@ The real-time dashboard is a Go API server with an embedded **React SPA** from `
 
 The dashboard protects all `/api/*`, `/htmx/*`, and `/metrics` endpoints by default. Public paths are limited to the SPA shell/assets, `/api/health`, and `/api/auth/login`.
 
-- Browser users sign in through the React login page. Successful login creates an HttpOnly `mae_session` cookie backed by the `auth_sessions` table.
+- Browser users sign in through the React login page. Successful login creates a Secure, HttpOnly `mae_session` cookie backed by the `auth_sessions` table. Run the dashboard behind HTTPS in deployed environments; plain-HTTP localhost browser login is not supported by the secure cookie.
 - API clients use `Authorization: Bearer <token>`. New admin-managed tokens live in `api_tokens`; legacy `users.api_token` values still load for compatibility.
 - Admin users can open `/admin` to create/revoke API tokens. Newly generated token secrets are shown once; store bootstrap credentials and generated operational tokens in Vaultwarden (for the public deployment, item: `MAE Dashboard bootstrap credentials - ai-agents.rodaddy.live`).
 - First-run bootstrap: set `MAE_BOOTSTRAP_USERNAME=<existing admin username>` and `MAE_BOOTSTRAP_PASSWORD=<temporary strong password>` before starting the dashboard. Startup sets that user's password only when `password_hash` is empty, so later restarts will not overwrite a rotated password. Remove the env vars after login and rotate/store the final password in Vaultwarden.
