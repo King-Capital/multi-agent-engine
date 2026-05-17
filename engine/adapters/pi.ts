@@ -3,7 +3,7 @@ import { mkdirSync, existsSync } from "fs";
 import { join } from "path";
 import type { PlatformAdapter, DelegateOptions, DelegateResult, StreamEvent, GradeLevel } from "../types";
 import { createLogger } from "../logger";
-import { sanitizeAgentInput } from "../security";
+import { redactSecrets, sanitizeAgentInput } from "../security";
 import { trackPromptVersion } from "../langfuse-prompts";
 import { withPiRepoContext } from "../pi-repo-context";
 import { writeAgentOutputArtifact } from "../trace-artifacts";
@@ -486,10 +486,10 @@ export class PiAdapter implements PlatformAdapter {
       let filePath = "";
       let toolArgs = "";
       if (args) {
-        filePath = ((args.file_path ?? args.path ?? args.command ?? "") as string).slice(0, 500);
-        // Capture full args as JSON for detail view
+        filePath = redactSecrets(String(args.file_path ?? args.path ?? args.command ?? "")).slice(0, 500);
+        // Capture redacted args as JSON for detail view.
         try {
-          toolArgs = JSON.stringify(args, null, 2).slice(0, 2000);
+          toolArgs = redactSecrets(JSON.stringify(args, null, 2)).slice(0, 2000);
         } catch { /* ignore */ }
       }
       log.info("Tool call", {
@@ -514,7 +514,7 @@ export class PiAdapter implements PlatformAdapter {
       let toolResult = "";
       if (evt.result) {
         try {
-          toolResult = (typeof evt.result === "string" ? evt.result : JSON.stringify(evt.result)).slice(0, 2000);
+          toolResult = redactSecrets(typeof evt.result === "string" ? evt.result : JSON.stringify(evt.result)).slice(0, 2000);
         } catch { /* ignore */ }
       }
       log.info("Tool call completed", {

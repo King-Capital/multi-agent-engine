@@ -268,7 +268,7 @@ describe("runChain trace lifecycle", () => {
         },
       ]);
 
-      await runChain({
+      await expect(runChain({
         emitter: {
           message: async () => {},
           tillDone: async () => {},
@@ -286,7 +286,7 @@ describe("runChain trace lifecycle", () => {
         getAdapter: () => { throw new Error("adapter should not be used"); },
         buildTeamDeps: () => ({} as never),
         drainMessageBuffer: () => "",
-      } as never, session, chain, "test task");
+      } as never, session, chain, "test task")).rejects.toThrow("Chain step 1 failed");
 
       const stepEnd = entries.find((entry) => entry.trace_type === "chain.step.end");
       expect(stepEnd?.status).toBe("failed");

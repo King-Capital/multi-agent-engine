@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+hooks_dir="$repo_root/.git/hooks"
+pre_push="$hooks_dir/pre-push"
+
+mkdir -p "$hooks_dir"
+
+if [[ -e "$pre_push" && ! -f "$pre_push" ]]; then
+  echo "Cannot install pre-push hook: $pre_push exists and is not a file" >&2
+  exit 1
+fi
+
+if [[ -f "$pre_push" ]] && ! grep -q "MAE local sync hook" "$pre_push"; then
+  backup="$pre_push.bak.$(date +%Y%m%d%H%M%S)"
+  cp "$pre_push" "$backup"
+  echo "Backed up existing pre-push hook to $backup"
+fi
+
+cat > "$pre_push" <<'HOOK'
+#!/usr/bin/env bash
+set -euo pipefail
+
+# MAE local sync hook
+# Keep the repo-backed local `mae` install aligned with the commit being pushed.
+repo_root="$(git rev-parse --show-toplevel)"
+"$repo_root/scripts/sync-local-mae"
+HOOK
+
+chmod +x "$pre_push"
+echo "✓ Installed MAE pre-push local sync hook: $pre_push"
