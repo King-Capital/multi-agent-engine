@@ -157,6 +157,15 @@ chains:
           Identify the files, components, and risk areas each SME squad must cover.
           Assign coverage for Correctness, Adversarial, Quality, Security, and Domain squads.
           Call out expected worker roles, any required deterministic checks, and gaps that need follow-up.
+          This is a REVIEW-ONLY coordination step: do not edit files, run fix scripts, or ask workers to mutate code.
+          Require every squad to return this exact bounded schema:
+          SQUAD_REPORT: <Correctness|Adversarial|Quality|Security|Domain>
+          SCOPE: <files/components inspected>
+          COMMANDS_RUN: <commands or "none">
+          FINDINGS:
+          - P0/P1/P2/P3: <evidence-backed finding or "none">
+          BLOCKERS: <sandbox/setup blockers or "none">
+          VERDICT: <pass|partial|fail>
           Your final line MUST be exactly: SWARM_COORDINATION_READY
           Do not put checklist syntax, bullets, or commentary after that final marker.
         till_done:
@@ -167,54 +176,59 @@ chains:
           - team: Correctness Squad
             system_prompt_append: |
               Use the Arch Coordinator brief in the previous context as the coverage contract.
-              SWARM MODE: Brief ALL workers immediately with specific file assignments.
-              Stream progress: after briefing, report "Briefed N workers on [files]" so the dashboard shows activity.
-              As workers report back, summarize each finding to the conversation — keep the user informed in real-time.
+              REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
+              SWARM MODE: Brief ALL workers immediately with specific file assignments and the same review-only constraint.
+              Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
+              Final response must be bounded and include exactly one schema block starting with SQUAD_REPORT: Correctness, plus SCOPE, COMMANDS_RUN, FINDINGS, BLOCKERS, and VERDICT.
               Synthesize all findings into a graded P0-P3 report. Track which files were covered.
           - team: Adversarial Squad
             system_prompt_append: |
               Use the Arch Coordinator brief in the previous context as the coverage contract.
-              SWARM MODE: Brief ALL workers immediately — each attacks different files from different angles.
-              Stream progress: report who's working on what as you brief them.
-              As workers find issues, relay findings immediately — don't wait for all to finish.
+              REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
+              SWARM MODE: Brief ALL workers immediately — each attacks different files from different angles with the same review-only constraint.
+              Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
+              Final response must be bounded and include exactly one schema block starting with SQUAD_REPORT: Adversarial, plus SCOPE, COMMANDS_RUN, FINDINGS, BLOCKERS, and VERDICT.
               Synthesize into prioritized attack report with P0-P3 severity.
           - team: Quality Squad
             system_prompt_append: |
               Use the Arch Coordinator brief in the previous context as the coverage contract.
-              SWARM MODE: Brief ALL workers immediately — each reviews a different quality dimension.
-              Stream progress: report assignments and worker status as they complete.
-              Relay findings as they come in so the dashboard shows real-time quality assessment.
+              REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
+              SWARM MODE: Brief ALL workers immediately — each reviews a different quality dimension with the same review-only constraint.
+              Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
+              Final response must be bounded and include exactly one schema block starting with SQUAD_REPORT: Quality, plus SCOPE, COMMANDS_RUN, FINDINGS, BLOCKERS, and VERDICT.
               Synthesize into actionable quality report with P0-P3 severity.
           - team: Security Squad
             system_prompt_append: |
               Use the Arch Coordinator brief in the previous context as the coverage contract.
-              SWARM MODE: Brief ALL workers immediately — each checks different OWASP categories on specific files.
-              Stream progress: report who's auditing what. Any file with user input, URLs, or file paths must be covered.
-              Relay security findings immediately as workers report — don't batch.
-              Synthesize into security audit with P0-P3 + CWE codes. End with verification checklist.
+              REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
+              SWARM MODE: Brief ALL workers immediately — each checks different OWASP categories on specific files with the same review-only constraint.
+              Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
+              Final response must be bounded and include exactly one schema block starting with SQUAD_REPORT: Security, plus SCOPE, COMMANDS_RUN, FINDINGS, BLOCKERS, and VERDICT.
+              Synthesize into security audit with P0-P3 + CWE codes.
           - team: Domain Squad
             system_prompt_append: |
               Use the Arch Coordinator brief in the previous context as the coverage contract.
-              SWARM MODE: Brief ALL workers immediately — backend, frontend, data, integration, infra, security-domain.
-              Stream progress: report assignments and relay findings as workers complete.
-              Cross-reference across workers — if two workers disagree, note the conflict.
+              REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
+              SWARM MODE: Brief ALL workers immediately — backend, frontend, data, integration, infra, security-domain with the same review-only constraint.
+              Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
+              Final response must be bounded and include exactly one schema block starting with SQUAD_REPORT: Domain, plus SCOPE, COMMANDS_RUN, FINDINGS, BLOCKERS, and VERDICT.
               Synthesize into domain fitness report with P0-P3 severity.
         till_done:
           - type: output_match
             text: "Correctness squad reported with evidence"
-            verify: "Correctness (Squad|squad|Lead|Reviewer|reviewer)"
+            verify: "SQUAD_REPORT: Correctness[\\s\\S]*SCOPE:[\\s\\S]*COMMANDS_RUN:[\\s\\S]*FINDINGS:[\\s\\S]*BLOCKERS:[\\s\\S]*VERDICT:"
           - type: output_match
             text: "Adversarial squad reported with evidence"
-            verify: "Adversarial (Squad|squad|Lead|Reviewer|reviewer)"
+            verify: "SQUAD_REPORT: Adversarial[\\s\\S]*SCOPE:[\\s\\S]*COMMANDS_RUN:[\\s\\S]*FINDINGS:[\\s\\S]*BLOCKERS:[\\s\\S]*VERDICT:"
           - type: output_match
             text: "Quality squad reported with evidence"
-            verify: "Quality (Squad|squad|Lead|Reviewer|reviewer)"
+            verify: "SQUAD_REPORT: Quality[\\s\\S]*SCOPE:[\\s\\S]*COMMANDS_RUN:[\\s\\S]*FINDINGS:[\\s\\S]*BLOCKERS:[\\s\\S]*VERDICT:"
           - type: output_match
             text: "Security squad reported with evidence"
-            verify: "Security (Squad|squad|Lead|Reviewer|reviewer)"
+            verify: "SQUAD_REPORT: Security[\\s\\S]*SCOPE:[\\s\\S]*COMMANDS_RUN:[\\s\\S]*FINDINGS:[\\s\\S]*BLOCKERS:[\\s\\S]*VERDICT:"
           - type: output_match
             text: "Domain squad reported with evidence"
-            verify: "Domain (Squad|squad|Lead|Reviewer|reviewer)"
+            verify: "SQUAD_REPORT: Domain[\\s\\S]*SCOPE:[\\s\\S]*COMMANDS_RUN:[\\s\\S]*FINDINGS:[\\s\\S]*BLOCKERS:[\\s\\S]*VERDICT:"
           - type: output_match
             text: "All findings graded P0-P3 with evidence"
             verify: "P[0-3]|P0|P1|P2|P3"

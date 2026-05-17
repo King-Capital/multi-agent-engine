@@ -41,6 +41,7 @@ export class EchoAdapter implements PlatformAdapter {
 
     const verificationKeywords = [
       "GRADE: PASS",
+      "SWARM_COORDINATION_READY",
       "Implementation plan produced with files risks steps",
       "All relevant files read understood",
       "Codebase mapped",
@@ -64,6 +65,11 @@ export class EchoAdapter implements PlatformAdapter {
       "Quality squad SOLID violations anti-patterns duplication dead code assessed",
       "Security squad OWASP injection SSRF path traversal credential handling checked",
       "Domain squad architectural fit framework conventions integration correctness reviewed",
+      "SQUAD_REPORT: Correctness SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
+      "SQUAD_REPORT: Adversarial SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
+      "SQUAD_REPORT: Quality SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
+      "SQUAD_REPORT: Security SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
+      "SQUAD_REPORT: Domain SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
       "Orchestrator synthesizes across all squads",
     ].join(". ");
 
