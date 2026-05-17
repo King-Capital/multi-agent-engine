@@ -159,8 +159,12 @@ export function loadProjectSkills(root = BASE_DIR): ProjectSkill[] {
     if (!existsSync(dir)) continue;
     for (const file of readdirSync(dir).filter((f) => f.endsWith(".md") || f.endsWith(".yaml") || f.endsWith(".yml")).sort().slice(0, 20)) {
       const fullPath = join(dir, file);
-      if (!statSync(fullPath).isFile()) continue;
-      const raw = readFileSync(fullPath, "utf-8").slice(0, 20_000);
+      let raw: string;
+      try {
+        raw = readFileSync(fullPath, "utf-8").slice(0, 20_000);
+      } catch {
+        continue;
+      }
       const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
       if (fmMatch) {
         const meta = parseYaml(fmMatch[1]!) as { name?: string; scope?: string; content?: string };

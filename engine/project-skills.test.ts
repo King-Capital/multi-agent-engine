@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { loadProjectSkills } from "./config";
@@ -12,7 +12,7 @@ afterEach(() => {
 
 describe("project skill loading", () => {
   test("loads sorted explicit project skills with frontmatter", () => {
-    const root = join(tmpdir(), `mae-project-skills-${Date.now()}`);
+    const root = mkdtempSync(join(tmpdir(), "mae-project-skills-"));
     roots.push(root);
     mkdirSync(join(root, ".mae", "skills"), { recursive: true });
     writeFileSync(join(root, ".mae", "skills", "b.md"), "---\nname: beta\nscope: worker\n---\nUse beta.");
