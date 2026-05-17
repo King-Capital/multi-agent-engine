@@ -151,7 +151,7 @@ export class PiAdapter implements PlatformAdapter {
     let totalTokens = 0;
     let cacheReadTokens = 0;
     let finalText = "";
-    const userPrompt = await withPiRepoContext(opts.userPrompt, opts.workingDir);
+    const userPrompt = await withPiRepoContext(opts.userPrompt, opts.workingDir, opts.domain.read);
 
     return new Promise<DelegateResult>((resolve) => {
       let resolved = false;

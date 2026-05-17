@@ -45,10 +45,21 @@ describe("pi repo context", () => {
     expect(context).not.toContain("SECRET=");
   });
 
+  test("scopes tracked file samples to delegate read domain", async () => {
+    const context = await buildPiRepoContext(FIXTURE_DIR, ["agents/teams/**"]);
+
+    expect(context).toContain("Read scope: agents/teams/**");
+    expect(context).toContain("- agents/teams/chains.yaml");
+    expect(context).not.toContain("- engine/cli.ts");
+    const trackedSection = context.split("Tracked file sample:")[1]?.split("File discovery guidance:")[0] ?? "";
+    expect(trackedSection).not.toContain("- README.md");
+  });
+
   test("prepends repo context to the Pi user prompt", async () => {
-    const prompt = await withPiRepoContext("Do the work.", FIXTURE_DIR);
+    const prompt = await withPiRepoContext("Do the work.", FIXTURE_DIR, ["engine/**"]);
 
     expect(prompt).toStartWith("<mae_repo_context>");
+    expect(prompt).toContain("Read scope: engine/**");
     expect(prompt).toContain("</mae_repo_context>\n\nDo the work.");
   });
 });

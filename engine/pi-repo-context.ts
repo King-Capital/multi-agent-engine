@@ -62,11 +62,24 @@ function listTopLevelEntries(workingDir: string): string[] {
   }
 }
 
-function selectTrackedFiles(files: string[]): string[] {
+function normalizeScope(scope: string): string | null {
+  const trimmed = scope.trim();
+  if (!trimmed || trimmed === "**/*" || trimmed === "*") return null;
+  return trimmed.replace(/\/\*\*.*$/, "").replace(/\/\*$/, "").replace(/\*.*$/, "").replace(/\/$/, "");
+}
+
+function isInScope(file: string, scopes?: string[]): boolean {
+  const normalized = (scopes ?? []).map(normalizeScope).filter((scope): scope is string => Boolean(scope));
+  if (normalized.length === 0) return true;
+  return normalized.some((scope) => file === scope || file.startsWith(`${scope}/`));
+}
+
+function selectTrackedFiles(files: string[], scopes?: string[]): string[] {
   const safeFiles = files
     .map((file) => file.trim())
     .filter(Boolean)
-    .filter((file) => !file.split("/").some((part) => !isSafeEntry(part)));
+    .filter((file) => !file.split("/").some((part) => !isSafeEntry(part)))
+    .filter((file) => isInScope(file, scopes));
 
   const priority = [
     "AGENTS.md",
@@ -93,12 +106,12 @@ function selectTrackedFiles(files: string[]): string[] {
   return [...selected];
 }
 
-export async function buildPiRepoContext(workingDir: string): Promise<string> {
+export async function buildPiRepoContext(workingDir: string, readScopes?: string[]): Promise<string> {
   const resolvedWorkingDir = resolve(workingDir);
   const gitRoot = await readGitOutput(resolvedWorkingDir, ["rev-parse", "--show-toplevel"]);
   const branch = await readGitOutput(resolvedWorkingDir, ["rev-parse", "--abbrev-ref", "HEAD"]);
   const trackedOutput = await readGitOutput(resolvedWorkingDir, ["ls-files"]);
-  const trackedFiles = trackedOutput ? selectTrackedFiles(trackedOutput.split("\n")) : [];
+  const trackedFiles = trackedOutput ? selectTrackedFiles(trackedOutput.split("\n"), readScopes) : [];
   const topLevel = listTopLevelEntries(resolvedWorkingDir);
 
   const lines = [
@@ -109,6 +122,7 @@ export async function buildPiRepoContext(workingDir: string): Promise<string> {
     branch ? `Git branch: ${branch}` : "",
     topLevel.length ? "Top-level entries:" : "",
     ...topLevel.map((entry) => `- ${entry}`),
+    readScopes?.length ? `Read scope: ${readScopes.join(", ")}` : "",
     trackedFiles.length ? "Tracked file sample:" : "",
     ...trackedFiles.map((file) => `- ${file}`),
     "File discovery guidance:",
@@ -123,7 +137,7 @@ export async function buildPiRepoContext(workingDir: string): Promise<string> {
   return lines.join("\n");
 }
 
-export async function withPiRepoContext(userPrompt: string, workingDir: string): Promise<string> {
-  const repoContext = await buildPiRepoContext(workingDir);
+export async function withPiRepoContext(userPrompt: string, workingDir: string, readScopes?: string[]): Promise<string> {
+  const repoContext = await buildPiRepoContext(workingDir, readScopes);
   return `${repoContext}\n\n${userPrompt}`;
 }
