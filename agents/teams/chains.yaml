@@ -199,13 +199,27 @@ chains:
               Cross-reference across workers — if two workers disagree, note the conflict.
               Synthesize into domain fitness report with P0-P3 severity.
         till_done:
-          - "Correctness squad: logic errors, type safety, edge cases, API contracts verified"
-          - "Adversarial squad: assumptions broken, failure modes found, implicit coupling identified"
-          - "Quality squad: SOLID violations, anti-patterns, duplication, dead code assessed"
-          - "Security squad: OWASP top 10, injection, SSRF, path traversal, credential handling checked"
-          - "Domain squad: architectural fit, framework conventions, integration correctness reviewed"
-          - "All findings graded P0-P3 with evidence"
-          - "Orchestrator synthesizes across all 5 squads"
+          - type: output_match
+            text: "Correctness squad reported with evidence"
+            verify: "Correctness (Squad|squad|Lead|Reviewer|reviewer)"
+          - type: output_match
+            text: "Adversarial squad reported with evidence"
+            verify: "Adversarial (Squad|squad|Lead|Reviewer|reviewer)"
+          - type: output_match
+            text: "Quality squad reported with evidence"
+            verify: "Quality (Squad|squad|Lead|Reviewer|reviewer)"
+          - type: output_match
+            text: "Security squad reported with evidence"
+            verify: "Security (Squad|squad|Lead|Reviewer|reviewer)"
+          - type: output_match
+            text: "Domain squad reported with evidence"
+            verify: "Domain (Squad|squad|Lead|Reviewer|reviewer)"
+          - type: output_match
+            text: "All findings graded P0-P3 with evidence"
+            verify: "P[0-3]|P0|P1|P2|P3"
+          - type: output_match
+            text: "Orchestrator synthesizes across all 5 squads"
+            verify: "synthesi[sz]e|SYNTHESIS|Synthesis|Orchestrator"
 
   swarm-review:
     description: "Full review swarm: red team + blue team in parallel, orchestrator synthesizes"

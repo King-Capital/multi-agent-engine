@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Sync the committed MAE checkout into the local repo-backed install.
+# Intended for git pre-push hooks so `mae` uses the same code that is being pushed.
+
+usage() {
+  cat <<'HELP'
+Usage: scripts/sync-local-mae [--dry-run]
+
+Copies the current committed checkout (HEAD) into the local MAE install repo,
+installs engine dependencies, builds the local agent binary, syncs VERSION, and
+updates the wrapper CLI at ~/.local/bin/mae (or MAE_BIN).
+
+Environment:
+  MAE_HOME       Install home (default: ~/.mae)
+  MAE_REPO_DIR   Repo-backed install root (default: $MAE_HOME/repo)
+  MAE_BIN        Wrapper CLI path (default: ~/.local/bin/mae)
+HELP
+}
+
+dry_run=false
+case "${1:-}" in
+  "") ;;
+  --dry-run) dry_run=true ;;
+  -h|--help|help) usage; exit 0 ;;
+  *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
+esac
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "Missing required command: $1" >&2
+    exit 1
+  }
+}
+
+require_cmd git
+require_cmd bun
+require_cmd tar
+require_cmd rsync
+
+if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+  cd "$repo_root"
+else
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  repo_root="$(cd "$script_dir/.." && pwd)"
+  cd "$repo_root"
+fi
+
+if [[ ! -d .git || ! -f engine/cli.ts || ! -f VERSION || ! -f scripts/mae ]]; then
+  echo "Not at MAE repo root: $repo_root" >&2
+  exit 1
+fi
+
+install_home="${MAE_HOME:-$HOME/.mae}"
+install_repo="${MAE_REPO_DIR:-$install_home/repo}"
+install_bin="${MAE_BIN:-$HOME/.local/bin/mae}"
+head_sha="$(git rev-parse HEAD)"
+version="$(tr -d '[:space:]' < VERSION)"
+
+echo "Syncing MAE local install"
+echo "  Source:  $repo_root@$head_sha"
+echo "  Target:  $install_repo"
+echo "  Version: $version"
+echo "  CLI:     $install_bin"
+
+if $dry_run; then
+  echo "DRY RUN: no changes made"
+  exit 0
+fi
+
+mkdir -p "$install_repo" "$install_home" "$(dirname "$install_bin")"
+
+# Replace the installed checkout with the committed tree only. This avoids
+# leaking local uncommitted scratch files into the default `mae` runtime.
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mae-local-sync.XXXXXX")"
+cleanup() { rm -rf "$tmp_dir"; }
+trap cleanup EXIT
+
+git archive --format=tar HEAD | tar -x -C "$tmp_dir"
+rsync -a --delete \
+  --exclude '.git/' \
+  --exclude 'node_modules/' \
+  --exclude 'dashboard-next/node_modules/' \
+  --exclude 'dashboard-next/dist/' \
+  --exclude 'agent' \
+  "$tmp_dir/" "$install_repo/"
+
+cd "$install_repo/engine"
+bun install
+bun build cli.ts --target=bun --outfile="$install_repo/agent"
+
+printf '%s\n' "$version" > "$install_home/VERSION"
+install -m 0755 "$install_repo/scripts/mae" "$install_bin"
+
+echo "✓ Local MAE install synced to $head_sha ($version)"

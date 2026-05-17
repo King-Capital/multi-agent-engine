@@ -13,8 +13,24 @@ const INJECTION_PATTERNS = [
   /<<SYS>>/gi,
 ];
 
+const SECRET_PATTERNS: RegExp[] = [
+  /\b(Authorization\s*:\s*Bearer\s+)([A-Za-z0-9._~+\/-]+=*)/gi,
+  /\b((?:api[_-]?key|token|secret|password|passwd|pwd|access[_-]?token|refresh[_-]?token)\b\s*[:=]\s*)([^\s'\"`;,}]+)/gi,
+  /\b()(sk-[A-Za-z0-9]{16,})\b/g,
+  /\b([A-Za-z0-9_]*KEY[A-Za-z0-9_]*\s*=\s*)([^\s'\"`;,}]+)/g,
+];
+
+export function redactSecrets(input: string): string {
+  let redacted = input;
+  for (const pattern of SECRET_PATTERNS) {
+    pattern.lastIndex = 0;
+    redacted = redacted.replace(pattern, (_match, prefix: string) => `${prefix}[REDACTED_SECRET]`);
+  }
+  return redacted;
+}
+
 export function sanitizeAgentInput(input: string): string {
-  let sanitized = input;
+  let sanitized = redactSecrets(input);
   for (const pattern of INJECTION_PATTERNS) {
     pattern.lastIndex = 0;
     sanitized = sanitized.replace(pattern, "[REDACTED]");

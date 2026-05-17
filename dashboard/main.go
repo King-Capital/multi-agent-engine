@@ -406,14 +406,10 @@ func init() {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if len(allowedOrigins) == 0 {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-		} else {
-			for _, allowed := range allowedOrigins {
-				if origin == allowed {
-					w.Header().Set("Access-Control-Allow-Origin", origin)
-					break
-				}
+		for _, allowed := range allowedOrigins {
+			if origin == allowed {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				break
 			}
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
@@ -444,12 +440,13 @@ func authMiddleware(next http.Handler) http.Handler {
 
 		path := r.URL.Path
 		isAPI := strings.HasPrefix(path, "/api/")
-		isPublicAPI := path == "/api/health" || path == "/api/users" || strings.HasSuffix(path, "/stream") || strings.HasSuffix(path, "/message") || strings.HasPrefix(path, "/api/sessions/") || strings.HasPrefix(path, "/api/pg/")
+		isReadOnly := r.Method == "GET" || r.Method == "HEAD"
+		isPublicReadAPI := path == "/api/health" || path == "/api/users" || strings.HasSuffix(path, "/stream") || strings.HasPrefix(path, "/api/sessions/")
 		isUIPage := !isAPI
 
-		// Allow unauthenticated GET/HEAD for UI pages and public API endpoints
-		// Also allow POST for /message (dashboard steering input)
-		if ((r.Method == "GET" || r.Method == "HEAD") && (isUIPage || isPublicAPI)) || (r.Method == "POST" && strings.HasSuffix(path, "/message")) {
+		// Allow unauthenticated read-only UI/session views. Mutating API routes,
+		// including dashboard steering (/message), require bearer auth by default.
+		if isReadOnly && (isUIPage || isPublicReadAPI) {
 			next.ServeHTTP(w, r)
 			return
 		}

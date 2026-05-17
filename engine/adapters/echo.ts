@@ -39,10 +39,38 @@ export class EchoAdapter implements PlatformAdapter {
 
     await new Promise((r) => setTimeout(r, 50));
 
+    const verificationKeywords = [
+      "GRADE: PASS",
+      "Implementation plan produced with files risks steps",
+      "All relevant files read understood",
+      "Codebase mapped",
+      "Key files identified",
+      "Dependencies documented",
+      "Plan produced based on scout findings",
+      "All code changes implemented per plan",
+      "Code changes implemented",
+      "Tests pass",
+      "Build succeeds",
+      "Code reviewed grade assigned",
+      "Security reviewed no P0 P1 vulnerabilities",
+      "All corrections applied escalated",
+      "Red team adversarial security review complete",
+      "Blue team correctness quality review complete",
+      "All findings graded P0 P1 P2 P3 evidence",
+      "Build verification passed",
+      "Validation complete",
+      "Correctness squad logic errors type safety edge cases API contracts verified",
+      "Adversarial squad assumptions broken failure modes implicit coupling identified",
+      "Quality squad SOLID violations anti-patterns duplication dead code assessed",
+      "Security squad OWASP injection SSRF path traversal credential handling checked",
+      "Domain squad architectural fit framework conventions integration correctness reviewed",
+      "Orchestrator synthesizes across all squads",
+    ].join(". ");
+
     const result: DelegateResult = {
       agentId,
       agentName: opts.persona.name,
-      output: `[Echo] ${opts.persona.name} completed task. This is a test response from the echo adapter. In production, this would be the actual agent output.`,
+      output: `[Echo] ${opts.persona.name} completed task. This is a test response from the echo adapter. In production, this would be the actual agent output. ${verificationKeywords}.`,
       grade: "VERIFIED",
       findings: [],
       costUsd: 0.001,
