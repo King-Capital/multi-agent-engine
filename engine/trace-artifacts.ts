@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
+import { redactSecrets } from "./security";
 
 export const TRACE_DIR =
   process.env.MAE_TRACE_DIR ?? join(process.env.HOME ?? "/tmp", ".mae", "traces");
@@ -9,7 +10,9 @@ export function getTraceDir(): string {
   return process.env.MAE_TRACE_DIR ?? TRACE_DIR;
 }
 
-const MAX_AGENT_OUTPUT_CHARS = Number(process.env.MAE_AGENT_OUTPUT_ARTIFACT_CHARS ?? 20_000);
+function maxAgentOutputChars(): number {
+  return Number(process.env.MAE_AGENT_OUTPUT_ARTIFACT_CHARS ?? 20_000);
+}
 
 function safeFilePart(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 120) || "unknown";
@@ -22,10 +25,11 @@ export interface AgentOutputArtifact {
 }
 
 export function writeAgentOutputArtifact(sessionId: string, agentId: string, output: string): AgentOutputArtifact | undefined {
-  const bounded = output.slice(0, Math.max(0, MAX_AGENT_OUTPUT_CHARS));
+  const redacted = redactSecrets(output);
+  const bounded = redacted.slice(0, Math.max(0, maxAgentOutputChars()));
   if (!bounded) return undefined;
 
-  const output_hash = createHash("sha256").update(bounded).digest("hex");
+  const output_hash = createHash("sha256").update(redacted).digest("hex");
   const sessionPart = safeFilePart(sessionId);
   const agentPart = safeFilePart(agentId);
   const artifactDir = join(getTraceDir(), sessionPart, "artifacts");

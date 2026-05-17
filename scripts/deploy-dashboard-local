@@ -6,68 +6,124 @@ cd "$repo_root"
 
 service_name="${MAE_DASHBOARD_SERVICE:-mae-dashboard}"
 install_root="${MAE_DASHBOARD_INSTALL_ROOT:-/opt/mae}"
+remote_host="${MAE_DASHBOARD_DEPLOY_HOST:-}"
+remote_user="${MAE_DASHBOARD_DEPLOY_USER:-mae}"
+remote_root_user="${MAE_DASHBOARD_DEPLOY_ROOT_USER:-root}"
 health_url="${MAE_DASHBOARD_HEALTH_URL:-http://localhost:8400/api/health}"
 spa_url="${MAE_DASHBOARD_SPA_URL:-http://localhost:8400/}"
+
+usage() {
+  cat <<USAGE
+Usage: scripts/deploy-dashboard-local [--remote 10.71.20.72]
+
+Builds dashboard-next + dashboard and deploys/bounces mae-dashboard.
+Remote mode deploys as \\${MAE_DASHBOARD_DEPLOY_USER:-mae} and restarts as \\${MAE_DASHBOARD_DEPLOY_ROOT_USER:-root}.
+Preserves /opt/mae/.env, /opt/mae/agent, dashboard data, and node_modules.
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --remote)
+      remote_host="${2:-}"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
 
 if [[ ! -d dashboard || ! -d dashboard-next ]]; then
   echo "Must run from MAE repo root" >&2
   exit 1
 fi
 
-echo "==> Building dashboard SPA"
-(cd dashboard-next && bun install && ./node_modules/.bin/vite build)
+run_remote() {
+  local target="${remote_user}@${remote_host}"
+  local root_target="${remote_root_user}@${remote_host}"
+  echo "==> Syncing committed HEAD to ${target}:${install_root}"
+  git archive --format=tar HEAD | ssh "$target" "set -euo pipefail; mkdir -p /tmp/mae-deploy-src; rm -rf /tmp/mae-deploy-src/*; tar -xf - -C /tmp/mae-deploy-src; rsync -a --delete --exclude=data --exclude=.env --exclude=agent --exclude=dashboard/mae-dashboard --exclude=dashboard/data --exclude=dashboard-next/node_modules --exclude=dashboard-next/dist /tmp/mae-deploy-src/ '${install_root}/'"
 
-echo "==> Generating Go templates"
-(cd dashboard && go run github.com/a-h/templ/cmd/templ@v0.3.1001 generate)
+  echo "==> Building dashboard on ${target}"
+  ssh "$target" "set -euo pipefail; cd '${install_root}/dashboard-next'; bun install; ./node_modules/.bin/vite build; rm -rf '${install_root}/dashboard-next-dist'; cp -R dist '${install_root}/dashboard-next-dist'; cd '${install_root}/dashboard'; go run github.com/a-h/templ/cmd/templ@v0.3.1001 generate; go build -o mae-dashboard ."
 
-echo "==> Building Go dashboard binary"
-(cd dashboard && go build -o mae-dashboard .)
+  echo "==> Restarting ${service_name} on ${root_target}"
+  ssh "$root_target" "systemctl restart '${service_name}'"
 
-echo "==> Stopping ${service_name}"
-sudo systemctl stop "$service_name"
+  echo "==> Verifying dashboard on ${target}"
+  ssh "$target" "set -euo pipefail; for i in 1 2 3 4 5 6 7 8 9 10; do curl -sf '${health_url}' >/dev/null 2>&1 && break; sleep 2; done; curl -sf '${health_url}'; echo; status=\$(curl -s -o /dev/null -w '%{http_code}' '${spa_url}'); test \"\$status\" = 200; echo SPA_HTTP=\$status"
+  echo "Remote dashboard deploy complete"
+}
 
-echo "==> Deploying SPA to ${install_root}/dashboard-next-dist"
-sudo rm -rf "${install_root}/dashboard-next-dist"
-sudo mkdir -p "$install_root"
-sudo cp -R dashboard-next/dist "${install_root}/dashboard-next-dist"
+run_local() {
+  echo "==> Building dashboard SPA"
+  (cd dashboard-next && bun install && ./node_modules/.bin/vite build)
 
-echo "==> Deploying dashboard binary/source"
-sudo mkdir -p "${install_root}/dashboard"
-sudo cp dashboard/mae-dashboard "${install_root}/dashboard/mae-dashboard"
-sudo rsync -a --delete \
-  --exclude='mae-dashboard' \
-  --exclude='data' \
-  dashboard/ "${install_root}/dashboard/"
+  echo "==> Generating Go templates"
+  (cd dashboard && go run github.com/a-h/templ/cmd/templ@v0.3.1001 generate)
 
-if [[ -d "${install_root}/dashboard/migrations" ]]; then
-  echo "==> Running migrations"
-  for f in "${install_root}"/dashboard/migrations/*.sql; do
-    [[ -e "$f" ]] || continue
-    PGPASSWORD="${MAE_DB_PASSWORD:-mae}" psql -h "${MAE_DB_HOST:-localhost}" -U "${MAE_DB_USER:-mae}" -d "${MAE_DB_NAME:-mae}" -f "$f" 2>/dev/null || true
-  done
-fi
+  echo "==> Building Go dashboard binary"
+  (cd dashboard && go build -o mae-dashboard .)
 
-echo "==> Starting ${service_name}"
-sudo systemctl start "$service_name"
+  echo "==> Stopping ${service_name}"
+  sudo systemctl stop "$service_name"
 
-for i in 1 2 3 4 5 6 7 8 9 10; do
-  if curl -sf "$health_url" >/dev/null 2>&1; then
-    echo "Dashboard health OK: $health_url"
-    break
+  echo "==> Deploying SPA to ${install_root}/dashboard-next-dist"
+  sudo rm -rf "${install_root}/dashboard-next-dist"
+  sudo mkdir -p "$install_root"
+  sudo cp -R dashboard-next/dist "${install_root}/dashboard-next-dist"
+
+  echo "==> Deploying dashboard binary/source"
+  sudo mkdir -p "${install_root}/dashboard"
+  sudo cp dashboard/mae-dashboard "${install_root}/dashboard/mae-dashboard"
+  sudo rsync -a --delete \
+    --exclude='mae-dashboard' \
+    --exclude='data' \
+    dashboard/ "${install_root}/dashboard/"
+
+  if [[ -d "${install_root}/dashboard/migrations" ]]; then
+    echo "==> Running migrations"
+    for f in "${install_root}"/dashboard/migrations/*.sql; do
+      [[ -e "$f" ]] || continue
+      PGPASSWORD="${MAE_DB_PASSWORD:-mae}" psql -h "${MAE_DB_HOST:-localhost}" -U "${MAE_DB_USER:-mae}" -d "${MAE_DB_NAME:-mae}" -f "$f" 2>/dev/null || true
+    done
   fi
-  if [[ "$i" == "10" ]]; then
-    echo "Dashboard failed health check: $health_url" >&2
-    sudo systemctl status "$service_name" --no-pager || true
+
+  echo "==> Starting ${service_name}"
+  sudo systemctl start "$service_name"
+
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    if curl -sf "$health_url" >/dev/null 2>&1; then
+      echo "Dashboard health OK: $health_url"
+      break
+    fi
+    if [[ "$i" == "10" ]]; then
+      echo "Dashboard failed health check: $health_url" >&2
+      sudo systemctl status "$service_name" --no-pager || true
+      exit 1
+    fi
+    sleep 2
+  done
+
+  status="$(curl -s -o /dev/null -w '%{http_code}' "$spa_url")"
+  if [[ "$status" != "200" ]]; then
+    echo "SPA not serving from $spa_url (HTTP $status)" >&2
     exit 1
   fi
-  sleep 2
-done
 
-status="$(curl -s -o /dev/null -w '%{http_code}' "$spa_url")"
-if [[ "$status" != "200" ]]; then
-  echo "SPA not serving from $spa_url (HTTP $status)" >&2
-  exit 1
+  echo "SPA serving OK: $spa_url"
+  echo "Dashboard deploy complete"
+}
+
+if [[ -n "$remote_host" ]]; then
+  run_remote
+else
+  run_local
 fi
-
-echo "SPA serving OK: $spa_url"
-echo "Dashboard deploy complete"

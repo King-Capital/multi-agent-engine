@@ -2,7 +2,10 @@ import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { redactSecrets, sanitizeAgentInput } from "./security";
 import { getTraceDir } from "./trace-artifacts";
+import { createLogger } from "./logger";
 import type { DelegateOptions, DelegateResult } from "./types";
+
+const log = createLogger("task-report");
 
 function safeFilePart(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 120) || "unknown";
@@ -63,7 +66,14 @@ export function writeTaskReport(sessionId: string, agentId: string, opts: Delega
   try {
     mkdirSync(reportDir, { recursive: true, mode: 0o700 });
     writeFileSync(reportPath, report, { mode: 0o600 });
-  } catch {
+  } catch (err) {
+    log.warn("Failed to write task report", {
+      session_id: sessionPart,
+      agent_id: agentId,
+      report_name: reportName,
+      error_type: err instanceof Error ? err.name : typeof err,
+      error_preview: redactSecrets(String(err)).slice(0, 300),
+    });
     return undefined;
   }
 

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { addSink, clearSinks, type LogEntry } from "./logger";
 
 let traceDir = "";
 
@@ -11,6 +12,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  clearSinks();
   rmSync(traceDir, { recursive: true, force: true });
   delete process.env.MAE_TRACE_DIR;
 });
@@ -46,6 +48,39 @@ describe("writeTaskReport", () => {
     expect(report).toContain("## Result");
     expect(report).toContain("- engine/foo.ts");
     expect(report).toContain("✅ Complete");
+  });
+
+  test("logs warning when task report cannot be written", async () => {
+    const entries: LogEntry[] = [];
+    addSink({ write: (entry) => { entries.push(entry); } });
+    const blockingPath = join(traceDir, "sess-blocked");
+    writeFileSync(blockingPath, "not a directory");
+
+    const { writeTaskReport } = await import("./task-report");
+    const artifact = writeTaskReport("sess-blocked", "agent-1", {
+      persona: { name: "Code Reviewer", model: "opus", expertise: "", tools: ["read"], skills: [], domain: { read: ["**/*"], write: [], update: [] } },
+      systemPrompt: "review",
+      userPrompt: "task",
+      model: "opus",
+      thinking: "medium",
+      teamName: "Validation",
+      teamColor: "#ffffff",
+      tools: ["read"],
+      domain: { read: ["**/*"], write: [], update: [] },
+      workingDir: "/tmp",
+      sessionDir: "data/sessions/sess-blocked",
+    }, {
+      agentId: "agent-1",
+      agentName: "Code Reviewer",
+      output: "Reviewed implementation.",
+      grade: "VERIFIED",
+      findings: [],
+      costUsd: 0,
+      tokensUsed: 0,
+    });
+
+    expect(artifact).toBeUndefined();
+    expect(entries.some((entry) => entry.component === "task-report" && entry.msg === "Failed to write task report")).toBe(true);
   });
 
   test("redacts secrets from task reports", async () => {

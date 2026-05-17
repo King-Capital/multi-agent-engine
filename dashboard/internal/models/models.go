@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type AgentRole string
 
@@ -134,6 +137,58 @@ type EventData struct {
 
 	// agent status
 	Status AgentStatus `json:"status,omitempty"`
+
+	Extra map[string]json.RawMessage `json:"-"`
+}
+
+func (d *EventData) UnmarshalJSON(data []byte) error {
+	type alias EventData
+	var known alias
+	if err := json.Unmarshal(data, &known); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	knownKeys := map[string]bool{
+		"session_name": true, "team_config": true, "task_prompt": true,
+		"agent_name": true, "agent_role": true, "model": true, "team_name": true, "team_color": true, "persona_path": true,
+		"from": true, "to": true, "content": true, "message_id": true, "ack_for": true,
+		"tool": true, "tool_args": true, "tool_result": true, "tool_status": true, "file_path": true,
+		"tilldone": true,
+		"blocked_path": true, "blocked_action": true, "block_reason": true,
+		"grade": true, "output_artifact": true, "task_report": true,
+		"failed_worker": true, "heal_action": true,
+		"error_msg": true, "status": true,
+	}
+	known.Extra = map[string]json.RawMessage{}
+	for key, value := range raw {
+		if !knownKeys[key] {
+			known.Extra[key] = value
+		}
+	}
+	*d = EventData(known)
+	return nil
+}
+
+func (d EventData) MarshalJSON() ([]byte, error) {
+	type alias EventData
+	base, err := json.Marshal(alias(d))
+	if err != nil {
+		return nil, err
+	}
+	var merged map[string]json.RawMessage
+	if err := json.Unmarshal(base, &merged); err != nil {
+		return nil, err
+	}
+	delete(merged, "Extra")
+	for key, value := range d.Extra {
+		if _, exists := merged[key]; !exists {
+			merged[key] = value
+		}
+	}
+	return json.Marshal(merged)
 }
 
 type Session struct {

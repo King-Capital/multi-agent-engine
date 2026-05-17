@@ -12,6 +12,7 @@ import { trackActivity, trackToolCall } from "./monitoring";
 import { checkBudget } from "./budget";
 import type { BudgetState } from "./budget";
 import { runTeamStep, runParallelStep } from "./team-execution";
+import { isReviewOnlyStep, readOnlyTools } from "./review-mode";
 import type { TeamExecutionDeps } from "./team-execution";
 import { logPerformance } from "./perf-log";
 import { buildStreamHandler, buildSendMessage } from "./stream-handler";
@@ -259,6 +260,7 @@ export async function runAgent(
   previousOutput: string,
   parentId: string,
   adapterName?: string,
+  step?: ChainStep,
 ): Promise<DelegateResult> {
   const { emitter, messageSenders, agentActivity, budgetState, pausedSessions, orchestratorLoop } = deps;
   const teams = loadTeams();
@@ -285,6 +287,7 @@ export async function runAgent(
   trackActivity(agentActivity, agentId, agentConfig.name, "worker");
 
   const agentResolved = resolveModelForRole("worker", agentConfig.model);
+  const reviewOnly = step ? isReviewOnlyStep(step) : false;
 
   await emitter.agentSpawn(session.id, agentId, parentId, agentConfig.name, "worker",
     agentResolved.model, teamName, teamColor);
@@ -300,8 +303,8 @@ export async function runAgent(
     userPrompt: prompt,
     model: agentResolved.model,
     thinking: agentResolved.thinking,
-    tools: persona.tools,
-    domain: persona.domain,
+    tools: reviewOnly ? readOnlyTools(persona.tools) : persona.tools,
+    domain: reviewOnly ? { ...persona.domain, write: [], update: [] } : persona.domain,
     workingDir: session.workingDir,
     sessionDir: `data/sessions/${session.id}`,
     parentId,
@@ -346,6 +349,10 @@ export async function runAgent(
   // Emit agent output summary
   const agentSummary = summarizeOutput(result.output, 2000);
   await emitter.message(session.id, agentId, persona.name, "user", agentSummary);
+  await emitter.agentDone(session.id, agentId, result.grade, result.costUsd, {
+    outputArtifact: result.outputArtifact,
+    taskReport: result.taskReport,
+  });
 
   return result;
 }
@@ -494,7 +501,7 @@ export async function runChain(
         stepResult = await runTeamStep(teamDeps, session, step, task, previousOutput, adapterName);
         previousOutput = wrapStepOutput(stepResult.output);
       } else if (step.agent) {
-        stepResult = await runAgent(deps, session, step.agent, task, previousOutput, "orch-1", adapterName);
+        stepResult = await runAgent(deps, session, step.agent, task, previousOutput, "orch-1", adapterName, step);
         previousOutput = wrapStepOutput(stepResult.output);
       }
     } catch (err) {

@@ -8,11 +8,18 @@ import (
 	"log"
 	"mae.local/dashboard/templates"
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 )
+
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+func isUUID(value string) bool {
+	return uuidPattern.MatchString(value)
+}
 
 func requireDB(w http.ResponseWriter) bool {
 	if !dbEnabled {
@@ -114,6 +121,10 @@ func handleAPICreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Name == "" {
 		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	if req.ID != "" && !isUUID(req.ID) {
+		http.Error(w, "invalid session id", http.StatusBadRequest)
 		return
 	}
 	if req.Platform == "" {
@@ -345,6 +356,10 @@ func handleAPIGetSessionEvents(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "id")
 	if sessionID == "" {
 		http.Error(w, "session id required", http.StatusBadRequest)
+		return
+	}
+	if !isUUID(sessionID) {
+		http.Error(w, "invalid session id", http.StatusBadRequest)
 		return
 	}
 
