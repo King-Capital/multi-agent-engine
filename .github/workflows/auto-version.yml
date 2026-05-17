@@ -156,8 +156,25 @@ jobs:
           BRANCH="automation/release-v${VERSION}"
           git checkout -B "$BRANCH"
           git push -f origin "$BRANCH"
-          gh pr create \
-            --base main \
-            --head "$BRANCH" \
-            --title "chore(release): v${VERSION}" \
-            --body "Automated version bump for v${VERSION}. Merge this PR to trigger the normal deploy workflows."
+          OWNER="${GITHUB_REPOSITORY%%/*}"
+          API_ROOT="${GITHUB_API_URL:-https://api.github.com}"
+          EXISTING_PR="$(curl -fsS \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${API_ROOT}/repos/${GITHUB_REPOSITORY}/pulls?head=${OWNER}:${BRANCH}&base=main&state=open")"
+          if echo "$EXISTING_PR" | grep -q '"html_url"'; then
+            echo "Release PR already exists for ${BRANCH}"
+            exit 0
+          fi
+
+          BODY_FILE="$(mktemp)"
+          cat > "$BODY_FILE" <<JSON
+{"base":"main","head":"${BRANCH}","title":"chore(release): v${VERSION}","body":"Automated version bump for v${VERSION}. Merge this PR to trigger the normal deploy workflows."}
+JSON
+          curl -fsS \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${API_ROOT}/repos/${GITHUB_REPOSITORY}/pulls" \
+            -d @"$BODY_FILE"
