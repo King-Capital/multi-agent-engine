@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
+import { redactSecrets } from "./security";
 
 export const TRACE_DIR =
   process.env.MAE_TRACE_DIR ?? join(process.env.HOME ?? "/tmp", ".mae", "traces");
@@ -22,7 +23,7 @@ export interface AgentOutputArtifact {
 }
 
 export function writeAgentOutputArtifact(sessionId: string, agentId: string, output: string): AgentOutputArtifact | undefined {
-  const bounded = output.slice(0, Math.max(0, MAX_AGENT_OUTPUT_CHARS));
+  const bounded = redactSecrets(output).slice(0, Math.max(0, MAX_AGENT_OUTPUT_CHARS));
   if (!bounded) return undefined;
 
   const output_hash = createHash("sha256").update(bounded).digest("hex");
