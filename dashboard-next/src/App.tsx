@@ -231,9 +231,9 @@ function SessionListPage() {
 			{/* Left panel: Session sidebar */}
 			<ResizablePanel
 				storageKey="mae-sidebar-width"
-				minWidth={200}
-				maxWidth={500}
-				defaultWidth={288}
+				minWidth={300}
+				maxWidth={560}
+				defaultWidth={340}
 			>
 				<SessionSidebar
 					sessions={sessions ?? []}
@@ -250,9 +250,9 @@ function SessionListPage() {
 				<SessionSSEProvider sessionId={selected.id}>
 					<ResizablePanel
 						storageKey="mae-agent-panel-width"
-						minWidth={180}
-						maxWidth={360}
-						defaultWidth={240}
+						minWidth={260}
+						maxWidth={420}
+						defaultWidth={300}
 					>
 						<AgentTreePanel
 							hideBack
@@ -365,9 +365,9 @@ function SessionDetailPage() {
 				{/* Left panel: Agent tree */}
 				<ResizablePanel
 					storageKey="mae-agent-panel-width"
-					minWidth={200}
+					minWidth={260}
 					maxWidth={500}
-					defaultWidth={288}
+					defaultWidth={320}
 				>
 					<AgentTreePanel
 						session={activeSession}
