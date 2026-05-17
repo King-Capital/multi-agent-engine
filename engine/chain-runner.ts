@@ -346,6 +346,10 @@ export async function runAgent(
   // Emit agent output summary
   const agentSummary = summarizeOutput(result.output, 2000);
   await emitter.message(session.id, agentId, persona.name, "user", agentSummary);
+  await emitter.agentDone(session.id, agentId, result.grade, result.costUsd, {
+    outputArtifact: result.outputArtifact,
+    taskReport: result.taskReport,
+  });
 
   return result;
 }
