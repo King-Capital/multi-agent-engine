@@ -16,11 +16,11 @@ import { AgentDetail } from "./AgentDetail";
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
-const NODE_W = 164;
-const NODE_H = 74;
-const H_GAP = 32;
-const V_GAP = 78;
-const SIBLING_STAGGER_Y = 26;
+const NODE_W = 196;
+const NODE_H = 86;
+const H_GAP = 56;
+const V_GAP = 104;
+const SIBLING_STAGGER_Y = 36;
 
 interface NodeLayout {
 	id: string;
@@ -264,11 +264,11 @@ function AgentNode({
 				y={y + 23}
 				textAnchor="middle"
 				fill="#f4f4f5"
-				fontSize={11}
+				fontSize={12.5}
 				fontWeight={600}
 				fontFamily="ui-monospace,monospace"
 			>
-				{agent.name.length > 20 ? `${agent.name.slice(0, 19)}…` : agent.name}
+				{agent.name.length > 24 ? `${agent.name.slice(0, 23)}…` : agent.name}
 			</text>
 			<rect
 				x={x + width / 2 - 28}
@@ -283,7 +283,7 @@ function AgentNode({
 				y={y + 38}
 				textAnchor="middle"
 				fill={teamColor}
-				fontSize={8.5}
+				fontSize={9.5}
 				fontWeight={700}
 				fontFamily="ui-monospace,monospace"
 				letterSpacing="0.05em"
@@ -294,18 +294,18 @@ function AgentNode({
 				x={x + width / 2}
 				y={y + 57}
 				textAnchor="middle"
-				fill="#71717a"
-				fontSize={8.5}
+				fill="#a1a1aa"
+				fontSize={9.5}
 				fontFamily="ui-sans-serif,system-ui,sans-serif"
 			>
-				{agent.model.length > 24 ? `${agent.model.slice(0, 23)}…` : agent.model}
+				{agent.model.length > 30 ? `${agent.model.slice(0, 29)}…` : agent.model}
 			</text>
 			<text
 				x={x + width - 7}
 				y={y + height - 6}
 				textAnchor="end"
 				fill="#22d3ee"
-				fontSize={8}
+				fontSize={9}
 				fontWeight={600}
 				fontFamily="ui-monospace,monospace"
 			>
@@ -343,7 +343,7 @@ function Edge({
 			fill="none"
 			stroke={validColor(color)}
 			strokeWidth={1.5}
-			strokeOpacity={0.45}
+			strokeOpacity={0.7}
 			markerEnd="url(#arrow)"
 		/>
 	);
@@ -687,7 +687,7 @@ export function AgentGraph({
 
 					{/* Team group backgrounds */}
 					{teamGroups.map((tg) => (
-						<g key={`team-${tg.team_name}`}>
+						<g key={`team-${tg.team_name}-${tg.x}-${tg.y}`}>
 							<rect
 								x={tg.x}
 								y={tg.y}

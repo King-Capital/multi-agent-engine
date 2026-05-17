@@ -173,10 +173,11 @@ export const api = {
   metricsText: (signal?: AbortSignal) => apiText("/metrics", signal),
 
   // Send a message to a session
-  sendMessage: async (id: string, content: string): Promise<{ message_id: string }> => {
+  sendMessage: async (id: string, content: string, opts?: { targetAgentId?: string | null }): Promise<{ message_id: string }> => {
     // The Go handler uses r.FormValue("content"), so send form-encoded
     const message_id = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const body = new URLSearchParams({ content, message_id });
+    if (opts?.targetAgentId) body.set("target_agent_id", opts.targetAgentId);
     const res = await fetch(
       `${API_BASE_URL}/api/sessions/${encodeURIComponent(id)}/message`,
       {

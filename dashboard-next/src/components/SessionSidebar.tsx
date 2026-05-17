@@ -15,7 +15,7 @@ import * as React from "react";
 import { Zap } from "lucide-react";
 import { apiFetch, api } from "@/lib/api";
 import type { DBSession, DBUser } from "@/lib/types";
-import { cn, formatCurrency, shortId, statusColor } from "@/lib/utils";
+import { cn, formatCurrency, formatNumber, shortId, statusColor } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -358,12 +358,12 @@ export function SessionSidebar({
 							<div className="mt-1 text-xs text-slate-500">
 								{shortId(s.id)} · {new Date(s.created_at).toLocaleString()}
 							</div>
-							<div className="mt-1.5 flex items-start justify-between gap-2">
-								<div className="flex min-w-0 flex-wrap items-center gap-1.5">
+							<div className="mt-1.5 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+								<div className="flex min-w-0 flex-wrap items-center gap-1.5 overflow-hidden">
 									<Badge className={cn(statusColor(s.status), "text-[10px]")} variant="outline">
 										{s.status}
 									</Badge>
-									{s.chain && <Badge variant="secondary" className="max-w-[150px] truncate text-[10px]">{s.chain}</Badge>}
+									{s.chain && <Badge variant="secondary" className="max-w-[110px] truncate text-[10px]" title={s.chain}>{s.chain}</Badge>}
 								</div>
 								{(() => {
 									const info = costMap.get(s.id);
@@ -371,10 +371,10 @@ export function SessionSidebar({
 										return null;
 									}
 									return (
-										<div className="shrink-0 text-right font-mono text-[10px] leading-tight">
-											<div className="text-emerald-400">{formatCurrency(info.cost)}</div>
+										<div className="max-w-[70px] overflow-hidden text-right font-mono text-[10px] leading-tight">
+											<div className="truncate text-emerald-400" title={formatCurrency(info.cost)}>{formatCurrency(info.cost)}</div>
 											{info.tokens > 0 && (
-												<div className="text-cyan-400">
+												<div className="truncate text-cyan-400" title={`${formatNumber(info.tokens)} tokens`}>
 													{(info.tokens / 1000).toFixed(0)}K tok
 												</div>
 											)}

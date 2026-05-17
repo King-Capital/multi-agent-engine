@@ -72,6 +72,7 @@ type TillDoneState struct {
 }
 
 type Event struct {
+	SSEID         int64     `json:"sse_id,omitempty"`
 	SessionID     string    `json:"session_id"`
 	AgentID       string    `json:"agent_id"`
 	ParentID      string    `json:"parent_id,omitempty"`

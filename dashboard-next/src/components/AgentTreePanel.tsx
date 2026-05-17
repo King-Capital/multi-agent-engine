@@ -104,7 +104,7 @@ function AgentRow({
 					? "ring-1 ring-white/20 bg-white/[0.06]"
 					: "hover:bg-white/[0.04]",
 			)}
-			style={{ marginLeft: `${Math.min(depth, 3) * 10}px` }}
+			style={{ paddingLeft: `${Math.min(depth, 3) * 10}px` }}
 		>
 			{/* Color bar (like the graph nodes) */}
 			<div className="h-1 rounded-t-lg" style={{ backgroundColor: teamColor }} />
@@ -149,11 +149,11 @@ function AgentRow({
 
 				{/* Cost / Tokens bubble */}
 				<span className={cn(
-					"text-[10px] font-mono font-bold shrink-0 px-1.5 py-0.5 rounded-full",
+					"max-w-[76px] truncate text-[10px] font-mono font-bold shrink-0 px-1.5 py-0.5 rounded-full",
 					showTokens
 						? "bg-amber-500/20 text-amber-300"
 						: "bg-emerald-500/20 text-emerald-300",
-				)}>
+				)} title={showTokens ? formatNumber(agent.tokens_used) : formatCurrency(agent.cost_usd)}>
 					{showTokens ? formatNumber(agent.tokens_used) : formatCurrency(agent.cost_usd)}
 				</span>
 			</div>

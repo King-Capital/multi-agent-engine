@@ -106,7 +106,7 @@ export class Orchestrator {
     this.defaultAdapter = name;
   }
 
-  sendUserMessage(sessionId: string, message: string, messageId?: string): void {
+  sendUserMessage(sessionId: string, message: string, messageId?: string, targetAgentId?: string): void {
     if (message.startsWith("!")) {
       const parts = message.slice(1).split(/\s+/);
       const cmd = parts[0] ?? "";
@@ -136,7 +136,7 @@ export class Orchestrator {
     const buf = this.messageBuffers.get(sessionId) ?? [];
     buf.push(message);
     this.messageBuffers.set(sessionId, buf);
-    sendUserMessage(this.messageSenders, sessionId, message);
+    sendUserMessage(this.messageSenders, sessionId, message, targetAgentId);
   }
 
   private async handleSteerCommand(sessionId: string, command: string, args: string): Promise<void> {
@@ -291,7 +291,7 @@ export class Orchestrator {
       messageBuffers: this.messageBuffers, actionQueue,
     });
     this.orchestratorLoop.start();
-    this.sseAbort = listenForUserMessages(this.dashboardUrl, sessionId, (sid, content, messageId) => this.sendUserMessage(sid, content, messageId));
+    this.sseAbort = listenForUserMessages(this.dashboardUrl, sessionId, (sid, content, messageId, targetAgentId) => this.sendUserMessage(sid, content, messageId, targetAgentId));
 
     this.skippedSteps.clear();
     const chainRunnerDeps = this.buildChainRunnerDeps();
