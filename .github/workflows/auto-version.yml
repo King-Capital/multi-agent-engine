@@ -1,17 +1,32 @@
 name: Auto Version
 
 on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: false
+        default: patch
+        type: choice
+        options: [patch, minor, major]
   pull_request:
     types: [closed]
     branches: [main]
 
 permissions:
   contents: write
+  pull-requests: write
+
+concurrency:
+  group: auto-version-main
+  cancel-in-progress: false
 
 jobs:
   version-bump:
-    if: github.event.pull_request.merged == true
-    runs-on: king-runner
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true && !startsWith(github.event.pull_request.title, 'chore(release):'))
+    runs-on: [self-hosted, mae]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -40,8 +55,11 @@ jobs:
         id: bump
         env:
           LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          DISPATCH_BUMP: ${{ inputs.bump || '' }}
         run: |
-          if echo "$LABELS" | grep -q '"major"'; then
+          if [ -n "$DISPATCH_BUMP" ]; then
+            echo "type=$DISPATCH_BUMP" >> "$GITHUB_OUTPUT"
+          elif echo "$LABELS" | grep -q '"major"'; then
             echo "type=major" >> "$GITHUB_OUTPUT"
           elif echo "$LABELS" | grep -q '"minor"'; then
             echo "type=minor" >> "$GITHUB_OUTPUT"
@@ -67,6 +85,7 @@ jobs:
             major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
             minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
             patch) PATCH=$((PATCH + 1)) ;;
+            *) echo "Unknown bump type: $BUMP" >&2; exit 1 ;;
           esac
 
           NEW="${MAJOR}.${MINOR}.${PATCH}"
@@ -75,18 +94,37 @@ jobs:
             perl -0pi -e "s/MAE_VERSION=\"[^\"]+\"/MAE_VERSION=\"$NEW\"/" scripts/mae
           fi
           if [ -f README.md ]; then
-            perl -0pi -e "s/Current stable release: \\*\\*v[0-9]+\\.[0-9]+\\.[0-9]+\\*\\*\\./Current stable release: **v$NEW**./" README.md
+            perl -0pi -e "s/Current stable release: \*\*v[0-9]+\.[0-9]+\.[0-9]+\*\*\./Current stable release: **v$NEW**./" README.md
           fi
           echo "version=$NEW" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "Bumped $CURRENT → $NEW ($BUMP)"
 
-      - name: Commit, tag, and push
+      - name: Commit, tag, and push or open release PR
         if: steps.check.outputs.skip == 'false' && steps.version.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          set -euo pipefail
+
           git add VERSION scripts/mae README.md
           git commit -m "chore(release): v${VERSION}"
           git pull --rebase origin main
-          git tag -a -m "v${VERSION}" "v${VERSION}"
-          git push origin HEAD:main --follow-tags
+
+          if git push origin HEAD:main; then
+            git tag -a -m "v${VERSION}" "v${VERSION}"
+            git push origin "v${VERSION}"
+            echo "Released v${VERSION} directly to main"
+            exit 0
+          fi
+
+          echo "Direct push to main failed; opening release PR instead"
+          BRANCH="automation/release-v${VERSION}"
+          git checkout -B "$BRANCH"
+          git push -f origin "$BRANCH"
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore(release): v${VERSION}" \
+            --body "Automated version bump for v${VERSION}. Merge this PR to trigger the normal deploy workflows."
