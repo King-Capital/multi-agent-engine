@@ -552,12 +552,15 @@ mae session — Manage sessions
 
 Usage:
   mae session list                          List all sessions
+  mae session show [latest|<id>]            Summarize one dashboard run
   mae session close <id> [--status done]    Close/complete a session
 
 Status options: done, completed, error
 
 Examples:
   mae session list
+  mae session show latest
+  mae session show 2dbc90f5 --messages 20
   mae session close 2dbc90f5
   mae session close 2dbc90f5 --status error
 `);
@@ -578,6 +581,53 @@ Examples:
         console.log(`${s.id.slice(0, 12)}  ${s.status.padEnd(12)} ${String(agentCount).padEnd(8)} $${s.total_cost.toFixed(3).padEnd(9)} ${(s.name ?? "").slice(0, 50)}`);
       }
       console.log(`\n${sessions.length} sessions total`);
+    } else if (subCmd === "show" || subCmd === "latest") {
+      const target = subCmd === "latest" ? "latest" : (args[2] ?? "latest");
+      const messageLimit = Number(getFlag(args, "--messages") ?? "12");
+      const eventLimit = Number(getFlag(args, "--events") ?? "20");
+      const resolveResp = target === "latest"
+        ? await fetch(`${dashUrl}/api/pg/sessions?limit=1`, { headers })
+        : await fetch(`${dashUrl}/api/pg/sessions/${encodeURIComponent(target)}`, { headers });
+      if (!resolveResp.ok) { console.error(`Dashboard error: ${resolveResp.status} ${await resolveResp.text()}`); process.exit(1); }
+      const resolved = await resolveResp.json() as unknown;
+      const session = Array.isArray(resolved) ? resolved[0] : resolved;
+      if (!session || typeof session !== "object") { console.error("No session found"); process.exit(1); }
+      const s = session as { id: string; name?: string; status?: string; chain?: string | null; created_at?: string; updated_at?: string; completed_at?: string | null };
+      const eventsResp = await fetch(`${dashUrl}/api/pg/sessions/${encodeURIComponent(s.id)}/events`, { headers });
+      if (!eventsResp.ok) { console.error(`Events error: ${eventsResp.status} ${await eventsResp.text()}`); process.exit(1); }
+      const events = await eventsResp.json() as Array<{ id?: number; created_at?: string; event_type: string; agent_id?: string | null; payload?: Record<string, unknown> | null }>;
+      const byType = new Map<string, number>();
+      for (const ev of events) byType.set(ev.event_type, (byType.get(ev.event_type) ?? 0) + 1);
+      const messages = events.filter(ev => ev.event_type === "message");
+      const steerMessages = messages.filter(ev => {
+        const payload = ev.payload as { data?: { from?: string; ack_for?: string } } | null | undefined;
+        const from = String(payload?.data?.from ?? ev.agent_id ?? "").toLowerCase();
+        return ev.agent_id === "user" || from === "user" || Boolean(payload?.data?.ack_for);
+      });
+      const synthesis = messages.filter(ev => String(ev.agent_id ?? "").toLowerCase().includes("synth"));
+      const interestingTail = events.filter(ev => ["message", "error", "stall_detected", "nudge_sent", "agent_done"].includes(ev.event_type)).slice(-eventLimit);
+      const preview = (ev: { payload?: Record<string, unknown> | null }) => {
+        const data = (ev.payload?.data ?? {}) as Record<string, unknown>;
+        const text = String(data.content ?? data.error_msg ?? data.status ?? data.grade ?? data.ack_for ?? "");
+        return text.replace(/\s+/g, " ").slice(0, 220);
+      };
+
+      console.log(`\nSession ${s.id}`);
+      console.log(`  Name: ${s.name ?? ""}`);
+      console.log(`  Status: ${s.status ?? "unknown"}${s.chain ? ` · Chain: ${s.chain}` : ""}`);
+      console.log(`  Created: ${s.created_at ?? "?"}`);
+      console.log(`  Updated: ${s.updated_at ?? "?"}${s.completed_at ? ` · Completed: ${s.completed_at}` : ""}`);
+      console.log(`\nEvents: ${events.length}`);
+      console.log([...byType.entries()].sort((a, b) => b[1] - a[1]).map(([type, count]) => `  ${type}: ${count}`).join("\n"));
+      console.log(`\nSteer messages (${steerMessages.length}, showing ${Math.min(messageLimit, steerMessages.length)}):`);
+      for (const ev of steerMessages.slice(-messageLimit)) {
+        const data = (ev.payload?.data ?? {}) as Record<string, unknown>;
+        console.log(`  ${ev.created_at ?? ""} ${data.from ?? ev.agent_id ?? "?"} → ${data.to ?? "?"}: ${preview(ev)}`);
+      }
+      console.log(`\nSynthesis messages (${synthesis.length}, showing ${Math.min(3, synthesis.length)}):`);
+      for (const ev of synthesis.slice(-3)) console.log(`  ${ev.created_at ?? ""} ${preview(ev)}`);
+      console.log(`\nRecent interesting events:`);
+      for (const ev of interestingTail) console.log(`  ${ev.created_at ?? ""} ${ev.event_type.padEnd(14)} ${(ev.agent_id ?? "").slice(0, 32).padEnd(32)} ${preview(ev)}`);
     } else if (subCmd === "close") {
       const sessionId = args[2];
       if (!sessionId) { console.error("Usage: mae session close <id> [--status done|error]"); process.exit(1); }
@@ -594,7 +644,7 @@ Examples:
       if (!resp.ok) { console.error(`Failed: ${resp.status} ${await resp.text()}`); process.exit(1); }
       console.log(`Session ${sessionId} → ${status}`);
     } else {
-      console.error("Usage: mae session <list|close>");
+      console.error("Usage: mae session <list|show|latest|close>");
       process.exit(1);
     }
     break;
