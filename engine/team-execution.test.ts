@@ -6,6 +6,7 @@ import {
   buildFailedTeamResults,
   accumulateWorkerCosts,
   delegateToLead,
+  buildWorkerSystemPromptAppend,
 } from "./team-execution";
 import type {
   DelegateResult,
@@ -140,6 +141,24 @@ function makeMockAdapter(
 // ---------------------------------------------------------------------------
 // buildParallelTeamStep
 // ---------------------------------------------------------------------------
+
+describe("buildWorkerSystemPromptAppend", () => {
+  test("propagates worker safety constraints without lead-only final schema", () => {
+    const append = [
+      "REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.",
+      "Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.",
+      "Final response must include exactly one schema block starting with REVIEW_REPORT: Correctness, plus SCOPE, COMMANDS_RUN, FINDINGS, BLOCKERS, and VERDICT.",
+    ].join("\n");
+
+    const result = buildWorkerSystemPromptAppend(append);
+
+    expect(result).toContain("REVIEW-ONLY MODE");
+    expect(result).toContain("Do not edit files");
+    expect(result).toContain("Use lightweight evidence commands");
+    expect(result).not.toContain("Final response must include");
+    expect(result).not.toContain("REVIEW_REPORT:");
+  });
+});
 
 describe("buildParallelTeamStep", () => {
   test("preserves per-squad overrides for parallel swarm teams", () => {

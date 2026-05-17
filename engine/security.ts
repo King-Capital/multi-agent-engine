@@ -18,6 +18,8 @@ const SECRET_PATTERNS: RegExp[] = [
   /((?:api[_-]?key|token|secret|password|passwd|pwd|access[_-]?token|refresh[_-]?token)\b\s*[:=]\s*)([^\s'\"`;,}]+)/gi,
   /("(?:api[_-]?key|token|secret|password|passwd|pwd|access[_-]?token|refresh[_-]?token)"\s*:\s*")([^"\\]*(?:\\.[^"\\]*)*)"/gi,
   /\b()(sk-[A-Za-z0-9]{16,})\b/g,
+  /\b()(ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|sk-ant-[A-Za-z0-9-_]{16,}|AIza[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16})\b/g,
+  /()-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
   /\b([A-Za-z0-9_]*KEY[A-Za-z0-9_]*\s*=\s*)([^\s'\"`;,}]+)/g,
   /("[A-Za-z0-9_]*KEY[A-Za-z0-9_]*"\s*:\s*")([^"\\]*(?:\\.[^"\\]*)*)"/g,
 ];

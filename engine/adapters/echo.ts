@@ -75,6 +75,11 @@ export class EchoAdapter implements PlatformAdapter {
       "SQUAD_REPORT: Quality SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
       "SQUAD_REPORT: Security SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
       "SQUAD_REPORT: Domain SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
+      "REVIEW_REPORT: Correctness SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
+      "REVIEW_REPORT: Adversarial SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
+      "REVIEW_REPORT: Quality SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
+      "REVIEW_REPORT: Security SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
+      "REVIEW_REPORT: Domain SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
       "Orchestrator synthesizes across all squads",
       "Orchestrator synthesizes conflicting findings",
     ].join(". ");

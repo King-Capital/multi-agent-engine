@@ -72,6 +72,38 @@ describe("EventEmitter", () => {
       expect(body.data.session_name).toBe("Test Session");
     });
 
+    test("redacts secrets from emitted dashboard messages and tool calls", async () => {
+      const emitter = new EventEmitter("http://test:8400");
+      await emitter.sessionStart("s1", "Test", "review", "repro with OPENAI_API_KEY=sk-tasksecret1234567890");
+      await emitter.message("s1", "a1", "from", "to", "OPENAI_API_KEY=sk-supersecret1234567890", {
+        content: "OPENAI_API_KEY=sk-metadataoverride1234567890",
+        nested: { token: "metadata-token" },
+      });
+      await emitter.toolCall("s1", "a1", "bash", "file.ts", "ok", "Authorization: Bearer token123", '{"password":"secret-value"}');
+      await emitter.trace("s1", "a1", "input", "OPENAI_API_KEY=sk-tracesecret1234567890", { token: "trace-token" });
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      const bodies = fetchMock.calls
+        .filter((c) => c.url.includes("/api/events"))
+        .map((c) => JSON.parse(c.init.body as string));
+      expect(JSON.stringify(bodies)).toContain("[REDACTED_SECRET]");
+      expect(JSON.stringify(bodies)).not.toContain("sk-supersecret");
+      expect(JSON.stringify(bodies)).not.toContain("metadata-token");
+      expect(JSON.stringify(bodies)).not.toContain("sk-tasksecret");
+      expect(JSON.stringify(bodies)).not.toContain("token123");
+      expect(JSON.stringify(bodies)).not.toContain("secret-value");
+
+      const traceBody = JSON.stringify(
+        fetchMock.calls
+          .filter((c) => c.url.includes("/api/traces"))
+          .map((c) => JSON.parse(c.init.body as string)),
+      );
+      expect(traceBody).toContain("[REDACTED_SECRET]");
+      expect(traceBody).not.toContain("sk-tracesecret");
+      expect(traceBody).not.toContain("trace-token");
+    });
+
     test("assigns monotonic sequence numbers", async () => {
       const emitter = new EventEmitter("http://test:8400");
       const bodies: unknown[] = [];

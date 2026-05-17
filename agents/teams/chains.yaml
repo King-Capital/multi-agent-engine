@@ -241,18 +241,52 @@ chains:
     steps:
       - parallel:
           - team: Correctness Review
+            system_prompt_append: |
+              REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
+              Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
+              Final response must include exactly one schema block starting with REVIEW_REPORT: Correctness, plus SCOPE, COMMANDS_RUN, FINDINGS with P0/P1/P2/P3 severity markers, BLOCKERS, and VERDICT.
           - team: Adversarial Review
+            system_prompt_append: |
+              REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
+              Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
+              Final response must include exactly one schema block starting with REVIEW_REPORT: Adversarial, plus SCOPE, COMMANDS_RUN, FINDINGS with P0/P1/P2/P3 severity markers, BLOCKERS, and VERDICT.
           - team: Quality Review
+            system_prompt_append: |
+              REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
+              Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
+              Final response must include exactly one schema block starting with REVIEW_REPORT: Quality, plus SCOPE, COMMANDS_RUN, FINDINGS with P0/P1/P2/P3 severity markers, BLOCKERS, and VERDICT.
           - team: Security Review
+            system_prompt_append: |
+              REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
+              Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
+              Final response must include exactly one schema block starting with REVIEW_REPORT: Security, plus SCOPE, COMMANDS_RUN, FINDINGS with P0/P1/P2/P3 severity markers, BLOCKERS, and VERDICT.
           - team: Domain Review
+            system_prompt_append: |
+              REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
+              Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
+              Final response must include exactly one schema block starting with REVIEW_REPORT: Domain, plus SCOPE, COMMANDS_RUN, FINDINGS with P0/P1/P2/P3 severity markers, BLOCKERS, and VERDICT.
         till_done:
-          - "Correctness reviewer verified logic, type/runtime safety, and regressions"
-          - "Adversarial reviewer challenged assumptions and failure modes"
-          - "Quality reviewer assessed maintainability, simplicity, and test quality"
-          - "Security reviewer checked auth, injection, SSRF, secrets, and unsafe operations"
-          - "Domain reviewer checked repo-specific business and operational correctness"
-          - "All findings graded P0-P3 with evidence"
-          - "Orchestrator synthesizes conflicting findings"
+          - type: output_match
+            text: "Correctness reviewer reported with evidence"
+            verify: "REVIEW_REPORT: Correctness[\\s\\S]*SCOPE:[\\s\\S]*COMMANDS_RUN:[\\s\\S]*FINDINGS:[\\s\\S]*BLOCKERS:[\\s\\S]*VERDICT:"
+          - type: output_match
+            text: "Adversarial reviewer reported with evidence"
+            verify: "REVIEW_REPORT: Adversarial[\\s\\S]*SCOPE:[\\s\\S]*COMMANDS_RUN:[\\s\\S]*FINDINGS:[\\s\\S]*BLOCKERS:[\\s\\S]*VERDICT:"
+          - type: output_match
+            text: "Quality reviewer reported with evidence"
+            verify: "REVIEW_REPORT: Quality[\\s\\S]*SCOPE:[\\s\\S]*COMMANDS_RUN:[\\s\\S]*FINDINGS:[\\s\\S]*BLOCKERS:[\\s\\S]*VERDICT:"
+          - type: output_match
+            text: "Security reviewer reported with evidence"
+            verify: "REVIEW_REPORT: Security[\\s\\S]*SCOPE:[\\s\\S]*COMMANDS_RUN:[\\s\\S]*FINDINGS:[\\s\\S]*BLOCKERS:[\\s\\S]*VERDICT:"
+          - type: output_match
+            text: "Domain reviewer reported with evidence"
+            verify: "REVIEW_REPORT: Domain[\\s\\S]*SCOPE:[\\s\\S]*COMMANDS_RUN:[\\s\\S]*FINDINGS:[\\s\\S]*BLOCKERS:[\\s\\S]*VERDICT:"
+          - type: output_match
+            text: "All findings graded P0-P3 with evidence"
+            verify: "P[0-3]|P0|P1|P2|P3"
+          - type: output_match
+            text: "Orchestrator synthesizes conflicting findings"
+            verify: "conflicting findings|synthesi[sz]e|SYNTHESIS|Synthesis|Orchestrator"
 
   red-blue:
     description: "Red team attacks, blue team defends — competing perspectives"

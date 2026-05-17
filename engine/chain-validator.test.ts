@@ -74,6 +74,25 @@ describe("chain-validator", () => {
     expect(agentNames).toContain("Domain Semantics Reviewer");
   });
 
+  test("swarm-review is review-only and schema-gated", () => {
+    const chain = loadChains().chains["swarm-review"];
+    const parallel = chain?.steps?.[0]?.parallel;
+    const tillDone = chain?.steps?.[0]?.till_done;
+
+    expect(parallel?.length).toBe(5);
+    for (const step of parallel ?? []) {
+      expect(step.system_prompt_append).toContain("REVIEW-ONLY MODE");
+      expect(step.system_prompt_append).toContain("Do not edit files");
+      expect(step.system_prompt_append).toContain("REVIEW_REPORT:");
+      expect(step.system_prompt_append).toContain("P0/P1/P2/P3");
+      expect(step.system_prompt_append).toContain("BLOCKERS");
+    }
+
+    expect(JSON.stringify(tillDone)).toContain("REVIEW_REPORT: Correctness");
+    expect(JSON.stringify(tillDone)).toContain("COMMANDS_RUN");
+    expect(JSON.stringify(tillDone)).toContain("VERDICT");
+  });
+
   test("plan-build-review includes deterministic verification without agent spawn", () => {
     const report = buildChainValidationReport("plan-build-review");
     const deterministic = report.steps.find((step) => step.mode === "deterministic");

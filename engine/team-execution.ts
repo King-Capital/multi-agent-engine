@@ -329,6 +329,19 @@ export async function delegateToLead(
 // 3. executeWorkers
 // ---------------------------------------------------------------------------
 
+export function buildWorkerSystemPromptAppend(stepAppend?: string): string {
+  if (!stepAppend) return "";
+  return stepAppend
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) =>
+      line.includes("REVIEW-ONLY MODE") ||
+      line.includes("Do not edit files") ||
+      line.includes("Use lightweight evidence commands"),
+    )
+    .join("\n");
+}
+
 export async function executeWorkers(
   deps: WorkerExecDeps,
   session: SessionState,
@@ -393,9 +406,14 @@ export async function executeWorkers(
       await emitter.message(session.id, workerId, teamConfig.lead.name, "user",
         "📋 **Assignment to " + member.name + ":**\n\n" + workerPrompt.slice(0, 3000));
 
+      const workerSystemPromptAppend = buildWorkerSystemPromptAppend(step.system_prompt_append);
+      const workerSystemPrompt = workerSystemPromptAppend
+        ? buildSystemPrompt(workerPersona, "worker") + "\n\n" + workerSystemPromptAppend
+        : buildSystemPrompt(workerPersona, "worker");
+
       const workerOpts: DelegateOptions = {
         persona: workerPersona,
-        systemPrompt: buildSystemPrompt(workerPersona, "worker"),
+        systemPrompt: workerSystemPrompt,
         userPrompt: workerPrompt,
         model: workerResolved.model,
         thinking: workerResolved.thinking,
