@@ -24,7 +24,7 @@ describe("chain-validator", () => {
       "Security Squad",
       "Domain Squad",
     ]);
-    expect(output).toContain("SWARM_COORDINATION_READY|SME Squad Coverage Plan|Squad Assignments");
+    expect(output).toContain("SWARM_COORDINATION_READY|SME Squad Coverage Plan|Squad Assignments|SQUAD_COVERAGE_PLAN|Coverage Plan");
     expect(output).toContain("Correctness Lead");
     expect(output).toContain("Security-Aware Domain Reviewer");
   });

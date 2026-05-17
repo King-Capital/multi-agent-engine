@@ -171,7 +171,7 @@ chains:
         till_done:
           - type: output_match
             text: "Arch coordinator produced the SME squad coverage plan"
-            verify: "SWARM_COORDINATION_READY|SME Squad Coverage Plan|Squad Assignments"
+            verify: "SWARM_COORDINATION_READY|SME Squad Coverage Plan|Squad Assignments|SQUAD_COVERAGE_PLAN|Coverage Plan"
       - parallel:
           - team: Correctness Squad
             system_prompt_append: |
