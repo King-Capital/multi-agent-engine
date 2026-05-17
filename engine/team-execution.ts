@@ -315,7 +315,10 @@ export async function delegateToLead(
 
   // Early return if lead failed or no workers
   if (leadResult.grade === "FAILED" || !teamConfig.members.length) {
-    await emitter.agentDone(session.id, leadId, leadResult.grade, leadResult.costUsd);
+    await emitter.agentDone(session.id, leadId, leadResult.grade, leadResult.costUsd, {
+      outputArtifact: leadResult.outputArtifact,
+      taskReport: leadResult.taskReport,
+    });
     untrackActivity(leadId);
     const msg = leadResult.grade === "FAILED"
       ? `${teamConfig["team-name"]} lead could not complete the task.`
@@ -452,7 +455,10 @@ export async function executeWorkers(
 
         const workerSummary = summarizeOutput(result.output, 1500);
         await emitter.message(session.id, workerId, member.name, "user", workerSummary);
-        await emitter.agentDone(session.id, workerId, result.grade, result.costUsd);
+        await emitter.agentDone(session.id, workerId, result.grade, result.costUsd, {
+          outputArtifact: result.outputArtifact,
+          taskReport: result.taskReport,
+        });
         untrackActivity(workerId);
 
         return result;
@@ -1022,7 +1028,10 @@ export async function runParallelStep(
 
   const synthSummary = summarizeOutput(synthResult.output, 2000);
   await emitter.message(session.id, synthId, "Synthesis", "user", synthSummary);
-  await emitter.agentDone(session.id, synthId, synthResult.grade ?? "VERIFIED", synthResult.costUsd);
+  await emitter.agentDone(session.id, synthId, synthResult.grade ?? "VERIFIED", synthResult.costUsd, {
+    outputArtifact: synthResult.outputArtifact,
+    taskReport: synthResult.taskReport,
+  });
 
   return [
     ...results,

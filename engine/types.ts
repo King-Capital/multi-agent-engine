@@ -230,6 +230,8 @@ export interface DelegateResult {
   findings?: string[];
   qualityNotes?: string[];
   reviews?: WorkerReview[];
+  outputArtifact?: string;
+  taskReport?: string;
   costUsd: number;
   tokensUsed: number;
 }

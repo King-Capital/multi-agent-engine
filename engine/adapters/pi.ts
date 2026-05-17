@@ -163,6 +163,8 @@ export class PiAdapter implements PlatformAdapter {
         resolved = true;
         const outputArtifact = writeAgentOutputArtifact(sessionId, agentId, result.output ?? "");
         const taskReport = writeTaskReport(sessionId, agentId, opts, result);
+        result.outputArtifact = outputArtifact?.output_artifact;
+        result.taskReport = taskReport?.task_report;
         log.info("Agent completed", {
           trace_type: "agent.end",
           session_id: sessionId,
