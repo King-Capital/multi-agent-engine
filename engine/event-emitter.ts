@@ -171,7 +171,7 @@ export class EventEmitter {
     });
   }
 
-  async agentDone(sessionId: string, agentId: string, grade?: string, costUsd?: number) {
+  async agentDone(sessionId: string, agentId: string, grade?: string, costUsd?: number, artifacts: { outputArtifact?: string; taskReport?: string } = {}) {
     await this.pgUpdateAgent(agentId, {
       status: grade === "FAILED" ? "failed" : "completed",
       cost_usd: costUsd ?? 0,
@@ -181,7 +181,12 @@ export class EventEmitter {
       agent_id: agentId,
       event_type: "agent_done",
       timestamp: new Date().toISOString(),
-      data: { grade: grade ?? "unknown", cost_usd: costUsd ?? 0 },
+      data: {
+        grade: grade ?? "unknown",
+        cost_usd: costUsd ?? 0,
+        ...(artifacts.outputArtifact ? { output_artifact: artifacts.outputArtifact } : {}),
+        ...(artifacts.taskReport ? { task_report: artifacts.taskReport } : {}),
+      },
     });
   }
 

@@ -1,0 +1,73 @@
+#!/bin/bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+service_name="${MAE_DASHBOARD_SERVICE:-mae-dashboard}"
+install_root="${MAE_DASHBOARD_INSTALL_ROOT:-/opt/mae}"
+health_url="${MAE_DASHBOARD_HEALTH_URL:-http://localhost:8400/api/health}"
+spa_url="${MAE_DASHBOARD_SPA_URL:-http://localhost:8400/}"
+
+if [[ ! -d dashboard || ! -d dashboard-next ]]; then
+  echo "Must run from MAE repo root" >&2
+  exit 1
+fi
+
+echo "==> Building dashboard SPA"
+(cd dashboard-next && bun install && ./node_modules/.bin/vite build)
+
+echo "==> Generating Go templates"
+(cd dashboard && go run github.com/a-h/templ/cmd/templ@v0.3.1001 generate)
+
+echo "==> Building Go dashboard binary"
+(cd dashboard && go build -o mae-dashboard .)
+
+echo "==> Stopping ${service_name}"
+sudo systemctl stop "$service_name"
+
+echo "==> Deploying SPA to ${install_root}/dashboard-next-dist"
+sudo rm -rf "${install_root}/dashboard-next-dist"
+sudo mkdir -p "$install_root"
+sudo cp -R dashboard-next/dist "${install_root}/dashboard-next-dist"
+
+echo "==> Deploying dashboard binary/source"
+sudo mkdir -p "${install_root}/dashboard"
+sudo cp dashboard/mae-dashboard "${install_root}/dashboard/mae-dashboard"
+sudo rsync -a --delete \
+  --exclude='mae-dashboard' \
+  --exclude='data' \
+  dashboard/ "${install_root}/dashboard/"
+
+if [[ -d "${install_root}/dashboard/migrations" ]]; then
+  echo "==> Running migrations"
+  for f in "${install_root}"/dashboard/migrations/*.sql; do
+    [[ -e "$f" ]] || continue
+    PGPASSWORD="${MAE_DB_PASSWORD:-mae}" psql -h "${MAE_DB_HOST:-localhost}" -U "${MAE_DB_USER:-mae}" -d "${MAE_DB_NAME:-mae}" -f "$f" 2>/dev/null || true
+  done
+fi
+
+echo "==> Starting ${service_name}"
+sudo systemctl start "$service_name"
+
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  if curl -sf "$health_url" >/dev/null 2>&1; then
+    echo "Dashboard health OK: $health_url"
+    break
+  fi
+  if [[ "$i" == "10" ]]; then
+    echo "Dashboard failed health check: $health_url" >&2
+    sudo systemctl status "$service_name" --no-pager || true
+    exit 1
+  fi
+  sleep 2
+done
+
+status="$(curl -s -o /dev/null -w '%{http_code}' "$spa_url")"
+if [[ "$status" != "200" ]]; then
+  echo "SPA not serving from $spa_url (HTTP $status)" >&2
+  exit 1
+fi
+
+echo "SPA serving OK: $spa_url"
+echo "Dashboard deploy complete"

@@ -53,6 +53,8 @@ export function buildAgentsFromEvents(dbEvents: DBEvent[]): LiveAgent[] {
         if (typeof cost === "number") existing.cost_usd = cost;
         if (typeof tokens === "number") existing.tokens_used = tokens;
         existing.last_activity_at = (payload.timestamp as string) ?? evt.created_at ?? existing.last_activity_at;
+        if (typeof data.output_artifact === "string") existing.output_artifact = data.output_artifact;
+        if (typeof data.task_report === "string") existing.task_report = data.task_report;
         existing.current_activity = "done";
       }
     } else if (eventType === "cost_update") {
@@ -117,6 +119,8 @@ export function mergeAgents(pgAgents: LiveAgent[], eventAgents: LiveAgent[]): Li
         persona_path: a.persona_path ?? existing.persona_path,
         last_activity_at: a.last_activity_at ?? existing.last_activity_at,
         current_activity: a.current_activity ?? existing.current_activity,
+        output_artifact: a.output_artifact ?? existing.output_artifact,
+        task_report: a.task_report ?? existing.task_report,
         cost_usd: a.cost_usd > 0 ? a.cost_usd : existing.cost_usd,
         tokens_used: a.tokens_used > 0 ? a.tokens_used : existing.tokens_used,
         context_tokens: a.context_tokens > 0 ? a.context_tokens : existing.context_tokens,

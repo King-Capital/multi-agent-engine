@@ -50,6 +50,14 @@ const TIMEOUT_FOR_ROLE: Record<string, number> = {
   orchestrator: 0,
 };
 
+const READ_ONLY_TOOLS = new Set(["read", "grep", "glob"]);
+
+export function isReadOnlyDelegateOptions(opts: DelegateOptions): boolean {
+  const writes = opts.domain.write ?? [];
+  const updates = opts.domain.update ?? [];
+  return writes.length === 0 && updates.length === 0 && opts.tools.every((tool) => READ_ONLY_TOOLS.has(tool));
+}
+
 function isFailed(result: DelegateResult): boolean {
   if (result.grade === "FAILED") return true;
   if (!result.output.trim()) return true;
@@ -132,8 +140,9 @@ export async function delegateWithHealing(ctx: SelfHealContext): Promise<Delegat
     }
   }
 
-  // Attempt 1.5: Try deterministic autofix before burning tokens on retry
-  if (opts.workingDir) {
+  // Attempt 1.5: Try deterministic autofix before burning tokens on retry.
+  // Review-only/read-only runs must never mutate the worktree as part of self-healing.
+  if (opts.workingDir && !isReadOnlyDelegateOptions(opts)) {
     log.info("Attempting deterministic autofix", { workingDir: opts.workingDir });
     try {
       // Run common autofixers -- they either fix the issue or no-op harmlessly

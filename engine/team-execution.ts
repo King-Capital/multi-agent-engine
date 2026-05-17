@@ -29,6 +29,7 @@ import type {
   WorkerReview,
 } from "./types";
 import { buildStreamHandler, buildSendMessage } from "./stream-handler";
+import { buildWorkerSystemPromptAppend, isReviewOnlyStep, readOnlyTools } from "./review-mode";
 import type { OrchestratorLoop } from "./orchestrator-loop";
 import type { ConcurrencyLimiter } from "./concurrency";
 
@@ -245,7 +246,8 @@ export async function prepareTeamStep(
   const leadSystemPrompt = step.system_prompt_append
     ? buildSystemPrompt(leadPersona, "lead") + "\n\n" + step.system_prompt_append
     : buildSystemPrompt(leadPersona, "lead");
-  const leadTools = step.tools_override ?? leadPersona.tools;
+  const reviewOnly = isReviewOnlyStep(step);
+  const leadTools = reviewOnly ? readOnlyTools(step.tools_override ?? leadPersona.tools) : step.tools_override ?? leadPersona.tools;
 
   // Emit the prompt being sent to the lead
   await emitter.message(session.id, leadId, "Orchestrator", "user",
@@ -258,7 +260,7 @@ export async function prepareTeamStep(
     model: leadResolved.model,
     thinking: leadResolved.thinking,
     tools: leadTools,
-    domain: leadPersona.domain,
+    domain: reviewOnly ? { ...leadPersona.domain, write: [], update: [] } : leadPersona.domain,
     workingDir: session.workingDir,
     sessionDir: `data/sessions/${session.id}`,
     parentId: "orch-1",
@@ -313,7 +315,10 @@ export async function delegateToLead(
 
   // Early return if lead failed or no workers
   if (leadResult.grade === "FAILED" || !teamConfig.members.length) {
-    await emitter.agentDone(session.id, leadId, leadResult.grade, leadResult.costUsd);
+    await emitter.agentDone(session.id, leadId, leadResult.grade, leadResult.costUsd, {
+      outputArtifact: leadResult.outputArtifact,
+      taskReport: leadResult.taskReport,
+    });
     untrackActivity(leadId);
     const msg = leadResult.grade === "FAILED"
       ? `${teamConfig["team-name"]} lead could not complete the task.`
@@ -329,18 +334,7 @@ export async function delegateToLead(
 // 3. executeWorkers
 // ---------------------------------------------------------------------------
 
-export function buildWorkerSystemPromptAppend(stepAppend?: string): string {
-  if (!stepAppend) return "";
-  return stepAppend
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) =>
-      line.includes("REVIEW-ONLY MODE") ||
-      line.includes("Do not edit files") ||
-      line.includes("Use lightweight evidence commands"),
-    )
-    .join("\n");
-}
+export { buildWorkerSystemPromptAppend } from "./review-mode";
 
 export async function executeWorkers(
   deps: WorkerExecDeps,
@@ -353,9 +347,10 @@ export async function executeWorkers(
   adapter: PlatformAdapter,
 ): Promise<WorkerExecutionResult> {
   const { emitter, messageSenders, trackActivity, untrackActivity, trackToolCall } = deps;
+  const reviewOnly = isReviewOnlyStep(step);
 
   assertSessionActive(session, "worker spawn");
-  const useWorktrees = teamConfig.members.length > 1 && await isGitRepo(session.workingDir);
+  const useWorktrees = !reviewOnly && teamConfig.members.length > 1 && await isGitRepo(session.workingDir);
   const workerWtIds: string[] = [];
   const workerAssignments = new Map<string, string>();
 
@@ -417,8 +412,8 @@ export async function executeWorkers(
         userPrompt: workerPrompt,
         model: workerResolved.model,
         thinking: workerResolved.thinking,
-        tools: workerPersona.tools,
-        domain: workerPersona.domain,
+        tools: reviewOnly ? readOnlyTools(workerPersona.tools) : workerPersona.tools,
+        domain: reviewOnly ? { ...workerPersona.domain, write: [], update: [] } : workerPersona.domain,
         workingDir: workerDir,
         sessionDir: `data/sessions/${session.id}`,
         parentId: leadId,
@@ -460,7 +455,10 @@ export async function executeWorkers(
 
         const workerSummary = summarizeOutput(result.output, 1500);
         await emitter.message(session.id, workerId, member.name, "user", workerSummary);
-        await emitter.agentDone(session.id, workerId, result.grade, result.costUsd);
+        await emitter.agentDone(session.id, workerId, result.grade, result.costUsd, {
+          outputArtifact: result.outputArtifact,
+          taskReport: result.taskReport,
+        });
         untrackActivity(workerId);
 
         return result;
@@ -659,6 +657,10 @@ export async function leadReviewAndRetry(
 
     for (const review of needsWork) {
       if (review.directFix) {
+        if (isReviewOnlyStep(step)) {
+          log.warn("Ignoring DIRECT_FIX in review-only step", { worker: review.workerName, session_id: session.id });
+          review.directFix = undefined;
+        } else {
         log.info("Lead applying direct fix", { worker: review.workerName, session_id: session.id });
         await deps.emitter.message(session.id, leadId, teamConfig.lead.name, "user",
           `Applying direct fix for ${review.workerName}:\n${review.directFix.slice(0, 500)}`);
@@ -668,6 +670,7 @@ export async function leadReviewAndRetry(
           workerResults[idx]!.output += `\n\n--- Lead Direct Fix ---\n${review.directFix}`;
         }
         continue;
+        }
       }
 
       if (review.spawnSr && review.srDomains?.length) {
@@ -833,6 +836,7 @@ export function buildParallelTeamStep(step: ChainStep, teamStep: ParallelTeamSte
 
   return {
     team: teamStep.team,
+    read_only: teamStep.read_only ?? step.read_only,
     tools_override: teamStep.tools_override ?? step.tools_override,
     system_prompt_append: systemPromptAppend,
     till_done: teamStep.till_done ?? step.till_done,
@@ -867,7 +871,7 @@ export async function runParallelStep(
   const teams = step.parallel!;
   log.info("Running parallel teams", { team_count: teams.length, teams: teams.map((t) => t.team), session_id: session.id });
 
-  const useWorktrees = teams.length > 1 && await isGitRepo(session.workingDir);
+  const useWorktrees = teams.length > 1 && !teams.some((t) => isReviewOnlyStep(buildParallelTeamStep(step, t))) && await isGitRepo(session.workingDir);
   const teamWtIds: string[] = [];
 
   const teamSessions: SessionState[] = [];
@@ -975,7 +979,8 @@ export async function runParallelStep(
     "",
     teamOutputs,
     "",
-    "Produce a unified report:",
+    "Produce a unified report. If team outputs contain REVIEW_REPORT or SQUAD_REPORT schema blocks, preserve those raw blocks verbatim in a final MACHINE_READABLE_APPENDIX so deterministic gates can verify them.",
+    "",
     "1. **Agreements** — findings all teams agree on",
     "2. **Conflicts** — where teams disagree, resolve each with reasoning",
     "3. **Unique findings** — found by only one team, validate or dismiss",
@@ -1023,7 +1028,10 @@ export async function runParallelStep(
 
   const synthSummary = summarizeOutput(synthResult.output, 2000);
   await emitter.message(session.id, synthId, "Synthesis", "user", synthSummary);
-  await emitter.agentDone(session.id, synthId, synthResult.grade ?? "VERIFIED", synthResult.costUsd);
+  await emitter.agentDone(session.id, synthId, synthResult.grade ?? "VERIFIED", synthResult.costUsd, {
+    outputArtifact: synthResult.outputArtifact,
+    taskReport: synthResult.taskReport,
+  });
 
   return [
     ...results,

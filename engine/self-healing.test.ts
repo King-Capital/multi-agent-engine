@@ -1,5 +1,5 @@
 import { afterEach, describe, test, expect, mock } from "bun:test";
-import { delegateWithHealing } from "./self-healing";
+import { delegateWithHealing, isReadOnlyDelegateOptions } from "./self-healing";
 import type { PlatformAdapter, DelegateOptions, DelegateResult } from "./types";
 
 function makeFailed(output = "", grade = "FAILED"): DelegateResult {
@@ -45,6 +45,18 @@ function makeOpts(): DelegateOptions {
 const noopEvent = async () => {};
 
 describe("self-healing", () => {
+  test("classifies read-only delegate options mechanically", () => {
+    expect(isReadOnlyDelegateOptions(makeOpts())).toBe(true);
+    expect(isReadOnlyDelegateOptions({
+      ...makeOpts(),
+      tools: ["read", "bash"],
+    })).toBe(false);
+    expect(isReadOnlyDelegateOptions({
+      ...makeOpts(),
+      domain: { read: ["**/*"], write: ["src/**"], update: [] },
+    })).toBe(false);
+  });
+
   afterEach(() => {
     delete process.env.MAE_MODEL_UNAVAILABLE_FALLBACK;
   });

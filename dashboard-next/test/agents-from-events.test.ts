@@ -37,11 +37,15 @@ describe("buildAgentsFromEvents", () => {
         data: {
           grade: "VERIFIED",
           cost_usd: 0.02,
+          output_artifact: "s1/artifacts/orch.txt",
+          task_report: "s1/RALPH/orch.md",
         },
       }),
     ]);
 
     expect(agents[0]?.cost_usd).toBe(0.02);
     expect(agents[0]?.status).toBe("done");
+    expect(agents[0]?.output_artifact).toBe("s1/artifacts/orch.txt");
+    expect(agents[0]?.task_report).toBe("s1/RALPH/orch.md");
   });
 });

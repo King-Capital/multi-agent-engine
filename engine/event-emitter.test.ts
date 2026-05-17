@@ -356,9 +356,12 @@ describe("EventEmitter", () => {
       expect(body.context_tokens).toBe(500);
     });
 
-    test("agentDone includes grade", async () => {
+    test("agentDone includes grade and artifacts", async () => {
       const emitter = new EventEmitter("http://test:8400");
-      await emitter.agentDone("s1", "agent-1", "VERIFIED");
+      await emitter.agentDone("s1", "agent-1", "VERIFIED", 0.01, {
+        outputArtifact: "s1/artifacts/agent.txt",
+        taskReport: "s1/RALPH/agent.md",
+      });
 
       await new Promise((r) => setTimeout(r, 100));
 
@@ -366,6 +369,8 @@ describe("EventEmitter", () => {
       const body = JSON.parse(call!.init.body as string);
       expect(body.event_type).toBe("agent_done");
       expect(body.data.grade).toBe("VERIFIED");
+      expect(body.data.output_artifact).toBe("s1/artifacts/agent.txt");
+      expect(body.data.task_report).toBe("s1/RALPH/agent.md");
     });
   });
 });

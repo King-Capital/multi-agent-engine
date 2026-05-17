@@ -121,7 +121,9 @@ type EventData struct {
 	BlockReason   string `json:"block_reason,omitempty"`
 
 	// agent_done
-	Grade string `json:"grade,omitempty"`
+	Grade          string `json:"grade,omitempty"`
+	OutputArtifact string `json:"output_artifact,omitempty"`
+	TaskReport     string `json:"task_report,omitempty"`
 
 	// self_heal
 	FailedWorker string `json:"failed_worker,omitempty"`

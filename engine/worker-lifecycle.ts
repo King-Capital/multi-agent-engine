@@ -14,6 +14,7 @@ import { delegateWithHealing } from "./self-healing";
 import { summarizeOutput } from "./output-parsing";
 import { parseReviews } from "./output-parsing";
 import { buildStreamHandler, buildSendMessage } from "./stream-handler";
+import { buildWorkerSystemPromptAppend, isReviewOnlyStep, readOnlyTools } from "./review-mode";
 import type { EventEmitter } from "./event-emitter";
 import type { OrchestratorLoop } from "./orchestrator-loop";
 import type {
@@ -83,14 +84,18 @@ export async function retryWorker(
   await emitter.message(session.id, workerId, teamConfig.lead.name, "user",
     `📋 **Retry assignment to ${member.name} (attempt ${attempt}):**\n\n${retryUserPrompt.slice(0, 3000)}`);
 
+  const reviewOnly = isReviewOnlyStep(step);
+  const workerSystemPromptAppend = buildWorkerSystemPromptAppend(step.system_prompt_append);
   const workerOpts: DelegateOptions = {
     persona: workerPersona,
-    systemPrompt: buildSystemPrompt(workerPersona, "worker"),
+    systemPrompt: workerSystemPromptAppend
+      ? buildSystemPrompt(workerPersona, "worker") + "\n\n" + workerSystemPromptAppend
+      : buildSystemPrompt(workerPersona, "worker"),
     userPrompt: retryUserPrompt,
     model: retryResolved.model,
     thinking: retryResolved.thinking,
-    tools: workerPersona.tools,
-    domain: workerPersona.domain,
+    tools: reviewOnly ? readOnlyTools(workerPersona.tools) : workerPersona.tools,
+    domain: reviewOnly ? { ...workerPersona.domain, write: [], update: [] } : workerPersona.domain,
     workingDir: session.workingDir,
     sessionDir: `data/sessions/${session.id}`,
     parentId: leadId,
@@ -134,7 +139,10 @@ export async function retryWorker(
 
   const workerSummary = summarizeOutput(result.output, 1500);
   await emitter.message(session.id, workerId, member.name, "user", workerSummary);
-  await emitter.agentDone(session.id, workerId, result.grade, result.costUsd);
+  await emitter.agentDone(session.id, workerId, result.grade, result.costUsd, {
+    outputArtifact: result.outputArtifact,
+    taskReport: result.taskReport,
+  });
 
   return result;
 }
@@ -191,6 +199,7 @@ export async function spawnSenior(
   const mergedBody = memberPersonas.map(p => p.body ?? "").filter(Boolean).join("\n\n---\n\n");
 
   const srPreamble = loadPreamble("sr");
+  const reviewOnly = isReviewOnlyStep(step);
   const srSystemPrompt = [
     srPreamble,
     "",
@@ -206,6 +215,7 @@ export async function spawnSenior(
     `Write: ${mergedWrite.join(", ")}`,
     "",
     mergedExpertise ? `## Combined Expertise\n\n${mergedExpertise}` : "",
+    reviewOnly ? buildWorkerSystemPromptAppend(step.system_prompt_append) : "",
   ].filter(Boolean).join("\n");
 
   const srPrompt = [
@@ -234,8 +244,8 @@ export async function spawnSenior(
     userPrompt: srPrompt,
     model: srResolved.model,
     thinking: srResolved.thinking,
-    tools: mergedTools,
-    domain: { read: mergedRead, write: mergedWrite, update: mergedUpdate },
+    tools: reviewOnly ? readOnlyTools(mergedTools) : mergedTools,
+    domain: reviewOnly ? { read: mergedRead, write: [], update: [] } : { read: mergedRead, write: mergedWrite, update: mergedUpdate },
     workingDir: session.workingDir,
     sessionDir: `data/sessions/${session.id}`,
     parentId: leadId,
@@ -276,7 +286,10 @@ export async function spawnSenior(
 
   const srSummary = summarizeOutput(result.output, 2000);
   await emitter.message(session.id, srId, `Sr. (${domainNames.join("+")})`, "user", srSummary);
-  await emitter.agentDone(session.id, srId, result.grade, result.costUsd);
+  await emitter.agentDone(session.id, srId, result.grade, result.costUsd, {
+    outputArtifact: result.outputArtifact,
+    taskReport: result.taskReport,
+  });
 
   return result;
 }
