@@ -728,6 +728,17 @@ function AgentSectionBlock({ section }: { section: AgentSection }) {
 	);
 }
 
+function isSteerEvent(ev: LiveEvent): boolean {
+	if (ev.event_type !== "message") return false;
+	const from = String(ev.data?.from ?? ev.agent_id ?? "").toLowerCase();
+	return ev.agent_id === "user" || from === "user" || Boolean(ev.data?.ack_for);
+}
+
+function formatSteerPeer(ev: LiveEvent): string {
+	if (ev.data?.ack_for) return "orchestrator";
+	return String(ev.data?.to ?? "orchestrator");
+}
+
 function StreamTab({
 	sessionId,
 	liveEvents,
@@ -769,6 +780,11 @@ function StreamTab({
 		return allEvents.find((ev) => ev.event_type === "message" && ev.data?.ack_for === pendingAckId) ?? null;
 	}, [allEvents, pendingAckId]);
 
+	const steerEvents = React.useMemo(
+		() => allEvents.filter(isSteerEvent).slice(-8),
+		[allEvents],
+	);
+
 	// Skip non-visual events entirely
 	const SKIP_TYPES = new Set([
 		"cost_update",
@@ -786,7 +802,7 @@ function StreamTab({
 		const agentOrder: string[] = [];
 
 		for (const ev of allEvents) {
-			if (SKIP_TYPES.has(ev.event_type)) continue;
+			if (SKIP_TYPES.has(ev.event_type) || isSteerEvent(ev)) continue;
 
 			const key = agentKey(ev);
 			if (!agentMap.has(key)) {
@@ -915,6 +931,22 @@ function StreamTab({
 			</div>
 			<div className="border-t border-zinc-800 p-3 space-y-2">
 				{sendError && <p className="text-xs text-red-400">{sendError}</p>}
+				{steerEvents.length > 0 && (
+					<div className="max-h-32 space-y-1 overflow-y-auto rounded-lg border border-cyan-500/20 bg-cyan-950/10 p-2">
+						<div className="text-[10px] font-semibold uppercase tracking-wide text-cyan-400/80">
+							Steer conversation
+						</div>
+						{steerEvents.map((ev) => (
+							<div key={`${ev.timestamp}-${ev.agent_id}-${ev.data?.message_id ?? ev.data?.ack_for ?? ev.data?.content}`} className="text-xs leading-snug">
+								<span className={cn("font-semibold", ev.agent_id === "user" || ev.data?.from === "user" ? "text-cyan-300" : "text-emerald-300")}>
+									{ev.agent_id === "user" || ev.data?.from === "user" ? "You" : String(ev.data?.from ?? ev.agent_id)}
+								</span>
+								<span className="text-zinc-600"> → {formatSteerPeer(ev)}: </span>
+								<span className="text-zinc-300">{String(ev.data?.content ?? ev.data?.ack_for ?? "ack")}</span>
+							</div>
+						))}
+					</div>
+				)}
 				{pendingAckId && (
 					<p className={cn("text-xs", ackEvent ? "text-emerald-400" : "text-zinc-500")}>
 						{ackEvent ? "Orchestrator ACK received" : "Steer sent; waiting for Orchestrator ACK"}
