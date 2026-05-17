@@ -61,16 +61,22 @@ export class EchoAdapter implements PlatformAdapter {
       "Build verification passed",
       "Validation complete",
       "Correctness squad logic errors type safety edge cases API contracts verified",
+      "Correctness reviewer verified logic type runtime safety and regressions",
       "Adversarial squad assumptions broken failure modes implicit coupling identified",
+      "Adversarial reviewer challenged assumptions and failure modes",
       "Quality squad SOLID violations anti-patterns duplication dead code assessed",
+      "Quality reviewer assessed maintainability simplicity and test quality",
       "Security squad OWASP injection SSRF path traversal credential handling checked",
+      "Security reviewer checked auth injection SSRF secrets and unsafe operations",
       "Domain squad architectural fit framework conventions integration correctness reviewed",
+      "Domain reviewer checked repo-specific business and operational correctness",
       "SQUAD_REPORT: Correctness SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
       "SQUAD_REPORT: Adversarial SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
       "SQUAD_REPORT: Quality SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
       "SQUAD_REPORT: Security SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
       "SQUAD_REPORT: Domain SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
       "Orchestrator synthesizes across all squads",
+      "Orchestrator synthesizes conflicting findings",
     ].join(". ");
 
     const result: DelegateResult = {

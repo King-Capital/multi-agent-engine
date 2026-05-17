@@ -7,6 +7,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -96,8 +97,14 @@ func main() {
 	} else {
 		dbEnabled = true
 		ctx := context.Background()
+		if err := EnsureAuthSchema(ctx); err != nil {
+			log.Printf("WARNING: failed to set up auth schema: %v", err)
+		}
+		if err := EnsureBootstrapPassword(ctx); err != nil {
+			log.Printf("WARNING: failed to apply bootstrap auth password: %v", err)
+		}
 		if err := EnsureAuthTokens(ctx); err != nil {
-			log.Printf("WARNING: failed to set up auth tokens: %v", err)
+			log.Printf("WARNING: failed to set up legacy auth tokens: %v", err)
 		}
 		if m, err := LoadTokenMap(ctx); err != nil {
 			log.Printf("WARNING: failed to load token map: %v", err)
@@ -190,6 +197,9 @@ func main() {
 								agentID = aid
 							}
 						}
+						if agentID == "" {
+							continue
+						}
 						name, _ := data["agent_name"].(string)
 						role, _ := data["agent_role"].(string)
 						model, _ := data["model"].(string)
@@ -200,8 +210,36 @@ func main() {
 							ID: agentID, Name: name, Role: models.AgentRole(role),
 							Model: model, TeamName: teamName, TeamColor: teamColor,
 							ParentID:  parentID,
-							Status:    models.StatusDone,
+							Status:    models.StatusRunning,
 							StartedAt: evt.CreatedAt,
+						}
+
+					case "agent_done":
+						agentID := ""
+						if evt.AgentID != nil {
+							agentID = *evt.AgentID
+						}
+						if agentID == "" {
+							if aid, ok := payload["agent_id"].(string); ok {
+								agentID = aid
+							}
+						}
+						if a, ok := sess.Agents[agentID]; ok {
+							a.Status = models.StatusDone
+						}
+
+					case "error":
+						agentID := ""
+						if evt.AgentID != nil {
+							agentID = *evt.AgentID
+						}
+						if agentID == "" {
+							if aid, ok := payload["agent_id"].(string); ok {
+								agentID = aid
+							}
+						}
+						if a, ok := sess.Agents[agentID]; ok {
+							a.Status = models.StatusError
 						}
 
 					case "cost_update":
@@ -344,9 +382,17 @@ func main() {
 		r.Get("/users", handleAPIGetUsers)
 		r.Get("/pg/history", handleAPISessionHistory)
 		r.Get("/pg/stats", handleAPIStats)
+		r.Post("/auth/login", handleAuthLogin)
+		r.Post("/auth/logout", handleAuthLogout)
+		r.Get("/auth/me", handleAuthMe)
+		r.Get("/admin/tokens", handleAdminListTokens)
+		r.Post("/admin/tokens", handleAdminCreateToken)
+		r.Delete("/admin/tokens/{id}", handleAdminRevokeToken)
+
 		r.Route("/pg/sessions", func(r chi.Router) {
 			r.Get("/", handleAPIGetSessions)
 			r.Post("/", handleAPICreateSession)
+			r.Get("/{id}", handleAPIGetSession)
 			r.Patch("/{id}", handleAPIPatchSession)
 			r.Get("/{id}/agents", handleAPIGetAgents)
 			r.Get("/{id}/events", handleAPIGetSessionEvents)
@@ -406,15 +452,18 @@ func init() {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		for _, allowed := range allowedOrigins {
-			if origin == allowed {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-				break
+		if len(allowedOrigins) > 0 {
+			for _, allowed := range allowedOrigins {
+				if origin == allowed {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Access-Control-Allow-Credentials", "true")
+					break
+				}
 			}
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Vary", "Origin")
+		w.Header().Add("Vary", "Origin")
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -438,38 +487,25 @@ func authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		path := r.URL.Path
-		isAPI := strings.HasPrefix(path, "/api/")
-		isReadOnly := r.Method == "GET" || r.Method == "HEAD"
-		isPublicReadAPI := path == "/api/health" || path == "/api/users" || strings.HasSuffix(path, "/stream") || strings.HasPrefix(path, "/api/sessions/")
-		isUIPage := !isAPI
-
-		// Allow unauthenticated read-only UI/session views. Mutating API routes,
-		// including dashboard steering (/message), require bearer auth by default.
-		if isReadOnly && (isUIPage || isPublicReadAPI) {
+		if isPublicPath(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		// Fail closed: if no tokens loaded (DB offline), reject auth-required requests
-		if len(tokenMap) == 0 {
+		user, err := authenticateRequest(r)
+		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
-			http.Error(w, `{"error":"auth unavailable - database offline"}`, http.StatusServiceUnavailable)
+			http.Error(w, `{"error":"auth failed"}`, http.StatusInternalServerError)
 			return
 		}
-
-		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") {
+		if user == nil {
 			w.Header().Set("Content-Type", "application/json")
 			http.Error(w, `{"error":"authorization required"}`, http.StatusUnauthorized)
 			return
 		}
-		token := strings.TrimPrefix(auth, "Bearer ")
-
-		user, ok := tokenMap[token]
-		if !ok {
+		if requiresCSRFCheck(r) && !hasValidRequestOrigin(r) {
 			w.Header().Set("Content-Type", "application/json")
-			http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+			http.Error(w, `{"error":"valid origin required"}`, http.StatusForbidden)
 			return
 		}
 
@@ -481,6 +517,42 @@ func authMiddleware(next http.Handler) http.Handler {
 func getAuthUser(r *http.Request) *DBUser {
 	u, _ := r.Context().Value(userContextKey).(*DBUser)
 	return u
+}
+
+func requiresCSRFCheck(r *http.Request) bool {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+		return false
+	}
+	return !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ")
+}
+
+func hasValidRequestOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin != "" {
+		return originAllowedForRequest(r, origin)
+	}
+	referer := r.Header.Get("Referer")
+	if referer == "" {
+		return false
+	}
+	return originAllowedForRequest(r, referer)
+}
+
+func originAllowedForRequest(r *http.Request, raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	if strings.EqualFold(parsed.Host, r.Host) {
+		return true
+	}
+	for _, allowed := range allowedOrigins {
+		allowedURL, err := url.Parse(allowed)
+		if err == nil && strings.EqualFold(allowedURL.Scheme, parsed.Scheme) && strings.EqualFold(allowedURL.Host, parsed.Host) {
+			return true
+		}
+	}
+	return false
 }
 
 // --- Rate Limiting ---

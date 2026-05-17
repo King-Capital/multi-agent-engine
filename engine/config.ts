@@ -31,13 +31,14 @@ function looksLikeMaeRoot(path: string): boolean {
 }
 
 function resolveBaseDir(): string {
+  if (looksLikeMaeRoot(process.cwd())) return process.cwd();
   if (process.env.MAE_ROOT) return process.env.MAE_ROOT;
 
   const candidates = [
+    process.cwd(),
     join(import.meta.dir, ".."),
     import.meta.dir,
     HOME_MAE_DIR,
-    process.cwd(),
   ].filter((path): path is string => Boolean(path));
 
   for (const candidate of candidates) {
@@ -145,9 +146,49 @@ export function loadPreamble(role: AgentRole, personaName?: string): string {
   return existsSync(p) ? readFileSync(p, "utf-8").trim() : "";
 }
 
+interface ProjectSkill {
+  name: string;
+  scope: string;
+  content: string;
+}
+
+export function loadProjectSkills(root = BASE_DIR): ProjectSkill[] {
+  const dirs = [join(root, ".mae", "skills"), join(root, ".mae", "project-skills")];
+  const skills: ProjectSkill[] = [];
+  for (const dir of dirs) {
+    if (!existsSync(dir)) continue;
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".md") || f.endsWith(".yaml") || f.endsWith(".yml")).sort().slice(0, 20)) {
+      const fullPath = join(dir, file);
+      let raw: string;
+      try {
+        raw = readFileSync(fullPath, "utf-8").slice(0, 20_000);
+      } catch {
+        continue;
+      }
+      const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+      if (fmMatch) {
+        const meta = parseYaml(fmMatch[1]!) as { name?: string; scope?: string; content?: string };
+        skills.push({ name: meta.name ?? file, scope: meta.scope ?? "all", content: (meta.content ?? fmMatch[2] ?? "").trim() });
+      } else {
+        skills.push({ name: file.replace(/\.(md|ya?ml)$/i, ""), scope: "all", content: raw.trim() });
+      }
+    }
+  }
+  return skills.filter((skill) => skill.content !== "");
+}
+
+function projectSkillApplies(skill: ProjectSkill, persona: PersonaConfig, role?: AgentRole): boolean {
+  const scope = skill.scope.toLowerCase();
+  return scope === "all" || scope === persona.name.toLowerCase() || scope === role || persona.name.toLowerCase().includes(scope);
+}
+
 export function buildSystemPrompt(persona: PersonaConfig, role?: AgentRole): string {
   const preamble = role ? loadPreamble(role, persona.name) : "";
   const skills = persona.skills.map((s) => loadSkill(resolveSkillPath(s))).join("\n\n---\n\n");
+  const projectSkills = loadProjectSkills(process.cwd())
+    .filter((skill) => projectSkillApplies(skill, persona, role))
+    .map((skill) => `### ${skill.name}\nScope: ${skill.scope}\n\n${skill.content}`)
+    .join("\n\n---\n\n");
   let expertise = loadExpertise(persona.expertise);
   if (persona.max_expertise_lines && expertise) {
     const lines = expertise.split("\n");
@@ -173,6 +214,8 @@ export function buildSystemPrompt(persona: PersonaConfig, role?: AgentRole): str
     "## Skills",
     "",
     skills,
+    "",
+    projectSkills ? `## Project Skills\n\n${projectSkills}` : "",
     "",
     expertise ? `## Expertise\n\n${expertise}` : "",
   ]
@@ -253,6 +296,15 @@ export function resolveModel(alias: string): string {
   return alias;
 }
 
+function applyModelOverride(
+  config: ModelRoutingConfig,
+  model: string,
+  thinking: ThinkingLevel,
+): { model: string; thinking: ThinkingLevel } {
+  const override = config.modelOverrides?.[model];
+  return { model, thinking: override?.thinking ?? thinking };
+}
+
 export function resolveModelForRole(
   role: AgentRole,
   preferredAlias?: string,
@@ -261,20 +313,20 @@ export function resolveModelForRole(
   const roleDefault = config.roleDefaults?.[role];
 
   if (!roleDefault) {
-    return { model: resolveModel(preferredAlias ?? "main"), thinking: "medium" };
+    return applyModelOverride(config, resolveModel(preferredAlias ?? "main"), "medium");
   }
 
   const tier = config.tiers?.[roleDefault.tier];
   if (!tier) {
-    return { model: resolveModel(preferredAlias ?? "main"), thinking: roleDefault.thinking };
+    return applyModelOverride(config, resolveModel(preferredAlias ?? "main"), roleDefault.thinking);
   }
 
   if (preferredAlias) {
     const resolved = resolveModel(preferredAlias);
-    return { model: resolved, thinking: roleDefault.thinking };
+    return applyModelOverride(config, resolved, roleDefault.thinking);
   }
 
-  return { model: tier.default, thinking: roleDefault.thinking };
+  return applyModelOverride(config, tier.default, roleDefault.thinking);
 }
 
 // --- Cross-Model Pair Enforcement ---

@@ -28,17 +28,21 @@ interface ResizablePanelProps {
 	className?: string;
 }
 
-function readStoredWidth(key: string, fallback: number): number {
+function clampWidth(width: number, minWidth: number, maxWidth: number): number {
+	return Math.max(minWidth, Math.min(maxWidth, width));
+}
+
+function readStoredWidth(key: string, fallback: number, minWidth: number, maxWidth: number): number {
 	try {
 		const v = localStorage.getItem(key);
 		if (v !== null) {
 			const n = parseInt(v, 10);
-			if (!isNaN(n) && n > 0) return n;
+			if (!isNaN(n) && n > 0) return clampWidth(n, minWidth, maxWidth);
 		}
 	} catch {
 		// SSR / localStorage unavailable
 	}
-	return fallback;
+	return clampWidth(fallback, minWidth, maxWidth);
 }
 
 function readStoredCollapsed(key: string): boolean {
@@ -58,13 +62,17 @@ export function ResizablePanel({
 	className,
 }: ResizablePanelProps) {
 	const [width, setWidth] = React.useState(() =>
-		readStoredWidth(storageKey, defaultWidth),
+		readStoredWidth(storageKey, defaultWidth, minWidth, maxWidth),
 	);
 	const [collapsed, setCollapsed] = React.useState(() =>
 		readStoredCollapsed(storageKey),
 	);
 	const [dragging, setDragging] = React.useState(false);
 	const panelRef = React.useRef<HTMLDivElement>(null);
+
+	React.useEffect(() => {
+		setWidth((current) => clampWidth(current, minWidth, maxWidth));
+	}, [minWidth, maxWidth]);
 
 	// Persist width
 	React.useEffect(() => {
@@ -88,11 +96,7 @@ export function ResizablePanel({
 			const startW = width;
 
 			const onMove = (ev: MouseEvent) => {
-				const newW = Math.max(
-					minWidth,
-					Math.min(maxWidth, startW + ev.clientX - startX),
-				);
-				setWidth(newW);
+				setWidth(clampWidth(startW + ev.clientX - startX, minWidth, maxWidth));
 			};
 
 			const onUp = () => {

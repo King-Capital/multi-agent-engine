@@ -29,6 +29,7 @@ const (
 	EventAgentDone    EventType = "agent_done"
 	EventMessage      EventType = "message"
 	EventToolCall     EventType = "tool_call"
+	EventToolResult   EventType = "tool_result"
 	EventTillDone     EventType = "tilldone"
 	EventCostUpdate   EventType = "cost_update"
 	EventDomainBlock  EventType = "domain_block"
@@ -71,6 +72,7 @@ type TillDoneState struct {
 }
 
 type Event struct {
+	SSEID         int64     `json:"sse_id,omitempty"`
 	SessionID     string    `json:"session_id"`
 	AgentID       string    `json:"agent_id"`
 	ParentID      string    `json:"parent_id,omitempty"`

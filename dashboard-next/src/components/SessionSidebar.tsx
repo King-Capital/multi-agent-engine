@@ -15,7 +15,7 @@ import * as React from "react";
 import { Zap } from "lucide-react";
 import { apiFetch, api } from "@/lib/api";
 import type { DBSession, DBUser } from "@/lib/types";
-import { cn, formatCurrency, shortId, statusColor } from "@/lib/utils";
+import { cn, formatCurrency, formatNumber, shortId, statusColor } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -121,6 +121,20 @@ function saveUser(u: string) {
 	} catch {}
 }
 
+function loadSearch(): string {
+	try {
+		return localStorage.getItem("mae-session-search") ?? "";
+	} catch {
+		return "";
+	}
+}
+
+function saveSearch(search: string) {
+	try {
+		localStorage.setItem("mae-session-search", search);
+	} catch {}
+}
+
 // ─── Status matching ──────────────────────────────────────────────────────────
 
 function matchesFilter(status: string, filters: Set<StatusFilter>): boolean {
@@ -136,24 +150,34 @@ function matchesFilter(status: string, filters: Set<StatusFilter>): boolean {
 
 interface SessionSidebarProps {
 	sessions: DBSession[];
+	totalSessions?: number;
+	selectedUser: string;
+	onUserChange: (username: string) => void;
 	selectedId?: string;
 	onSelect: (id: string) => void;
 	/** Double-click to open session detail view */
 	onDoubleClick?: (id: string) => void;
+	onLoadMore?: () => void;
+	hasMore?: boolean;
 	loading: boolean;
 	error: string | null;
 }
 
 export function SessionSidebar({
 	sessions,
+	totalSessions,
+	selectedUser,
+	onUserChange,
 	selectedId,
 	onSelect,
 	onDoubleClick,
+	onLoadMore,
+	hasMore,
 	loading,
 	error,
 }: SessionSidebarProps) {
 	const [users, setUsers] = React.useState<DBUser[]>([]);
-	const [selectedUser, setSelectedUser] = React.useState(() => loadUser());
+	const [search, setSearch] = React.useState(() => loadSearch());
 	const [filters, setFilters] = React.useState<Set<StatusFilter>>(() =>
 		loadFilters(),
 	);
@@ -207,22 +231,34 @@ export function SessionSidebar({
 
 	function handleUserChange(e: React.ChangeEvent<HTMLSelectElement>) {
 		const v = e.target.value;
-		setSelectedUser(v);
+		onUserChange(v);
 		saveUser(v);
+	}
+
+	function handleSearchChange(e: React.ChangeEvent<HTMLInputElement>) {
+		const v = e.target.value;
+		setSearch(v);
+		saveSearch(v);
 	}
 
 	// Filter + sort sessions
 	const visible = React.useMemo(() => {
 		let list = sessions.filter((s) => matchesFilter(s.status, filters));
 
-		// User filter
-		if (selectedUser) {
-			list = list.filter((s) => {
-				// Match by user_id or check if name contains username
-				const u = users.find((u) => u.username === selectedUser);
-				if (u && s.user_id != null) return s.user_id === u.id;
-				return true; // No user_id set — show anyway
-			});
+		const normalizedSearch = search.trim().toLowerCase();
+		if (normalizedSearch) {
+			list = list.filter((s) =>
+				[
+					s.name,
+					s.id,
+					s.chain ?? "",
+					s.status,
+					s.platform,
+				]
+					.join(" ")
+					.toLowerCase()
+					.includes(normalizedSearch),
+			);
 		}
 
 		// Sort
@@ -257,7 +293,7 @@ export function SessionSidebar({
 		}
 
 		return sorted;
-	}, [sessions, filters, sort, selectedUser, users, costMap]);
+	}, [sessions, filters, sort, costMap, search]);
 
 	return (
 		<div className="flex h-full w-full flex-col">
@@ -310,9 +346,9 @@ export function SessionSidebar({
 					})}
 				</div>
 
-				{/* Sort + count */}
-				<div className="flex flex-wrap items-center justify-between gap-y-1">
-					<div className="flex items-center gap-1.5 min-w-0">
+				{/* Sort + text filter + count */}
+				<div className="flex flex-wrap items-center justify-between gap-2">
+					<div className="flex min-w-0 flex-1 items-center gap-1.5">
 						<span className="text-xs text-zinc-600">Sort:</span>
 						<select
 							value={sort}
@@ -324,9 +360,19 @@ export function SessionSidebar({
 							<option value="cost">Cost ↓</option>
 							<option value="tokens">Tokens ↓</option>
 						</select>
+						<input
+							value={search}
+							onChange={handleSearchChange}
+							placeholder="Filter…"
+							className="min-w-0 flex-1 rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-xs text-zinc-300 placeholder:text-zinc-600 focus:border-cyan-500/50 focus:outline-none"
+						/>
 					</div>
 					<span className="text-xs text-zinc-600">
-						{loading ? "Refreshing…" : `${visible.length} sessions`}
+						{loading
+							? "Refreshing…"
+							: totalSessions != null
+								? `${visible.length}/${sessions.length} shown of ${totalSessions}`
+								: `${visible.length} shown`}
 						{error && <span className="text-red-400 ml-1">· {error}</span>}
 					</span>
 				</div>
@@ -358,32 +404,36 @@ export function SessionSidebar({
 							<div className="mt-1 text-xs text-slate-500">
 								{shortId(s.id)} · {new Date(s.created_at).toLocaleString()}
 							</div>
-							<div className="mt-1.5 flex items-start justify-between gap-2">
-								<div className="flex min-w-0 flex-wrap items-center gap-1.5">
-									<Badge className={cn(statusColor(s.status), "text-[10px]")} variant="outline">
-										{s.status}
-									</Badge>
-									{s.chain && <Badge variant="secondary" className="max-w-[150px] truncate text-[10px]">{s.chain}</Badge>}
-								</div>
+							<div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5 overflow-hidden">
+								<Badge className={cn(statusColor(s.status), "text-[10px]")} variant="outline">
+									{s.status}
+								</Badge>
+								{s.chain && <Badge variant="secondary" className="max-w-[110px] truncate text-[10px]" title={s.chain}>{s.chain}</Badge>}
 								{(() => {
 									const info = costMap.get(s.id);
 									if (!info) {
 										return null;
 									}
 									return (
-										<div className="shrink-0 text-right font-mono text-[10px] leading-tight">
-											<div className="text-emerald-400">{formatCurrency(info.cost)}</div>
-											{info.tokens > 0 && (
-												<div className="text-cyan-400">
-													{(info.tokens / 1000).toFixed(0)}K tok
-												</div>
-											)}
-										</div>
+										<span className="inline-flex max-w-full flex-wrap items-center gap-x-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] leading-tight text-emerald-300" title={`${formatCurrency(info.cost)}${info.tokens > 0 ? ` · ${formatNumber(info.tokens)} tokens` : ""}`}>
+											<span>{formatCurrency(info.cost)}</span>
+											{info.tokens > 0 && <span className="text-cyan-300">{(info.tokens / 1000).toFixed(0)}K tok</span>}
+										</span>
 									);
 								})()}
 							</div>
 						</button>
 					))}
+					{hasMore && (
+						<button
+							type="button"
+							onClick={onLoadMore}
+							disabled={loading}
+							className="w-full rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-3 py-2 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-60"
+						>
+							{loading ? "Loading…" : `Load more sessions (${sessions.length}${totalSessions != null ? `/${totalSessions}` : ""})`}
+						</button>
+					)}
 				</div>
 			</ScrollArea>
 		</div>

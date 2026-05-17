@@ -23,7 +23,7 @@
 
 ## Release Status
 
-Current stable release: **v1.0.14**.
+Current stable release: **v1.0.15**.
 
 The `VERSION` file uses standard stable SemVer. The auto-version workflow resumes from this value and applies normal patch/minor/major bumps after merged PRs.
 
@@ -148,6 +148,8 @@ bun engine/cli.ts task "your task" --dashboard "$MAE_DASHBOARD_URL"
 
 Any host with `bun` can run agent teams and stream results to the central dashboard.
 
+Project-specific skills can be added under `.mae/skills/` or `.mae/project-skills/` as Markdown/YAML files. Optional frontmatter supports `name` and `scope`; `scope: all` applies to every agent, while a role or persona-name scope only injects into matching prompts.
+
 For dogfood/audit runs, `MAE_WORKTREE_CONTEXT_PATHS` accepts comma- or colon-separated relative paths. Each path is copied into worker git worktrees with symlinks skipped and size/file-count caps applied.
 
 ---
@@ -204,7 +206,7 @@ For dogfood/audit runs, `MAE_WORKTREE_CONTEXT_PATHS` accepts comma- or colon-sep
 
 ## 📊 Dashboard
 
-The real-time dashboard is a Go API server with an embedded **React SPA** from `dashboard-next/src/` and **SSE** for live updates. Legacy templ files remain in `dashboard/templates/` but are not the active UI.
+The real-time dashboard is a Go API server with an embedded **React SPA** from `dashboard-next/src/` and **SSE** for live updates. Session streams emit stable SSE `id:` values for persisted events and honor `Last-Event-ID` plus `?last_event_id=` replay, so browser reconnects catch up missed events. Legacy templ files remain in `dashboard/templates/` but are not the active UI.
 
 | Feature | Detail |
 |---------|--------|
@@ -214,6 +216,20 @@ The real-time dashboard is a Go API server with an embedded **React SPA** from `
 | Multi-host support | Multiple CLI hosts stream into one dashboard |
 
 **Access:** Set `MAE_DASHBOARD_URL` in `~/.mae/config` and open in your browser.
+
+### Dashboard authentication
+
+The dashboard protects all `/api/*`, `/htmx/*`, and `/metrics` endpoints by default. Public paths are limited to the SPA shell/assets, `/api/health`, and `/api/auth/login`.
+
+- Browser users sign in through the React login page. Successful login creates a Secure, HttpOnly `mae_session` cookie backed by the `auth_sessions` table. Run the dashboard behind HTTPS in deployed environments; plain-HTTP localhost browser login is not supported by the secure cookie.
+- API clients use `Authorization: Bearer <token>`. New admin-managed tokens live in `api_tokens`; legacy `users.api_token` values still load for compatibility.
+- Admin users can open `/admin` to create/revoke API tokens. Newly generated token secrets are shown once; store bootstrap credentials and generated operational tokens in Vaultwarden (for the public deployment, item: `MAE Dashboard bootstrap credentials - ai-agents.rodaddy.live`).
+- The Sessions sidebar loads the newest 100 sessions by default, with an explicit Load more control for older runs and a text Filter next to Sort. The main overview stats/charts remain all-session aggregates, so the sidebar count shows loaded/filtered rows while the center cards show global totals.
+- Session detail includes Stream, Agents, Board, Progress, Files, Cost, and Replay tabs. The Board tab derives Kanban-style cards from agent/till-done/error events; the Agents tab hydrates colors/models/status from event history plus live SSE so reloads preserve swarm state.
+- Steering messages can target the orchestrator or a selected agent. Targeted messages are stored in the message event `to` field and routed by exact agent id when the engine SSE listener receives them.
+- First-run bootstrap: set `MAE_BOOTSTRAP_USERNAME=<existing admin username>` and `MAE_BOOTSTRAP_PASSWORD=<temporary strong password>` before starting the dashboard. Startup sets that user's password only when `password_hash` is empty, so later restarts will not overwrite a rotated password. Remove the env vars after login and rotate/store the final password in Vaultwarden.
+- Legacy `users.api_token` bearer tokens still work for migration compatibility, but they are not visible in `/admin`, do not track `last_used_at`, and cannot be revoked there. Prefer creating replacement `api_tokens` from `/admin`, updating clients, then removing legacy tokens from `users.api_token`.
+- If the database is unavailable, auth-required endpoints fail closed instead of falling back to anonymous API access.
 
 ---
 

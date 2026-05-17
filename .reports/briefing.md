@@ -1,7 +1,7 @@
 # Multi-Agent Engine — Current State
 
 ## What Works
-- **Release state:** `main` is at `v1.0.14` with PR #260 FOSS scrub squash-merged (`dd0d5a4b`). All internal IPs scrubbed, git history clean of secrets.
+- **Release state:** `main` is at `v1.0.15`; PR #260 FOSS scrub was squash-merged (`dd0d5a4b`). All internal IPs scrubbed, git history clean of secrets.
 - **FOSS readiness:** Repo cleared for public visibility. Remaining Proxmox hostnames, agent persona names, and platform references reviewed and accepted.
 - **Installed hosts:** local wrapper and two remote hosts installed at `v1.0.4`; remote health is `HEALTHY`.
 - **Adapters:** `echo`, `pi`, and `a2a` available. A2A configured to MonkeyProof A2A endpoint.
@@ -24,7 +24,7 @@
 5. **Installer smoke tests:** test `mae update` from installed and symlinked wrappers.
 6. **a2a.ts file length:** still above 750-line threshold.
 
-## Version: v1.0.14
+## Version: v1.0.15
 ## Recent PRs: #259, #260
 
 ---

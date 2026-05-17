@@ -37,7 +37,8 @@ import {
 	YAxis,
 } from "recharts";
 import { api } from "@/lib/api";
-import type { DBSession } from "@/lib/types";
+import { loadCurrentUser, logout } from "@/lib/auth";
+import type { DBSession, DBUser } from "@/lib/types";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 import { usePolling } from "@/hooks/usePolling";
 import { SessionSSEProvider } from "@/hooks/useSessionSSE";
@@ -53,16 +54,19 @@ import { ResizablePanel } from "@/components/ResizablePanel";
 import { SessionSidebar } from "@/components/SessionSidebar";
 import { AgentTreePanel } from "@/components/AgentTreePanel";
 import { SessionTabs } from "@/components/SessionTabs";
+import { LoginPage } from "@/components/LoginPage";
+import { AdminTokenPanel } from "@/components/AdminTokenPanel";
 
 // ─── Stats panel (shown when no session selected) ────────────────────────────
 
-function StatsPanel() {
-	const { data, loading, error } = usePolling(
+function StatsPanel({ data }: { data?: Awaited<ReturnType<typeof api.stats>> }) {
+	const { data: fallbackData, loading, error } = usePolling(
 		(signal) => api.stats(signal),
 		15_000,
 		[],
 	);
-	if (loading)
+	const stats = data ?? fallbackData;
+	if (loading && !stats)
 		return (
 			<Card className="glass">
 				<CardContent className="p-5 text-sm text-slate-400">
@@ -70,7 +74,7 @@ function StatsPanel() {
 				</CardContent>
 			</Card>
 		);
-	if (error || !data)
+	if (error || !stats)
 		return (
 			<Card className="glass">
 				<CardContent className="p-5 text-sm text-red-300">
@@ -84,10 +88,10 @@ function StatsPanel() {
 			<div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
 				{(
 					[
-						["Sessions", formatNumber(data.total_sessions), Activity],
-						["Agents", formatNumber(data.total_agents), Users],
-						["Total Cost", formatCurrency(data.total_cost), CircleDollarSign],
-						["Events", formatNumber(data.total_events), Zap],
+						["Sessions", formatNumber(stats.total_sessions), Activity],
+						["Agents", formatNumber(stats.total_agents), Users],
+						["Total Cost", formatCurrency(stats.total_cost), CircleDollarSign],
+						["Events", formatNumber(stats.total_events), Zap],
 					] as const
 				).map(([label, value, Icon]) => (
 					<Card key={String(label)} className="glass">
@@ -110,11 +114,11 @@ function StatsPanel() {
 				<Card className="glass">
 					<CardHeader>
 						<CardTitle>Cost per day</CardTitle>
-						<CardDescription>Last 30 days</CardDescription>
+						<CardDescription>Last 30 days · all sessions</CardDescription>
 					</CardHeader>
 					<CardContent className="h-64">
 						<ResponsiveContainer>
-							<AreaChart data={data.cost_per_day}>
+							<AreaChart data={stats.cost_per_day}>
 								<defs>
 									<linearGradient id="cost" x1="0" y1="0" x2="0" y2="1">
 										<stop offset="5%" stopColor="#22d3ee" stopOpacity={0.5} />
@@ -144,11 +148,11 @@ function StatsPanel() {
 				<Card className="glass">
 					<CardHeader>
 						<CardTitle>Top chains</CardTitle>
-						<CardDescription>By total agent cost</CardDescription>
+						<CardDescription>By total agent cost · all sessions</CardDescription>
 					</CardHeader>
 					<CardContent className="h-64">
 						<ResponsiveContainer>
-							<BarChart data={data.top_chains}>
+							<BarChart data={stats.top_chains}>
 								<CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
 								<XAxis dataKey="chain" stroke="#64748b" fontSize={12} />
 								<YAxis stroke="#64748b" fontSize={12} />
@@ -196,18 +200,37 @@ function Detail({ session, selectedAgentId, onClearAgentFilter }: {
 
 function SessionListPage() {
 	const navigate = useNavigate();
+	const PAGE_SIZE = 100;
+	const [sessionLimit, setSessionLimit] = useState(PAGE_SIZE);
+	const [selectedUser, setSelectedUser] = useState(() => {
+		try {
+			return localStorage.getItem("mae-user") ?? "";
+		} catch {
+			return "";
+		}
+	});
 	const {
 		data: sessions,
-		loading,
-		error,
-	} = usePolling((signal) => api.sessions(signal), 5_000, []);
+		loading: sessionsLoading,
+		error: sessionsError,
+	} = usePolling(
+		(signal) => api.sessions(signal, { limit: sessionLimit, user: selectedUser }),
+		5_000,
+		[sessionLimit, selectedUser],
+	);
 	const { data: health } = usePolling(
 		(signal) => api.health(signal),
 		30_000,
 		[],
 	);
+	const { data: stats } = usePolling(
+		(signal) => api.stats(signal),
+		15_000,
+		[],
+	);
 	const [selectedId, setSelectedId] = useState<string>();
 	const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+	const [pinnedSession, setPinnedSession] = useState<DBSession | null>(null);
 
 	const handleSelect = useCallback((id: string) => {
 		setSelectedId(id);
@@ -221,24 +244,55 @@ function SessionListPage() {
 		[navigate],
 	);
 
-	const selected = (sessions ?? []).find((s) => s.id === selectedId);
+	const loadedSessions = sessions ?? [];
+	const loadedSelected = loadedSessions.find((s) => s.id === selectedId);
+	const selected = loadedSelected ?? (pinnedSession?.id === selectedId ? pinnedSession : undefined);
+
+	useEffect(() => {
+		if (!selectedId || loadedSelected) {
+			if (loadedSelected) setPinnedSession(loadedSelected);
+			return;
+		}
+		let cancelled = false;
+		api.session(selectedId)
+			.then((session) => {
+				if (!cancelled) setPinnedSession(session);
+			})
+			.catch(() => {
+				if (!cancelled) setPinnedSession(null);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [selectedId, loadedSelected]);
 
 	return (
 		<div className="flex h-screen overflow-hidden bg-grid">
 			{/* Left panel: Session sidebar */}
 			<ResizablePanel
 				storageKey="mae-sidebar-width"
-				minWidth={200}
-				maxWidth={500}
-				defaultWidth={288}
+				minWidth={300}
+				maxWidth={560}
+				defaultWidth={340}
 			>
 				<SessionSidebar
-					sessions={sessions ?? []}
+					sessions={loadedSessions}
+					totalSessions={selectedUser ? undefined : stats?.total_sessions}
+					selectedUser={selectedUser}
+					onUserChange={(user) => {
+						setSelectedUser(user);
+						setSessionLimit(PAGE_SIZE);
+						setSelectedId(undefined);
+						setPinnedSession(null);
+						setSelectedAgentId(null);
+					}}
 					selectedId={selectedId}
 					onSelect={handleSelect}
 					onDoubleClick={handleDoubleClick}
-					loading={loading}
-					error={error}
+					onLoadMore={() => setSessionLimit((current) => current + PAGE_SIZE)}
+					hasMore={loadedSessions.length >= sessionLimit && (selectedUser !== "" || stats?.total_sessions == null || loadedSessions.length < stats.total_sessions)}
+					loading={sessionsLoading}
+					error={sessionsError}
 				/>
 			</ResizablePanel>
 
@@ -246,10 +300,10 @@ function SessionListPage() {
 			{selected ? (
 				<SessionSSEProvider sessionId={selected.id}>
 					<ResizablePanel
-						storageKey="mae-agent-panel-width"
-						minWidth={180}
-						maxWidth={360}
-						defaultWidth={240}
+						storageKey="mae-session-list-agent-panel-width"
+						minWidth={260}
+						maxWidth={420}
+						defaultWidth={300}
 					>
 						<AgentTreePanel
 							hideBack
@@ -277,7 +331,7 @@ function SessionListPage() {
 							</CardDescription>
 						</CardHeader>
 						<CardContent>
-							<StatsPanel />
+							<StatsPanel data={stats ?? undefined} />
 							<p className="mt-4 flex items-center gap-2 text-xs text-slate-500">
 								<HeartPulse size={14} />
 								API: {health?.status || "checking"} · DB:{" "}
@@ -361,10 +415,10 @@ function SessionDetailPage() {
 			<div className="flex h-screen overflow-hidden bg-grid">
 				{/* Left panel: Agent tree */}
 				<ResizablePanel
-					storageKey="mae-agent-panel-width"
-					minWidth={200}
+					storageKey="mae-session-detail-agent-panel-width"
+					minWidth={260}
 					maxWidth={500}
-					defaultWidth={288}
+					defaultWidth={320}
 				>
 					<AgentTreePanel
 						session={activeSession}
@@ -384,14 +438,44 @@ function SessionDetailPage() {
 
 // ─── Root App with Router ─────────────────────────────────────────────────────
 
-export default function App() {
+function AuthenticatedApp({ user, onLogout }: { user: DBUser; onLogout: () => void }) {
 	return (
-		<BrowserRouter>
-			<ErrorBoundary>
+		<>
+			<div className="fixed right-3 top-3 z-50 flex items-center gap-2 rounded-full border border-white/10 bg-black/50 px-3 py-1 text-xs text-zinc-300 backdrop-blur">
+				<span>{user.display_name}</span>
+				{user.role === "admin" ? <a className="text-cyan-300 hover:text-cyan-100" href="/admin">Admin</a> : null}
+				<button className="text-zinc-500 hover:text-zinc-200" onClick={onLogout}>Logout</button>
+			</div>
 			<Routes>
 				<Route path="/" element={<SessionListPage />} />
 				<Route path="/session/:id" element={<SessionDetailPage />} />
+				<Route path="/admin" element={<AdminTokenPanel currentUser={user} />} />
 			</Routes>
+		</>
+	);
+}
+
+export default function App() {
+	const [user, setUser] = React.useState<DBUser | null>(null);
+	const [loading, setLoading] = React.useState(true);
+
+	React.useEffect(() => {
+		loadCurrentUser().then(setUser).finally(() => setLoading(false));
+	}, []);
+
+	async function handleLogout() {
+		await logout().catch(() => undefined);
+		setUser(null);
+	}
+
+	if (loading) {
+		return <div className="min-h-screen bg-grid flex items-center justify-center text-zinc-400">Loading…</div>;
+	}
+
+	return (
+		<BrowserRouter>
+			<ErrorBoundary>
+				{user ? <AuthenticatedApp user={user} onLogout={handleLogout} /> : <LoginPage onLogin={setUser} />}
 			</ErrorBoundary>
 		</BrowserRouter>
 	);

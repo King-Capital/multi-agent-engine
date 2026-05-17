@@ -16,10 +16,11 @@ import { AgentDetail } from "./AgentDetail";
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
-const NODE_W = 164;
-const NODE_H = 74;
-const H_GAP = 32;
-const V_GAP = 68;
+const NODE_W = 196;
+const NODE_H = 86;
+const H_GAP = 56;
+const V_GAP = 104;
+const SIBLING_STAGGER_Y = 36;
 
 interface NodeLayout {
 	id: string;
@@ -91,12 +92,13 @@ function layoutTree(
 		return Math.max(NODE_W, w);
 	}
 
-	function place(id: string, left: number, depth: number) {
+	function place(id: string, left: number, depth: number, siblingIndex = 0) {
 		const kids = children.get(id) ?? [];
 		const sw = subtreeWidth(id);
+		const stagger = depth > 0 ? (siblingIndex % 3) * SIBLING_STAGGER_Y : 0;
 		positions.set(id, {
 			x: left + sw / 2 - NODE_W / 2,
-			y: depth * (NODE_H + V_GAP) + V_GAP,
+			y: depth * (NODE_H + V_GAP) + V_GAP + stagger,
 		});
 		let childLeft = left;
 		let prevTeam: string | null = null;
@@ -105,7 +107,7 @@ function layoutTree(
 			if (i > 0) {
 				childLeft += kidTeam !== prevTeam ? H_GAP + TEAM_GROUP_GAP : H_GAP;
 			}
-			place(kids[i], childLeft, depth + 1);
+			place(kids[i], childLeft, depth + 1, i);
 			childLeft += subtreeWidth(kids[i]);
 			prevTeam = kidTeam;
 		}
@@ -113,7 +115,7 @@ function layoutTree(
 
 	let left = H_GAP;
 	for (const r of roots) {
-		place(r, left, 0);
+		place(r, left, 0, 0);
 		left += subtreeWidth(r) + H_GAP * 2;
 	}
 
@@ -262,11 +264,11 @@ function AgentNode({
 				y={y + 23}
 				textAnchor="middle"
 				fill="#f4f4f5"
-				fontSize={11}
+				fontSize={12.5}
 				fontWeight={600}
 				fontFamily="ui-monospace,monospace"
 			>
-				{agent.name.length > 20 ? `${agent.name.slice(0, 19)}…` : agent.name}
+				{agent.name.length > 24 ? `${agent.name.slice(0, 23)}…` : agent.name}
 			</text>
 			<rect
 				x={x + width / 2 - 28}
@@ -281,7 +283,7 @@ function AgentNode({
 				y={y + 38}
 				textAnchor="middle"
 				fill={teamColor}
-				fontSize={8.5}
+				fontSize={9.5}
 				fontWeight={700}
 				fontFamily="ui-monospace,monospace"
 				letterSpacing="0.05em"
@@ -292,18 +294,18 @@ function AgentNode({
 				x={x + width / 2}
 				y={y + 57}
 				textAnchor="middle"
-				fill="#71717a"
-				fontSize={8.5}
+				fill="#a1a1aa"
+				fontSize={9.5}
 				fontFamily="ui-sans-serif,system-ui,sans-serif"
 			>
-				{agent.model.length > 24 ? `${agent.model.slice(0, 23)}…` : agent.model}
+				{agent.model.length > 30 ? `${agent.model.slice(0, 29)}…` : agent.model}
 			</text>
 			<text
 				x={x + width - 7}
 				y={y + height - 6}
 				textAnchor="end"
 				fill="#22d3ee"
-				fontSize={8}
+				fontSize={9}
 				fontWeight={600}
 				fontFamily="ui-monospace,monospace"
 			>
@@ -341,7 +343,7 @@ function Edge({
 			fill="none"
 			stroke={validColor(color)}
 			strokeWidth={1.5}
-			strokeOpacity={0.45}
+			strokeOpacity={0.7}
 			markerEnd="url(#arrow)"
 		/>
 	);
@@ -357,6 +359,36 @@ function Edge({
  */
 
 // ─── Main Graph ───────────────────────────────────────────────────────────────
+
+function withVirtualOrchestrator(agents: LiveAgent[]): LiveAgent[] {
+	if (agents.length === 0 || agents.some((agent) => agent.id === "orch-1")) {
+		return agents;
+	}
+	const hasOrchestratorChildren = agents.some((agent) => agent.parent_id === "orch-1");
+	if (!hasOrchestratorChildren) return agents;
+	const hasActiveChildren = agents.some(
+		(agent) => agent.parent_id === "orch-1" && agent.status !== "done" && agent.status !== "error",
+	);
+	return [
+		{
+			id: "orch-1",
+			name: "Orchestrator",
+			role: "orchestrator",
+			model: "orchestrator",
+			team_name: "Orchestrator",
+			team_color: "#36f9f6",
+			status: hasActiveChildren ? "running" : "done",
+			cost_usd: 0,
+			tokens_used: 0,
+			context_tokens: 0,
+			context_max: 0,
+			started_at: agents[0]?.started_at ?? new Date().toISOString(),
+			elapsed_ms: 0,
+			current_activity: hasActiveChildren ? "coordinating" : "done",
+		},
+		...agents,
+	];
+}
 
 interface AgentGraphProps {
 	sessionId: string;
@@ -441,9 +473,25 @@ export function AgentGraph({
 					started_at: event.timestamp ?? new Date().toISOString(),
 					elapsed_ms: 0,
 				};
-				setAgents((prev) =>
-					prev.some((a) => a.id === newAgent.id) ? prev : [...prev, newAgent],
-				);
+				setAgents((prev) => {
+					const existing = prev.find((a) => a.id === newAgent.id);
+					if (!existing) return [...prev, newAgent];
+					return prev.map((a) =>
+						a.id === newAgent.id
+							? {
+									...a,
+									name: newAgent.name,
+									role: newAgent.role,
+									model: newAgent.model && newAgent.model !== "unknown" ? newAgent.model : a.model,
+									team_name: newAgent.team_name || a.team_name,
+									team_color: newAgent.team_color || a.team_color,
+									parent_id: newAgent.parent_id ?? a.parent_id,
+									persona_path: newAgent.persona_path ?? a.persona_path,
+									status: newAgent.status,
+								}
+							: a,
+					);
+				});
 			} else if (event.event_type === "agent_done") {
 				setAgents((prev) =>
 					prev.map((a) =>
@@ -478,29 +526,32 @@ export function AgentGraph({
 		if (selectedAgentId !== undefined) setSelected(selectedAgentId ?? null);
 	}, [selectedAgentId]);
 
+	const graphAgents = React.useMemo(() => withVirtualOrchestrator(agents), [agents]);
+
 	const { nodes: layouts, teamGroups } = React.useMemo(
-		() => layoutTree(agents),
-		[agents],
+		() => layoutTree(graphAgents),
+		[graphAgents],
 	);
 	const agentById = React.useMemo(
-		() => new Map(agents.map((a) => [a.id, a])),
-		[agents],
+		() => new Map(graphAgents.map((a) => [a.id, a])),
+		[graphAgents],
 	);
 	const layoutById = React.useMemo(
 		() => new Map(layouts.map((l) => [l.id, l])),
 		[layouts],
 	);
 
-	const viewBox = React.useMemo(() => {
-		if (layouts.length === 0) return "0 0 800 300";
+	const svgSize = React.useMemo(() => {
+		if (layouts.length === 0) return { width: 800, height: 300 };
 		const maxX = Math.max(...layouts.map((l) => l.x + l.width));
 		const maxY = Math.max(...layouts.map((l) => l.y + l.height));
-		return `0 0 ${maxX + H_GAP * 2} ${maxY + V_GAP}`;
+		return { width: maxX + H_GAP * 2, height: maxY + V_GAP };
 	}, [layouts]);
+	const viewBox = `0 0 ${svgSize.width} ${svgSize.height}`;
 
 	const edges = React.useMemo(() => {
 		const result: { from: NodeLayout; to: NodeLayout; color: string }[] = [];
-		for (const agent of agents) {
+		for (const agent of graphAgents) {
 			if (agent.parent_id) {
 				const from = layoutById.get(agent.parent_id);
 				const to = layoutById.get(agent.id);
@@ -515,7 +566,7 @@ export function AgentGraph({
 			}
 		}
 		return result;
-	}, [agents, agentById, layoutById]);
+	}, [graphAgents, agentById, layoutById]);
 
 	const handleNodeClick = (agent: LiveAgent) => {
 		const next = selected === agent.id ? null : agent.id;
@@ -535,7 +586,7 @@ export function AgentGraph({
 	};
 
 	const countByStatus = (status: string) =>
-		agents.filter((a) => a.status === status).length;
+		graphAgents.filter((a) => a.status === status).length;
 
 	const dotColorClass = (status: string) => {
 		if (status === "running") return "bg-cyan-400";
@@ -601,7 +652,12 @@ export function AgentGraph({
 					)}
 				</div>
 
-				<svg viewBox={viewBox} className="w-full" style={{ minHeight: 200 }}>
+				<svg
+					viewBox={viewBox}
+					width={svgSize.width}
+					height={svgSize.height}
+					style={{ minWidth: svgSize.width, minHeight: 260 }}
+				>
 					<defs>
 						<marker
 							id="arrow"
@@ -631,7 +687,7 @@ export function AgentGraph({
 
 					{/* Team group backgrounds */}
 					{teamGroups.map((tg) => (
-						<g key={`team-${tg.team_name}`}>
+						<g key={`team-${tg.team_name}-${tg.x}-${tg.y}`}>
 							<rect
 								x={tg.x}
 								y={tg.y}
@@ -659,7 +715,7 @@ export function AgentGraph({
 					{edges.map(({ from, to, color }, i) => (
 						<Edge key={i} from={from} to={to} color={color} />
 					))}
-					{agents.map((agent) => {
+					{graphAgents.map((agent) => {
 						const layout = layoutById.get(agent.id);
 						if (!layout) return null;
 						const dimmed =
@@ -680,12 +736,12 @@ export function AgentGraph({
 				{/* Legend */}
 				<div className="flex flex-wrap items-center gap-4 border-t border-zinc-800 px-4 py-2.5 text-xs text-zinc-500">
 					<span className="ml-auto flex gap-3">
-						<span>{agents.length} agents</span>
+						<span>{graphAgents.length} agents</span>
 						<span className="text-cyan-400">
-							{formatCurrency(agents.reduce((s, a) => s + a.cost_usd, 0))}
+							{formatCurrency(graphAgents.reduce((s, a) => s + a.cost_usd, 0))}
 						</span>
 						<span>
-							{formatNumber(agents.reduce((s, a) => s + a.tokens_used, 0))} tok
+							{formatNumber(graphAgents.reduce((s, a) => s + a.tokens_used, 0))} tok
 						</span>
 					</span>
 				</div>

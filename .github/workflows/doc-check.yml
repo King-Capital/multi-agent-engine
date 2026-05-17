@@ -5,6 +5,9 @@ on:
     paths:
       - 'engine/**'
       - 'dashboard/**'
+      - 'dashboard-next/src/**'
+      - 'docs/**'
+      - '.github/workflows/doc-check.yml'
 
 permissions:
   contents: read
@@ -12,4 +15,90 @@ permissions:
 
 jobs:
   check-docs:
-    uses: King-Capital/king-capital/.github/workflows/doc-check.yml@main
+    runs-on: [self-hosted, king-capital]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Check docs/api/ exists
+        id: has-docs
+        run: |
+          if [ -d "docs/api" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::docs/api/ directory not found — skipping doc check"
+          fi
+
+      - name: Find changed source modules
+        if: steps.has-docs.outputs.exists == 'true'
+        id: changed
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+
+          CHANGED_SOURCE=$(git diff --name-only "$BASE"..."$HEAD" -- \
+            'engine/**/*.ts' \
+            'dashboard-next/src/**/*.ts' \
+            'dashboard-next/src/**/*.tsx' \
+            'dashboard/**/*.go' \
+            | grep -v '__tests__' \
+            | grep -v '\.test\.' \
+            | grep -v '\.spec\.' \
+            || true)
+
+          if [ -z "$CHANGED_SOURCE" ]; then
+            echo "modules=" >> "$GITHUB_OUTPUT"
+            echo "No source files changed"
+            exit 0
+          fi
+
+          MODULES=$(echo "$CHANGED_SOURCE" \
+            | sed -n \
+              -e 's|^engine/\([^/]*\).*|engine-\1|p' \
+              -e 's|^dashboard-next/src/\([^/]*\)/.*|dashboard-next-\1|p' \
+              -e 's|^dashboard/\([^/]*\).*|dashboard-\1|p' \
+            | sort -u \
+            | tr '\n' ' ')
+
+          echo "modules=$MODULES" >> "$GITHUB_OUTPUT"
+          echo "Changed modules: $MODULES"
+
+      - name: Check docs updated for changed modules
+        if: steps.has-docs.outputs.exists == 'true' && steps.changed.outputs.modules != ''
+        id: verify
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+
+          CHANGED_DOCS=$(git diff --name-only "$BASE"..."$HEAD" -- 'docs/api/*.md' 'docs/internals/*.md' 'README.md' || true)
+
+          if [ -z "$CHANGED_DOCS" ]; then
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+            MSG="Documentation not updated for changed modules: ${{ steps.changed.outputs.modules }}"
+            echo "$MSG"
+            echo "message=$MSG" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=passed" >> "$GITHUB_OUTPUT"
+            echo "Docs changed: $CHANGED_DOCS"
+          fi
+
+      - name: Comment on PR if docs missing
+        if: steps.verify.outputs.status == 'failed'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const body = `### Documentation Check Failed\n\n${{ steps.verify.outputs.message }}\n\nUpdate docs/API, docs/internals, or README documentation for the changed dashboard/engine modules before merging.`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
+      - name: Fail if docs missing
+        if: steps.verify.outputs.status == 'failed'
+        run: |
+          echo "::error::Documentation not updated for changed source modules"
+          exit 1

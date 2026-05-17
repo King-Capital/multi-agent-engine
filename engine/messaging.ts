@@ -12,7 +12,19 @@ export function sendUserMessage(
   messageSenders: Map<string, (msg: string) => void>,
   sessionId: string,
   message: string,
+  targetAgentId?: string,
 ): void {
+  if (targetAgentId && targetAgentId !== "orchestrator") {
+    const sender = messageSenders.get(`${sessionId}:${targetAgentId}`);
+    if (sender) {
+      log.info("Targeted message to agent", { session_id: sessionId, agent: targetAgentId, preview: message.slice(0, 80) });
+      sender(message);
+      return;
+    }
+    log.warn("No active agent matching structured target", { session_id: sessionId, agent: targetAgentId });
+    return;
+  }
+
   if (message.startsWith("@")) {
     const prefix = `${sessionId}:`;
     // Match longest registered agent name from the @mention
@@ -87,19 +99,21 @@ export function broadcastControlMessage(
 export function listenForUserMessages(
   dashboardUrl: string,
   sessionId: string,
-  onMessage: (sessionId: string, content: string, messageId?: string) => void,
+  onMessage: (sessionId: string, content: string, messageId?: string, targetAgentId?: string) => void,
 ): AbortController {
   const abort = new AbortController();
   if (dashboardUrl.trim() === "" || dashboardUrl === "off" || process.env.MAE_DISABLE_DASHBOARD === "1") {
     return abort;
   }
 
-  const url = `${dashboardUrl}/api/sessions/${sessionId}/stream`;
+  const baseUrl = `${dashboardUrl}/api/sessions/${sessionId}/stream`;
   const BASE_RETRY_MS = 3_000;
   const MAX_RETRY_MS = 60_000;
   let retryDelay = BASE_RETRY_MS;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let activeReader: { cancel: () => Promise<void> } | null = null;
+  let lastEventId: string | undefined;
+  const seenMessageIds = new Set<string>();
 
   abort.signal.addEventListener("abort", () => {
     if (retryTimer) {
@@ -120,13 +134,26 @@ export function listenForUserMessages(
 
   const connect = () => {
     if (abort.signal.aborted) return;
-    fetch(url, { signal: abort.signal }).then(async (res) => {
-      if (!res.ok || !res.body) return;
+    const apiToken = process.env.MAE_API_TOKEN;
+    const headers: Record<string, string> = {};
+    if (apiToken) headers.Authorization = `Bearer ${apiToken}`;
+    if (lastEventId) headers["Last-Event-ID"] = lastEventId;
+    const url = lastEventId ? `${baseUrl}?last_event_id=${encodeURIComponent(lastEventId)}` : baseUrl;
+    fetch(url, { signal: abort.signal, headers: Object.keys(headers).length > 0 ? headers : undefined }).then(async (res) => {
+      if (!res.ok || !res.body) {
+        if (!abort.signal.aborted) {
+          log.warn("SSE connection returned non-OK response, retrying", { session_id: sessionId, status: res.status, retry_delay_ms: retryDelay });
+          scheduleReconnect(retryDelay);
+          retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
+        }
+        return;
+      }
       const reader = res.body.getReader();
       activeReader = reader;
       const decoder = new TextDecoder();
       let buffer = "";
       let currentEvent = "";
+      let currentId = "";
 
       try {
         while (true) {
@@ -139,18 +166,26 @@ export function listenForUserMessages(
             const line = buffer.slice(0, lineEnd).trim();
             buffer = buffer.slice(lineEnd + 1);
 
-            if (line.startsWith("event:")) {
+            if (line.startsWith("id:")) {
+              currentId = line.slice(3).trim();
+            } else if (line.startsWith("event:")) {
               currentEvent = line.slice(6).trim();
             } else if (line.startsWith("data:") && currentEvent === "message") {
               try {
                 const evt = JSON.parse(line.slice(5));
                 if (evt.data?.from === "user" && evt.data?.content) {
+                  const messageId = typeof evt.data.message_id === "string" ? evt.data.message_id : undefined;
+                  const dedupeKey = messageId ?? `${currentId}:${evt.data.content}`;
+                  if (seenMessageIds.has(dedupeKey)) continue;
+                  seenMessageIds.add(dedupeKey);
                   log.info("User message received", { session_id: sessionId, preview: evt.data.content.slice(0, 80) });
-                  onMessage(sessionId, evt.data.content, evt.data.message_id);
+                  onMessage(sessionId, evt.data.content, messageId, evt.data.to);
                 }
               } catch { /* not JSON */ }
             } else if (line === "") {
+              if (currentId) lastEventId = currentId;
               currentEvent = "";
+              currentId = "";
             }
           }
         }

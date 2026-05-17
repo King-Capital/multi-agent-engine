@@ -47,6 +47,33 @@ describe("chain-validator", () => {
     expect(JSON.stringify(tillDone)).toContain("VERDICT");
   });
 
+  test("swarm-review maps to five visible role leads with worker authority", () => {
+    const report = buildChainValidationReport("swarm-review", "Review PR #123");
+
+    expect(report.summary.steps).toBe(1);
+    expect(report.summary.teams).toBe(5);
+    expect(report.summary.leads).toBe(5);
+    expect(report.summary.workers).toBeGreaterThanOrEqual(15);
+    expect(report.steps[0]?.teams).toEqual([
+      "Correctness Review",
+      "Adversarial Review",
+      "Quality Review",
+      "Security Review",
+      "Domain Review",
+    ]);
+    const agentNames = report.steps[0]?.agents.map((agent) => agent.name) ?? [];
+    expect(agentNames).toContain("Correctness Lead");
+    expect(agentNames).toContain("Adversarial Lead");
+    expect(agentNames).toContain("Quality Lead");
+    expect(agentNames).toContain("Security Lead");
+    expect(agentNames).toContain("Domain Lead");
+    expect(agentNames).toContain("Correctness Logic Reviewer");
+    expect(agentNames).toContain("Assumption Breaker");
+    expect(agentNames).toContain("Maintainability Reviewer");
+    expect(agentNames).toContain("Auth Boundary Reviewer");
+    expect(agentNames).toContain("Domain Semantics Reviewer");
+  });
+
   test("plan-build-review includes deterministic verification without agent spawn", () => {
     const report = buildChainValidationReport("plan-build-review");
     const deterministic = report.steps.find((step) => step.mode === "deterministic");

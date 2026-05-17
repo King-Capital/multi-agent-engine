@@ -1,5 +1,12 @@
-import { describe, test, expect } from "bun:test";
-import { sendUserMessage, broadcastControlMessage } from "./messaging";
+import { afterEach, describe, test, expect, mock } from "bun:test";
+import { listenForUserMessages, sendUserMessage, broadcastControlMessage } from "./messaging";
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  delete process.env.MAE_API_TOKEN;
+});
 
 describe("steering commands (#147)", () => {
   describe("message routing", () => {
@@ -22,6 +29,17 @@ describe("steering commands (#147)", () => {
       expect(received["a2"]!.length).toBeGreaterThan(0);
     });
 
+    test("structured target routes to exact agent id", () => {
+      const received: Record<string, string[]> = { a1: [], a2: [] };
+      const senders = new Map<string, (msg: string) => void>();
+      senders.set("sess-1:agent-1", (msg) => received["a1"]!.push(msg));
+      senders.set("sess-1:agent-2", (msg) => received["a2"]!.push(msg));
+
+      sendUserMessage(senders, "sess-1", "check token expiry", "agent-2");
+      expect(received["a1"]).toEqual([]);
+      expect(received["a2"]).toEqual(["check token expiry"]);
+    });
+
     test("message to unknown session is a no-op", () => {
       const senders = new Map<string, (msg: string) => void>();
       senders.set("sess-1:agent-1", () => {});
@@ -42,6 +60,45 @@ describe("steering commands (#147)", () => {
       expect(received["a1"]).toEqual(["!stop"]);
       expect(received["a2"]).toEqual(["!stop"]);
       expect(received["other"]).toEqual([]);
+    });
+  });
+
+  describe("dashboard SSE listener", () => {
+    test("uses MAE_API_TOKEN when listening for dashboard user messages", async () => {
+      process.env.MAE_API_TOKEN = "mae_test_token";
+      const calls: RequestInit[] = [];
+      globalThis.fetch = mock(async (_input: string | URL | Request, init?: RequestInit) => {
+        calls.push(init ?? {});
+        return new Response(null, { status: 401 });
+      }) as unknown as typeof fetch;
+
+      const abort = listenForUserMessages("https://dashboard.example", "sess-1", () => {});
+      await Bun.sleep(10);
+      abort.abort();
+
+      expect(calls[0]?.headers).toEqual({ Authorization: "Bearer mae_test_token" });
+    });
+
+    test("tracks SSE ids and dedupes replayed user messages", async () => {
+      const calls: Array<{ input: string | URL | Request; init?: RequestInit }> = [];
+      const delivered: string[] = [];
+      let fetchCount = 0;
+      globalThis.fetch = mock(async (input: string | URL | Request, init?: RequestInit) => {
+        calls.push({ input, init });
+        fetchCount++;
+        if (fetchCount === 1) {
+          return new Response("id: 7\nevent: message\ndata: {\"data\":{\"from\":\"user\",\"content\":\"ping\",\"message_id\":\"m1\"}}\n\n");
+        }
+        return new Response("id: 7\nevent: message\ndata: {\"data\":{\"from\":\"user\",\"content\":\"ping\",\"message_id\":\"m1\"}}\n\n");
+      }) as unknown as typeof fetch;
+
+      const abort = listenForUserMessages("https://dashboard.example", "sess-1", (_sessionId, content) => delivered.push(content));
+      await Bun.sleep(3100);
+      abort.abort();
+
+      expect(delivered).toEqual(["ping"]);
+      expect(String(calls[1]?.input)).toContain("last_event_id=7");
+      expect(calls[1]?.init?.headers).toEqual({ "Last-Event-ID": "7" });
     });
   });
 

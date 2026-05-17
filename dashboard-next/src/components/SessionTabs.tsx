@@ -11,6 +11,7 @@ import {
 	Activity,
 	Bot,
 	CheckSquare,
+	Columns3,
 	DollarSign,
 	FolderOpen,
 	MessageSquare,
@@ -28,8 +29,10 @@ import { FilesView } from "@/components/FilesView";
 import { CostBreakdown } from "@/components/CostBreakdown";
 import { ReplayPlayer } from "@/components/ReplayPlayer";
 import { SessionStatusBar } from "@/components/SessionStatusBar";
+import { BoardTab } from "@/components/BoardTab";
 import { api } from "@/lib/api";
 import { buildAgentsFromEvents, mergeAgents } from "@/lib/agents-from-events";
+import { deriveSessionStatus, mergeSessionEvents } from "@/lib/session-events";
 import { usePolling } from "@/hooks/usePolling";
 import { useSessionSSE } from "@/hooks/useSessionSSE";
 import type { DBSession, DBEvent, LiveEvent } from "@/lib/types";
@@ -759,40 +762,7 @@ function StreamTab({
 		if (nearBottom && !autoFollow) setAutoFollow(true);
 	}, [autoFollow]);
 
-	const allEvents: LiveEvent[] = React.useMemo(() => {
-		const hist: LiveEvent[] = historyEvents.map((e) => {
-			const p = e.payload as LiveEvent | null;
-			return {
-				session_id: e.session_id,
-				agent_id: e.agent_id ?? "",
-				event_type: e.event_type,
-				timestamp: p?.timestamp ?? e.created_at,
-				data: p?.data,
-				cost_usd: p?.cost_usd,
-				tokens_used: p?.tokens_used,
-			};
-		});
-		const merged = [...hist, ...liveEvents];
-
-		// Dedup: events can appear twice (dashboard stores + engine echoes back)
-		const seen = new Set<string>();
-		return merged.filter((ev) => {
-			if (ev.event_type === "message") {
-				const content = ev.data?.content ?? "";
-				const key = `msg:${ev.agent_id}:${content.slice(0, 120)}`;
-				if (seen.has(key)) return false;
-				seen.add(key);
-				return true;
-			}
-			if (ev.event_type === "agent_spawn") {
-				const key = `spawn:${ev.agent_id}`;
-				if (seen.has(key)) return false;
-				seen.add(key);
-				return true;
-			}
-			return true;
-		});
-	}, [historyEvents, liveEvents]);
+	const allEvents: LiveEvent[] = React.useMemo(() => mergeSessionEvents(historyEvents, liveEvents), [historyEvents, liveEvents]);
 
 	const ackEvent = React.useMemo(() => {
 		if (!pendingAckId) return null;
@@ -888,18 +858,7 @@ function StreamTab({
 		return null;
 	}, [liveEvents]);
 
-	const sessionStatus = React.useMemo(() => {
-		if (latestSessionState?.data?.session_status) {
-			return latestSessionState.data.session_status as "active" | "paused" | "completed" | "error";
-		}
-		for (let i = liveEvents.length - 1; i >= 0; i--) {
-			const t = liveEvents[i]!.event_type;
-			if (t === "pause") return "paused" as const;
-			if (t === "resume") return "active" as const;
-			if (t === "session_end") return "completed" as const;
-		}
-		return "active" as const;
-	}, [liveEvents, latestSessionState]);
+	const sessionStatus = React.useMemo(() => deriveSessionStatus(allEvents, "active"), [allEvents]);
 
 	return (
 		<div className="flex flex-col h-full min-h-0">
@@ -993,7 +952,7 @@ function StreamTab({
 				<div className="flex gap-2">
 					<input
 						className="flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-						placeholder="Steer the orchestrator…"
+						placeholder={selectedAgentId ? `Message ${selectedAgentId}…` : "Steer the orchestrator…"}
 						value={message}
 						onChange={(e) => onMessageChange(e.target.value)}
 						onKeyDown={(e) => {
@@ -1080,6 +1039,9 @@ export function SessionTabs({
 	// Use shared SSE from context
 	const { events: liveEvents, error: streamError } = useSessionSSE();
 
+	const mergedEvents = React.useMemo(() => mergeSessionEvents(historyEvents, liveEvents), [historyEvents, liveEvents]);
+	const displayStatus = React.useMemo(() => deriveSessionStatus(mergedEvents, session.status), [mergedEvents, session.status]);
+
 	const totals = React.useMemo(() => {
 		const duration = session.completed_at
 			? new Date(session.completed_at).getTime() -
@@ -1092,7 +1054,7 @@ export function SessionTabs({
 		if (!message.trim()) return;
 		setSendError(null);
 		try {
-			const result = await api.sendMessage(session.id, message.trim());
+			const result = await api.sendMessage(session.id, message.trim(), { targetAgentId: selectedAgentId });
 			setPendingAckId(result.message_id);
 			setMessage("");
 		} catch (err) {
@@ -1112,8 +1074,8 @@ export function SessionTabs({
 							<h2 className="text-xl font-bold text-zinc-100 break-words">
 								{session.name}
 							</h2>
-							<Badge className={statusColor(session.status)} variant="outline">
-								{session.status}
+							<Badge className={statusColor(displayStatus)} variant="outline">
+								{displayStatus}
 							</Badge>
 							{session.chain && (
 								<Badge variant="secondary">{session.chain}</Badge>
@@ -1147,6 +1109,10 @@ export function SessionTabs({
 						<TabsTrigger value="agents">
 							<Bot className="w-3.5 h-3.5 mr-1.5" />
 							Agents
+						</TabsTrigger>
+						<TabsTrigger value="board">
+							<Columns3 className="w-3.5 h-3.5 mr-1.5" />
+							Board
 						</TabsTrigger>
 						<TabsTrigger value="tilldone">
 							<CheckSquare className="w-3.5 h-3.5 mr-1.5" />
@@ -1210,6 +1176,21 @@ export function SessionTabs({
 							</CardHeader>
 							<CardContent className="p-4">
 								<AgentGraph sessionId={session.id} events={historyEvents} />
+							</CardContent>
+						</Card>
+					</TabsContent>
+
+					{/* Board tab */}
+					<TabsContent value="board" className="flex-1 min-h-0">
+						<Card className="glass">
+							<CardHeader className="py-3 px-4 border-b border-white/5">
+								<CardTitle className="flex items-center gap-2 text-sm">
+									<Columns3 className="w-4 h-4 text-cyan-400" />
+									Board
+								</CardTitle>
+							</CardHeader>
+							<CardContent className="p-4">
+								<BoardTab session={session} historyEvents={historyEvents} liveEvents={liveEvents} />
 							</CardContent>
 						</Card>
 					</TabsContent>

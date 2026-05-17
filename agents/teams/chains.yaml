@@ -237,15 +237,21 @@ chains:
             verify: "synthesi[sz]e|SYNTHESIS|Synthesis|Orchestrator"
 
   swarm-review:
-    description: "Full review swarm: red team + blue team in parallel, orchestrator synthesizes"
+    description: "Canonical 5-role code review swarm: correctness, adversarial, quality, security, domain"
     steps:
       - parallel:
-          - team: Red Team
-          - team: Blue Team
+          - team: Correctness Review
+          - team: Adversarial Review
+          - team: Quality Review
+          - team: Security Review
+          - team: Domain Review
         till_done:
-          - "Red team adversarial + security review complete"
-          - "Blue team correctness + quality review complete"
-          - "All findings graded P0-P3"
+          - "Correctness reviewer verified logic, type/runtime safety, and regressions"
+          - "Adversarial reviewer challenged assumptions and failure modes"
+          - "Quality reviewer assessed maintainability, simplicity, and test quality"
+          - "Security reviewer checked auth, injection, SSRF, secrets, and unsafe operations"
+          - "Domain reviewer checked repo-specific business and operational correctness"
+          - "All findings graded P0-P3 with evidence"
           - "Orchestrator synthesizes conflicting findings"
 
   red-blue:
