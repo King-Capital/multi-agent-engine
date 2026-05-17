@@ -174,6 +174,7 @@ chains:
             verify: "SWARM_COORDINATION_READY|SME Squad Coverage Plan|Squad Assignments|SQUAD_COVERAGE_PLAN|Coverage Plan"
       - parallel:
           - team: Correctness Squad
+            read_only: true
             system_prompt_append: |
               Use the Arch Coordinator brief in the previous context as the coverage contract.
               REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
@@ -182,6 +183,7 @@ chains:
               Final response must be bounded and include exactly one schema block starting with SQUAD_REPORT: Correctness, plus SCOPE, COMMANDS_RUN, FINDINGS, BLOCKERS, and VERDICT.
               Synthesize all findings into a graded P0-P3 report. Track which files were covered.
           - team: Adversarial Squad
+            read_only: true
             system_prompt_append: |
               Use the Arch Coordinator brief in the previous context as the coverage contract.
               REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
@@ -190,6 +192,7 @@ chains:
               Final response must be bounded and include exactly one schema block starting with SQUAD_REPORT: Adversarial, plus SCOPE, COMMANDS_RUN, FINDINGS, BLOCKERS, and VERDICT.
               Synthesize into prioritized attack report with P0-P3 severity.
           - team: Quality Squad
+            read_only: true
             system_prompt_append: |
               Use the Arch Coordinator brief in the previous context as the coverage contract.
               REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
@@ -198,6 +201,7 @@ chains:
               Final response must be bounded and include exactly one schema block starting with SQUAD_REPORT: Quality, plus SCOPE, COMMANDS_RUN, FINDINGS, BLOCKERS, and VERDICT.
               Synthesize into actionable quality report with P0-P3 severity.
           - team: Security Squad
+            read_only: true
             system_prompt_append: |
               Use the Arch Coordinator brief in the previous context as the coverage contract.
               REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
@@ -206,6 +210,7 @@ chains:
               Final response must be bounded and include exactly one schema block starting with SQUAD_REPORT: Security, plus SCOPE, COMMANDS_RUN, FINDINGS, BLOCKERS, and VERDICT.
               Synthesize into security audit with P0-P3 + CWE codes.
           - team: Domain Squad
+            read_only: true
             system_prompt_append: |
               Use the Arch Coordinator brief in the previous context as the coverage contract.
               REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
@@ -241,26 +246,31 @@ chains:
     steps:
       - parallel:
           - team: Correctness Review
+            read_only: true
             system_prompt_append: |
               REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
               Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
               Final response must include exactly one schema block starting with REVIEW_REPORT: Correctness, plus SCOPE, COMMANDS_RUN, FINDINGS with P0/P1/P2/P3 severity markers, BLOCKERS, and VERDICT.
           - team: Adversarial Review
+            read_only: true
             system_prompt_append: |
               REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
               Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
               Final response must include exactly one schema block starting with REVIEW_REPORT: Adversarial, plus SCOPE, COMMANDS_RUN, FINDINGS with P0/P1/P2/P3 severity markers, BLOCKERS, and VERDICT.
           - team: Quality Review
+            read_only: true
             system_prompt_append: |
               REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
               Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
               Final response must include exactly one schema block starting with REVIEW_REPORT: Quality, plus SCOPE, COMMANDS_RUN, FINDINGS with P0/P1/P2/P3 severity markers, BLOCKERS, and VERDICT.
           - team: Security Review
+            read_only: true
             system_prompt_append: |
               REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
               Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
               Final response must include exactly one schema block starting with REVIEW_REPORT: Security, plus SCOPE, COMMANDS_RUN, FINDINGS with P0/P1/P2/P3 severity markers, BLOCKERS, and VERDICT.
           - team: Domain Review
+            read_only: true
             system_prompt_append: |
               REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
               Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.

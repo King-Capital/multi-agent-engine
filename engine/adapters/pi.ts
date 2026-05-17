@@ -7,6 +7,7 @@ import { redactSecrets, sanitizeAgentInput } from "../security";
 import { trackPromptVersion } from "../langfuse-prompts";
 import { withPiRepoContext } from "../pi-repo-context";
 import { writeAgentOutputArtifact } from "../trace-artifacts";
+import { writeTaskReport } from "../task-report";
 
 const log = createLogger("pi-adapter");
 
@@ -161,6 +162,7 @@ export class PiAdapter implements PlatformAdapter {
         if (resolved) return;
         resolved = true;
         const outputArtifact = writeAgentOutputArtifact(sessionId, agentId, result.output ?? "");
+        const taskReport = writeTaskReport(sessionId, agentId, opts, result);
         log.info("Agent completed", {
           trace_type: "agent.end",
           session_id: sessionId,
@@ -172,6 +174,7 @@ export class PiAdapter implements PlatformAdapter {
           tokens: result.tokensUsed,
           output_preview: sanitizeAgentInput(result.output ?? "").slice(0, 500),
           ...outputArtifact,
+          ...taskReport,
         });
         if (timer) clearTimeout(timer);
         if (abortHandler) opts.abortSignal?.removeEventListener("abort", abortHandler);

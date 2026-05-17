@@ -3,6 +3,7 @@ import { createLogger } from "../logger";
 import { sanitizeAgentInput } from "../security";
 import { trackPromptVersion } from "../langfuse-prompts";
 import { writeAgentOutputArtifact } from "../trace-artifacts";
+import { writeTaskReport } from "../task-report";
 
 const log = createLogger("echo-adapter");
 
@@ -114,6 +115,7 @@ export class EchoAdapter implements PlatformAdapter {
     });
 
     const outputArtifact = writeAgentOutputArtifact(sessionId, agentId, result.output);
+    const taskReport = writeTaskReport(sessionId, agentId, opts, result);
     log.info("Agent completed", {
       trace_type: "agent.end",
       session_id: sessionId,
@@ -125,6 +127,7 @@ export class EchoAdapter implements PlatformAdapter {
       tokens: result.tokensUsed,
       output_preview: sanitizeAgentInput(result.output).slice(0, 500),
       ...outputArtifact,
+      ...taskReport,
     });
 
     return result;

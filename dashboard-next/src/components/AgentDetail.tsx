@@ -273,6 +273,27 @@ export function AgentDetail({ agent, events = [], onClose }: AgentDetailProps) {
             </div>
           )}
 
+          {/* Artifacts */}
+          {(agent.task_report || agent.output_artifact) && (
+            <div>
+              <p className="text-[10px] text-zinc-600 mb-1 uppercase tracking-wider font-medium">Artifacts</p>
+              <div className="space-y-1">
+                {agent.task_report && (
+                  <div className="flex items-center gap-1.5 bg-zinc-950 rounded px-2 py-1.5 border border-emerald-900/60">
+                    <FileText className="w-3 h-3 text-emerald-400 shrink-0" />
+                    <span className="text-[11px] text-emerald-300 font-mono break-all">RALPH: {agent.task_report}</span>
+                  </div>
+                )}
+                {agent.output_artifact && (
+                  <div className="flex items-center gap-1.5 bg-zinc-950 rounded px-2 py-1.5 border border-zinc-800">
+                    <FileText className="w-3 h-3 text-zinc-500 shrink-0" />
+                    <span className="text-[11px] text-zinc-400 font-mono break-all">Output: {agent.output_artifact}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Persona path */}
           {agent.persona_path && (
             <div>

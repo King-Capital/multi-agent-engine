@@ -5,6 +5,10 @@ import { join } from "path";
 export const TRACE_DIR =
   process.env.MAE_TRACE_DIR ?? join(process.env.HOME ?? "/tmp", ".mae", "traces");
 
+export function getTraceDir(): string {
+  return process.env.MAE_TRACE_DIR ?? TRACE_DIR;
+}
+
 const MAX_AGENT_OUTPUT_CHARS = Number(process.env.MAE_AGENT_OUTPUT_ARTIFACT_CHARS ?? 20_000);
 
 function safeFilePart(value: string): string {
@@ -24,7 +28,7 @@ export function writeAgentOutputArtifact(sessionId: string, agentId: string, out
   const output_hash = createHash("sha256").update(bounded).digest("hex");
   const sessionPart = safeFilePart(sessionId);
   const agentPart = safeFilePart(agentId);
-  const artifactDir = join(TRACE_DIR, sessionPart, "artifacts");
+  const artifactDir = join(getTraceDir(), sessionPart, "artifacts");
   const artifactName = `${agentPart}-output-${output_hash.slice(0, 12)}.txt`;
   const artifactPath = join(artifactDir, artifactName);
 

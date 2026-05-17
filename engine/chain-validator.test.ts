@@ -36,6 +36,7 @@ describe("chain-validator", () => {
 
     expect(parallel?.length).toBe(5);
     for (const step of parallel ?? []) {
+      expect(step.read_only).toBe(true);
       expect(step.system_prompt_append).toContain("REVIEW-ONLY MODE");
       expect(step.system_prompt_append).toContain("Do not edit files");
       expect(step.system_prompt_append).toContain("SQUAD_REPORT:");
@@ -81,6 +82,7 @@ describe("chain-validator", () => {
 
     expect(parallel?.length).toBe(5);
     for (const step of parallel ?? []) {
+      expect(step.read_only).toBe(true);
       expect(step.system_prompt_append).toContain("REVIEW-ONLY MODE");
       expect(step.system_prompt_append).toContain("Do not edit files");
       expect(step.system_prompt_append).toContain("REVIEW_REPORT:");

@@ -111,6 +111,8 @@ export interface EventData {
   persona_path?: string;
   grade?: string;
   status?: AgentStatus;
+  output_artifact?: string;
+  task_report?: string;
 
   // message
   from?: string;
@@ -308,6 +310,8 @@ export interface LiveAgent {
   elapsed_ms: number;
   last_activity_at?: string;
   current_activity?: string;
+  output_artifact?: string;
+  task_report?: string;
 }
 
 // ─── Prometheus metrics ───────────────────────────────────────────────────────

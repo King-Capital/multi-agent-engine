@@ -108,6 +108,7 @@ export type TillDoneVerifyType = "output_match" | "deterministic" | "llm_verifie
 
 export interface ParallelTeamStep {
   team: string;
+  read_only?: boolean;
   tools_override?: string[];
   system_prompt_append?: string;
   till_done?: (string | { text: string; type: TillDoneVerifyType; verify?: string })[];
@@ -123,6 +124,7 @@ export interface ChainStep {
   team?: string;
   agent?: string;
   parallel?: ParallelTeamStep[];
+  read_only?: boolean;
   deterministic?: {
     command: string;
     on_failure?: "loop" | "fail" | "continue";
