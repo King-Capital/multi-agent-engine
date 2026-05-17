@@ -33,6 +33,23 @@ export function redactSecrets(input: string): string {
   return redacted;
 }
 
+export function redactUnknown<T>(value: T): T {
+  if (typeof value === "string") return redactSecrets(value) as T;
+  if (Array.isArray(value)) return value.map((item) => redactUnknown(item)) as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      if (/secret|token|password|api[_-]?key|authorization|credential/i.test(key)) {
+        out[key] = "[REDACTED_SECRET]";
+      } else {
+        out[key] = redactUnknown(item);
+      }
+    }
+    return out as T;
+  }
+  return value;
+}
+
 export function sanitizeAgentInput(input: string): string {
   let sanitized = redactSecrets(input);
   for (const pattern of INJECTION_PATTERNS) {

@@ -94,6 +94,7 @@ func (s *Store) loadSession(id string) error {
 }
 
 func (s *Store) Append(evt models.Event) error {
+	evt = models.RedactEvent(evt)
 	if evt.Timestamp.IsZero() {
 		evt.Timestamp = time.Now()
 	}
