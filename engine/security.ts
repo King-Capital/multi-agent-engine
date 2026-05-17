@@ -39,7 +39,7 @@ export function redactUnknown<T>(value: T): T {
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      if (/secret|token|password|api[_-]?key|authorization|credential/i.test(key)) {
+      if (/secret|token|password|api[_-]?key|authorization|credential/i.test(key) && typeof item === "string") {
         out[key] = "[REDACTED_SECRET]";
       } else {
         out[key] = redactUnknown(item);
