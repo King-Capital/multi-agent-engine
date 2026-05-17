@@ -15,16 +15,18 @@ const INJECTION_PATTERNS = [
 
 const SECRET_PATTERNS: RegExp[] = [
   /\b(Authorization\s*:\s*Bearer\s+)([A-Za-z0-9._~+\/-]+=*)/gi,
-  /\b((?:api[_-]?key|token|secret|password|passwd|pwd|access[_-]?token|refresh[_-]?token)\b\s*[:=]\s*)([^\s'\"`;,}]+)/gi,
+  /((?:api[_-]?key|token|secret|password|passwd|pwd|access[_-]?token|refresh[_-]?token)\b\s*[:=]\s*)([^\s'\"`;,}]+)/gi,
+  /("(?:api[_-]?key|token|secret|password|passwd|pwd|access[_-]?token|refresh[_-]?token)"\s*:\s*")([^"\\]*(?:\\.[^"\\]*)*)"/gi,
   /\b()(sk-[A-Za-z0-9]{16,})\b/g,
   /\b([A-Za-z0-9_]*KEY[A-Za-z0-9_]*\s*=\s*)([^\s'\"`;,}]+)/g,
+  /("[A-Za-z0-9_]*KEY[A-Za-z0-9_]*"\s*:\s*")([^"\\]*(?:\\.[^"\\]*)*)"/g,
 ];
 
 export function redactSecrets(input: string): string {
   let redacted = input;
   for (const pattern of SECRET_PATTERNS) {
     pattern.lastIndex = 0;
-    redacted = redacted.replace(pattern, (_match, prefix: string) => `${prefix}[REDACTED_SECRET]`);
+    redacted = redacted.replace(pattern, (_match, prefix: string) => `${prefix}[REDACTED_SECRET]${prefix.endsWith('"') ? '"' : ''}`);
   }
   return redacted;
 }

@@ -157,7 +157,8 @@ chains:
           Identify the files, components, and risk areas each SME squad must cover.
           Assign coverage for Correctness, Adversarial, Quality, Security, and Domain squads.
           Call out expected worker roles, any required deterministic checks, and gaps that need follow-up.
-          End with "SWARM_COORDINATION_READY" once the squad plan is complete.
+          Your final line MUST be exactly: SWARM_COORDINATION_READY
+          Do not put checklist syntax, bullets, or commentary after that final marker.
         till_done:
           - type: output_match
             text: "Arch coordinator produced the SME squad coverage plan"
