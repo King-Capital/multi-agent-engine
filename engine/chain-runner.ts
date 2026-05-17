@@ -183,7 +183,7 @@ export async function verifyTillDone(
         item.completed = true;
       } else {
         item.evidence = "Could not verify from output";
-        item.completed = true; // Don't block on LLM verification — mark as soft-verified
+        failures.push(`${item.description} (llm_verified: insufficient evidence)`);
       }
     }
   }
@@ -587,6 +587,9 @@ export async function runChain(
     });
     const stepStatus = !stepVerified || stepGrade === "FAILED" || stepGrade === "FEEDBACK" ? "failed" : "completed";
     log.info(`Step ${stepNumber} ${stepStatus}`, { trace_type: "chain.step.end", session_id: session.id, step: stepNumber, name: stepLabel, team: step.team, status: stepStatus, duration_ms: Date.now() - stepStartedAt });
+    if (stepStatus === "failed") {
+      throw new Error(`Chain step ${stepNumber} failed: ${stepLabel}`);
+    }
     } catch (err) {
       const duration_ms = Date.now() - stepStartedAt;
       const errorMsg = err instanceof Error ? err.message : String(err);

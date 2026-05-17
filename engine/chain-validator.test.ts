@@ -5,6 +5,7 @@ import {
   resolveValidateChainInput,
   suggestChainForGoal,
 } from "./chain-validator";
+import { loadChains } from "./config";
 
 describe("chain-validator", () => {
   test("standard-swarm exposes Arch coordinator plus all SME squads", () => {
@@ -23,9 +24,27 @@ describe("chain-validator", () => {
       "Security Squad",
       "Domain Squad",
     ]);
-    expect(output).toContain("SWARM_COORDINATION_READY");
+    expect(output).toContain("SWARM_COORDINATION_READY|SME Squad Coverage Plan|Squad Assignments|SQUAD_COVERAGE_PLAN|Coverage Plan");
     expect(output).toContain("Correctness Lead");
     expect(output).toContain("Security-Aware Domain Reviewer");
+  });
+
+  test("standard-swarm review squads are read-only and schema-gated", () => {
+    const chain = loadChains().chains["standard-swarm"];
+    const parallel = chain?.steps?.[1]?.parallel;
+    const tillDone = chain?.steps?.[1]?.till_done;
+
+    expect(parallel?.length).toBe(5);
+    for (const step of parallel ?? []) {
+      expect(step.system_prompt_append).toContain("REVIEW-ONLY MODE");
+      expect(step.system_prompt_append).toContain("Do not edit files");
+      expect(step.system_prompt_append).toContain("SQUAD_REPORT:");
+      expect(step.system_prompt_append).toContain("BLOCKERS");
+    }
+
+    expect(JSON.stringify(tillDone)).toContain("SQUAD_REPORT: Correctness");
+    expect(JSON.stringify(tillDone)).toContain("COMMANDS_RUN");
+    expect(JSON.stringify(tillDone)).toContain("VERDICT");
   });
 
   test("swarm-review maps to five visible role leads with worker authority", () => {
