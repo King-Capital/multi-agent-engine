@@ -358,27 +358,21 @@ export function SessionSidebar({
 							<div className="mt-1 text-xs text-slate-500">
 								{shortId(s.id)} · {new Date(s.created_at).toLocaleString()}
 							</div>
-							<div className="mt-1.5 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
-								<div className="flex min-w-0 flex-wrap items-center gap-1.5 overflow-hidden">
-									<Badge className={cn(statusColor(s.status), "text-[10px]")} variant="outline">
-										{s.status}
-									</Badge>
-									{s.chain && <Badge variant="secondary" className="max-w-[110px] truncate text-[10px]" title={s.chain}>{s.chain}</Badge>}
-								</div>
+							<div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5 overflow-hidden">
+								<Badge className={cn(statusColor(s.status), "text-[10px]")} variant="outline">
+									{s.status}
+								</Badge>
+								{s.chain && <Badge variant="secondary" className="max-w-[110px] truncate text-[10px]" title={s.chain}>{s.chain}</Badge>}
 								{(() => {
 									const info = costMap.get(s.id);
 									if (!info) {
 										return null;
 									}
 									return (
-										<div className="max-w-[70px] overflow-hidden text-right font-mono text-[10px] leading-tight">
-											<div className="truncate text-emerald-400" title={formatCurrency(info.cost)}>{formatCurrency(info.cost)}</div>
-											{info.tokens > 0 && (
-												<div className="truncate text-cyan-400" title={`${formatNumber(info.tokens)} tokens`}>
-													{(info.tokens / 1000).toFixed(0)}K tok
-												</div>
-											)}
-										</div>
+										<span className="inline-flex max-w-full flex-wrap items-center gap-x-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] leading-tight text-emerald-300" title={`${formatCurrency(info.cost)}${info.tokens > 0 ? ` · ${formatNumber(info.tokens)} tokens` : ""}`}>
+											<span>{formatCurrency(info.cost)}</span>
+											{info.tokens > 0 && <span className="text-cyan-300">{(info.tokens / 1000).toFixed(0)}K tok</span>}
+										</span>
 									);
 								})()}
 							</div>
