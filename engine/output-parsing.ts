@@ -1,3 +1,4 @@
+import { redactSecrets } from "./security";
 import type { DelegateResult, WorkerReview } from "./types";
 
 /**
@@ -64,10 +65,12 @@ export function parseReviews(reviewOutput: string, workerResults: DelegateResult
  */
 export function summarizeOutput(output: string, maxLen: number): string {
   if (!output || output.length === 0) return "(no output)";
+
+  const safeOutput = redactSecrets(output);
   // Try to extract a grade line if present
-  const gradeLine = output.match(/GRADE:\s*\w+.*/i)?.[0] ?? "";
+  const gradeLine = safeOutput.match(/GRADE:\s*\w+.*/i)?.[0] ?? "";
   // Try to extract findings
-  const findings = output.split("\n")
+  const findings = safeOutput.split("\n")
     .filter(l => /^\s*-\s*P[0-3]:/.test(l) || /^\s*\d+\./.test(l) || /^##\s/.test(l))
     .slice(0, 5)
     .join("\n");
@@ -78,7 +81,7 @@ export function summarizeOutput(output: string, maxLen: number): string {
   }
 
   // Fallback: first N chars
-  return output.length <= maxLen ? output : output.slice(0, maxLen) + "...";
+  return safeOutput.length <= maxLen ? safeOutput : safeOutput.slice(0, maxLen) + "...";
 }
 
 /**

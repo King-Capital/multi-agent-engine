@@ -228,6 +228,13 @@ describe("summarizeOutput", () => {
     expect(result).toContain("1. Fixed the bug");
     expect(result).toContain("2. Added tests");
   });
+
+  test("redacts secrets before dashboard summaries", () => {
+    const output = "## Findings\n- P1: leaked OPENAI_API_KEY=sk-supersecret1234567890 in logs";
+    const result = summarizeOutput(output, 1000);
+    expect(result).toContain("[REDACTED_SECRET]");
+    expect(result).not.toContain("sk-supersecret");
+  });
 });
 
 describe("worstGrade", () => {

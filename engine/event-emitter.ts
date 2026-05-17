@@ -1,9 +1,29 @@
 import type { SessionEvent, SessionStateEvent } from "./types";
 import type { BudgetProjection } from "./budget";
 import { createLogger } from "./logger";
+import { redactSecrets } from "./security";
 
 const log = createLogger("event-emitter");
 const RETRY_DELAYS = [100, 500, 2000];
+
+function isSecretKey(key: string): boolean {
+  return /(?:api[_-]?key|token|secret|password|passwd|pwd|access[_-]?token|refresh[_-]?token|authorization)/i.test(key);
+}
+
+function redactValue(value: unknown, key = ""): unknown {
+  if (typeof value === "string") return isSecretKey(key) ? "[REDACTED_SECRET]" : redactSecrets(value);
+  if (Array.isArray(value)) return value.map((nested) => redactValue(nested, key));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([nestedKey, nested]) => [nestedKey, redactValue(nested, nestedKey)]),
+    );
+  }
+  return value;
+}
+
+function redactRecord<T extends Record<string, unknown>>(record: T): T {
+  return redactValue(record) as T;
+}
 
 export class EventEmitter {
   private dashboardUrl: string;
@@ -64,6 +84,8 @@ export class EventEmitter {
   async emit(event: SessionEvent): Promise<void> {
     if (this.disabled) return;
 
+    event.data = redactRecord(event.data);
+
     if (!event.timestamp) {
       event.timestamp = new Date().toISOString();
     }
@@ -111,7 +133,7 @@ export class EventEmitter {
       data: {
         session_name: name,
         team_config: chain,
-        task_prompt: task,
+        task_prompt: redactSecrets(task),
       },
     });
   }
@@ -176,7 +198,7 @@ export class EventEmitter {
       agent_id: agentId,
       event_type: "message",
       timestamp: new Date().toISOString(),
-      data: { from, to, content, ...metadata },
+      data: { ...redactRecord(metadata), from, to, content: redactSecrets(content) },
     });
   }
 
@@ -194,7 +216,13 @@ export class EventEmitter {
       agent_id: agentId,
       event_type: "tool_call",
       timestamp: new Date().toISOString(),
-      data: { tool, file_path: filePath, tool_status: status, tool_args: toolArgs ?? "", tool_result: toolResult ?? "" },
+      data: {
+        tool,
+        file_path: filePath,
+        tool_status: status,
+        tool_args: redactSecrets(toolArgs ?? ""),
+        tool_result: redactSecrets(toolResult ?? ""),
+      },
     });
   }
 
@@ -364,12 +392,12 @@ export class EventEmitter {
       headers: this.authHeaders(),
       body: JSON.stringify({
         id: opts.id,
-        name: opts.name,
-        platform: opts.platform ?? "multi-agent-engine",
+        name: redactSecrets(opts.name),
+        platform: opts.platform ? redactSecrets(opts.platform) : "multi-agent-engine",
         user_id: opts.userId,
-        team: opts.team,
-        chain: opts.chain,
-        config: opts.config,
+        team: opts.team ? redactSecrets(opts.team) : undefined,
+        chain: opts.chain ? redactSecrets(opts.chain) : undefined,
+        config: opts.config ? redactRecord(opts.config) : undefined,
       }),
     });
     if (!res) log.error("Failed to create PG session after retries", { session_id: opts.id });
@@ -381,7 +409,7 @@ export class EventEmitter {
     const res = await this.fetchWithRetry(`${this.dashboardUrl}/api/pg/sessions/${sessionId}`, {
       method: "PATCH",
       headers: this.authHeaders(),
-      body: JSON.stringify(updates),
+      body: JSON.stringify(redactRecord(updates as Record<string, unknown>)),
     });
     if (!res) log.error("Failed to update PG session after retries", { session_id: sessionId });
   }
@@ -407,8 +435,8 @@ export class EventEmitter {
         persona: opts.persona,
         adapter: opts.adapter,
         status: "running",
-        prompt: opts.prompt,
-        config: opts.config,
+        prompt: opts.prompt ? redactSecrets(opts.prompt) : undefined,
+        config: opts.config ? redactRecord(opts.config) : undefined,
       }),
     });
     if (res?.ok) {
@@ -434,7 +462,7 @@ export class EventEmitter {
     const res = await this.fetchWithRetry(`${this.dashboardUrl}/api/pg/agents/${pgId}`, {
       method: "PATCH",
       headers: this.authHeaders(),
-      body: JSON.stringify(updates),
+      body: JSON.stringify(redactRecord(updates as Record<string, unknown>)),
     });
     if (!res) log.error("Failed to update PG agent after retries", { agent_id: agentId });
   }
@@ -449,8 +477,8 @@ export class EventEmitter {
         session_id: sessionId,
         agent_id: agentId,
         direction,
-        content,
-        metadata,
+        content: redactSecrets(content),
+        metadata: metadata ? redactRecord(metadata) : undefined,
       }),
     });
     if (!res) log.error("Failed to record trace", { agent_id: agentId, direction });
