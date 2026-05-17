@@ -127,4 +127,16 @@ describe("chain-validator", () => {
     expect(suggestion?.chain).toBe("plan-build-review");
     expect(suggestion?.score).toBe(0);
   });
+
+  test("warns when goals are too broad for micro-task discipline", () => {
+    const report = buildChainValidationReport(
+      "standard-swarm",
+      "build fix implement refactor migrate deploy review audit the api dashboard frontend backend database auth rbac ci cd deploy server worker agent adapter trace logger langfuse with a lot of extra requirements that should be split into multiple micro tasks before running a swarm",
+    );
+
+    expect(report.warnings.some((warning) => warning.includes("many action verbs"))).toBe(true);
+    expect(report.warnings.some((warning) => warning.includes("many subsystems"))).toBe(true);
+    expect(report.warnings.some((warning) => warning.includes("high fanout"))).toBe(true);
+    expect(formatChainValidationReport(report)).toContain("Warnings:");
+  });
 });

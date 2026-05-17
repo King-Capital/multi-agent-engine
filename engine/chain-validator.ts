@@ -46,6 +46,7 @@ export interface ChainValidationReport {
   description: string;
   goal?: string;
   suggestedChain?: { chain: string; reason: string; score: number };
+  warnings: string[];
   steps: ValidationStep[];
   summary: {
     steps: number;
@@ -228,6 +229,31 @@ function costForAgent(agent: ValidationAgent): { low: number; high: number; unkn
   return { low: mid * 0.5, high: mid * 2 };
 }
 
+function buildContractWarnings(steps: ValidationStep[], goal?: string): string[] {
+  const warnings: string[] = [];
+  const goalWords = goal?.split(/\s+/).filter(Boolean) ?? [];
+  const actionMatches = goal?.match(/\b(add|build|fix|implement|refactor|migrate|deploy|review|audit|test|document|create|update|harden|investigate)\b/gi) ?? [];
+  const systemsMatches = goal?.match(/\b(api|dashboard|frontend|backend|database|auth|rbac|ci|cd|deploy|server|worker|agent|adapter|trace|logger|langfuse)\b/gi) ?? [];
+
+  if (goalWords.length > 60) warnings.push("Goal is long; split into micro-tasks or a PRD/task ledger before spawning agents.");
+  if (actionMatches.length > 4) warnings.push("Goal contains many action verbs; split into <=30s micro-tasks with one owner each.");
+  if (new Set(systemsMatches.map((m) => m.toLowerCase())).size > 4) warnings.push("Goal spans many subsystems; use a scout/planning step to produce bounded task shards first.");
+
+  for (const step of steps) {
+    if (step.mode === "parallel" && (step.teams?.length ?? 0) > 4) {
+      warnings.push(`${step.title} has high fanout (${step.teams?.length ?? 0} teams); require bounded outputs and deterministic gates.`);
+    }
+    if (step.agents.length > 8) {
+      warnings.push(`${step.title} may spawn ${step.agents.length} agents; prefer micro-task sharding to avoid context/time blowups.`);
+    }
+    if (step.tillDone.some((item) => !item.includes("[output_match]") && !item.includes("[deterministic]")) && step.agents.length > 0) {
+      warnings.push(`${step.title} relies on soft till_done checks; add output_match or deterministic evidence where possible.`);
+    }
+  }
+
+  return [...new Set(warnings)];
+}
+
 function summarize(steps: ValidationStep[]): ChainValidationReport["summary"] {
   const agents = steps.flatMap((step) => step.agents);
   const models: Record<string, number> = {};
@@ -289,6 +315,7 @@ export function buildChainValidationReport(chainName: string, goal?: string): Ch
     chainName,
     description: chain.description,
     goal,
+    warnings: buildContractWarnings(steps, goal),
     steps,
     summary: summarize(steps),
   };
@@ -314,6 +341,10 @@ export function formatChainValidationReport(report: ChainValidationReport): stri
   if (report.goal) lines.push(`Goal: ${report.goal}`);
   if (report.suggestedChain) {
     lines.push(`Suggested chain: ${report.suggestedChain.chain} (score ${report.suggestedChain.score}) — ${report.suggestedChain.reason}`);
+  }
+  if (report.warnings.length > 0) {
+    lines.push("Warnings:");
+    for (const warning of report.warnings) lines.push(`  - ${warning}`);
   }
   lines.push("");
 
