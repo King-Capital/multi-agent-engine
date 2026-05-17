@@ -22,6 +22,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  tag-release-pr:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.title, 'chore(release):')
+    runs-on: [self-hosted, mae]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.GH_PAT || github.token }}
+
+      - name: Tag merged release PR
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Refusing to tag non-stable VERSION: $VERSION" >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin --tags
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "Tag v${VERSION} already exists"
+            exit 0
+          fi
+          git tag -a -m "v${VERSION}" "v${VERSION}"
+          git push origin "v${VERSION}"
+
   version-bump:
     if: >-
       github.event_name == 'workflow_dispatch' ||
