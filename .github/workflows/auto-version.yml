@@ -168,9 +168,8 @@ jobs:
           fi
 
           BODY_FILE="$(mktemp)"
-          cat > "$BODY_FILE" <<JSON
-{"base":"main","head":"${BRANCH}","title":"chore(release): v${VERSION}","body":"Automated version bump for v${VERSION}. Merge this PR to trigger the normal deploy workflows."}
-JSON
+          printf '{"base":"main","head":"%s","title":"chore(release): v%s","body":"Automated version bump for v%s. Merge this PR to trigger the normal deploy workflows."}\n' \
+            "$BRANCH" "$VERSION" "$VERSION" > "$BODY_FILE"
           curl -fsS \
             -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
