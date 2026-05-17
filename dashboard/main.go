@@ -392,6 +392,7 @@ func main() {
 		r.Route("/pg/sessions", func(r chi.Router) {
 			r.Get("/", handleAPIGetSessions)
 			r.Post("/", handleAPICreateSession)
+			r.Get("/{id}", handleAPIGetSession)
 			r.Patch("/{id}", handleAPIPatchSession)
 			r.Get("/{id}/agents", handleAPIGetAgents)
 			r.Get("/{id}/events", handleAPIGetSessionEvents)

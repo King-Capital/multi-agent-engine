@@ -174,16 +174,24 @@ func UpdateSession(ctx context.Context, id string, name *string, status *string)
 }
 
 func GetSessions(ctx context.Context) ([]DBSession, error) {
+	return GetSessionsPage(ctx, 100, 0)
+}
+
+func GetSessionsPage(ctx context.Context, limit int, offset int) ([]DBSession, error) {
 	return querySessions(ctx,
 		`SELECT id, user_id, name, platform, team, chain, status, COALESCE(config, 'null'::jsonb), created_at, updated_at, completed_at
-		 FROM sessions ORDER BY created_at DESC`)
+		 FROM sessions ORDER BY created_at DESC LIMIT $1 OFFSET $2`, limit, offset)
 }
 
 func GetSessionsByUser(ctx context.Context, username string) ([]DBSession, error) {
+	return GetSessionsByUserPage(ctx, username, 100, 0)
+}
+
+func GetSessionsByUserPage(ctx context.Context, username string, limit int, offset int) ([]DBSession, error) {
 	return querySessions(ctx,
 		`SELECT s.id, s.user_id, s.name, s.platform, s.team, s.chain, s.status, COALESCE(s.config, 'null'::jsonb), s.created_at, s.updated_at, s.completed_at
 		 FROM sessions s JOIN users u ON s.user_id = u.id
-		 WHERE u.username = $1 ORDER BY s.created_at DESC`, username)
+		 WHERE u.username = $1 ORDER BY s.created_at DESC LIMIT $2 OFFSET $3`, username, limit, offset)
 }
 
 func querySessions(ctx context.Context, query string, args ...interface{}) ([]DBSession, error) {

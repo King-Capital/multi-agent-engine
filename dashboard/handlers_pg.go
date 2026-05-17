@@ -44,13 +44,29 @@ func handleAPIGetSessions(w http.ResponseWriter, r *http.Request) {
 	if !requireDB(w) {
 		return
 	}
+	limit := 100
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+			if limit > 5000 {
+				limit = 5000
+			}
+		}
+	}
+	offset := 0
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if n, err := strconv.Atoi(o); err == nil && n > 0 {
+			offset = n
+		}
+	}
+
 	username := r.URL.Query().Get("user")
 	var sessions []DBSession
 	var err error
 	if username != "" {
-		sessions, err = GetSessionsByUser(r.Context(), username)
+		sessions, err = GetSessionsByUserPage(r.Context(), username, limit, offset)
 	} else {
-		sessions, err = GetSessions(r.Context())
+		sessions, err = GetSessionsPage(r.Context(), limit, offset)
 	}
 	if err != nil {
 		dbError(w, "query", err)
@@ -58,6 +74,24 @@ func handleAPIGetSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(sessions)
+}
+
+func handleAPIGetSession(w http.ResponseWriter, r *http.Request) {
+	if !requireDB(w) {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	sess, err := GetDBSession(r.Context(), id)
+	if err != nil {
+		dbError(w, "query", err)
+		return
+	}
+	if sess == nil {
+		http.Error(w, `{"error":"session not found"}`, http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(sess)
 }
 
 func handleAPICreateSession(w http.ResponseWriter, r *http.Request) {
