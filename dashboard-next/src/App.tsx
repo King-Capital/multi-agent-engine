@@ -249,7 +249,7 @@ function SessionListPage() {
 			{selected ? (
 				<SessionSSEProvider sessionId={selected.id}>
 					<ResizablePanel
-						storageKey="mae-agent-panel-width"
+						storageKey="mae-session-list-agent-panel-width"
 						minWidth={260}
 						maxWidth={420}
 						defaultWidth={300}
@@ -364,7 +364,7 @@ function SessionDetailPage() {
 			<div className="flex h-screen overflow-hidden bg-grid">
 				{/* Left panel: Agent tree */}
 				<ResizablePanel
-					storageKey="mae-agent-panel-width"
+					storageKey="mae-session-detail-agent-panel-width"
 					minWidth={260}
 					maxWidth={500}
 					defaultWidth={320}
