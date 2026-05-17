@@ -386,44 +386,47 @@ export function SessionSidebar({
 					</div>
 				)}
 				<div className="space-y-2 pt-2">
-					{visible.map((s) => (
-						<button
-							key={s.id}
-							onClick={() => onSelect(s.id)}
-							onDoubleClick={() => onDoubleClick?.(s.id)}
-							className={cn(
-								"w-full rounded-xl border p-3 text-left transition hover:bg-white/5",
-								selectedId === s.id
-									? "border-cyan-400/40 bg-cyan-400/10"
-									: "border-white/10 bg-white/[0.02]",
-							)}
-						>
-							<div className="truncate text-sm font-semibold text-zinc-200">
-								{s.name}
-							</div>
-							<div className="mt-1 text-xs text-slate-500">
-								{shortId(s.id)} · {new Date(s.created_at).toLocaleString()}
-							</div>
-							<div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5 overflow-hidden">
-								<Badge className={cn(statusColor(s.status), "text-[10px]")} variant="outline">
-									{s.status}
-								</Badge>
-								{s.chain && <Badge variant="secondary" className="max-w-[110px] truncate text-[10px]" title={s.chain}>{s.chain}</Badge>}
-								{(() => {
-									const info = costMap.get(s.id);
-									if (!info) {
-										return null;
-									}
-									return (
-										<span className="inline-flex max-w-full flex-wrap items-center gap-x-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] leading-tight text-emerald-300" title={`${formatCurrency(info.cost)}${info.tokens > 0 ? ` · ${formatNumber(info.tokens)} tokens` : ""}`}>
-											<span>{formatCurrency(info.cost)}</span>
-											{info.tokens > 0 && <span className="text-cyan-300">{(info.tokens / 1000).toFixed(0)}K tok</span>}
+					{visible.map((s) => {
+						const info = costMap.get(s.id);
+						return (
+							<button
+								key={s.id}
+								onClick={() => onSelect(s.id)}
+								onDoubleClick={() => onDoubleClick?.(s.id)}
+								className={cn(
+									"w-full min-w-0 rounded-xl border p-3 text-left transition hover:bg-white/5",
+									selectedId === s.id
+										? "border-cyan-400/40 bg-cyan-400/10"
+										: "border-white/10 bg-white/[0.02]",
+								)}
+							>
+								<div className="min-w-0 truncate text-sm font-semibold text-zinc-200">
+									{s.name}
+								</div>
+								<div className="mt-1 min-w-0 truncate text-xs text-slate-500">
+									{shortId(s.id)} · {new Date(s.created_at).toLocaleString()}
+								</div>
+								<div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5">
+									<Badge className={cn(statusColor(s.status), "text-[10px]")} variant="outline">
+										{s.status}
+									</Badge>
+									{s.chain && <Badge variant="secondary" className="max-w-[110px] truncate text-[10px]" title={s.chain}>{s.chain}</Badge>}
+								</div>
+								{info ? (
+									<div className="mt-1.5 min-w-0 text-left font-mono text-[10px] leading-tight" title={`${formatCurrency(info.cost)}${info.tokens > 0 ? ` · ${formatNumber(info.tokens)} tokens` : ""}`}>
+										<span className="inline rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-emerald-300">
+											{formatCurrency(info.cost)}
 										</span>
-									);
-								})()}
-							</div>
-						</button>
-					))}
+										{info.tokens > 0 && (
+											<span className="ml-1 inline rounded-full bg-cyan-500/10 px-1.5 py-0.5 text-cyan-300">
+												{formatNumber(info.tokens)} tok
+											</span>
+										)}
+									</div>
+								) : null}
+							</button>
+						);
+					})}
 					{hasMore && (
 						<button
 							type="button"
