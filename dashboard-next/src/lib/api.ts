@@ -92,8 +92,14 @@ export const api = {
   users: (signal?: AbortSignal) => get<import("./types").DBUser[]>("/api/users", signal),
 
   // Sessions list
-  sessions: (signal?: AbortSignal) =>
-    get<DBSession[]>("/api/pg/sessions", signal),
+  sessions: (signal?: AbortSignal, opts?: { limit?: number; offset?: number; user?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.limit != null) params.set("limit", String(opts.limit));
+    if (opts?.offset != null) params.set("offset", String(opts.offset));
+    if (opts?.user) params.set("user", opts.user);
+    const query = params.toString();
+    return get<DBSession[]>(`/api/pg/sessions${query ? `?${query}` : ""}`, signal);
+  },
 
   // Single session
   session: (id: string, signal?: AbortSignal) =>
