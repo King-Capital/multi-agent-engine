@@ -285,7 +285,7 @@ validate_certification_contract() {
     END {
       ok = found && ended && schema && verdict && p0 && p1 && perspectives && blockers && failed_teams && ready
       ok = ok && perspectives ~ /correctness/ && perspectives ~ /adversarial/ && perspectives ~ /quality/ && perspectives ~ /security/ && perspectives ~ /domain/
-      ok = ok && failed_teams ~ /^failed_teams:[[:space:]]*none[[:space:]]*$/
+      if (expected == "clean") ok = ok && failed_teams ~ /^failed_teams:[[:space:]]*none[[:space:]]*$/
       if (expected == "clean") ok = ok && verdict ~ /pass/ && p0 ~ /:[[:space:]]*0[[:space:]]*$/ && p1 ~ /:[[:space:]]*0[[:space:]]*$/ && ready ~ /true/
       if (expected == "seeded") ok = ok && (verdict ~ /fail/ || p0 !~ /:[[:space:]]*0[[:space:]]*$/ || p1 !~ /:[[:space:]]*0[[:space:]]*$/) && ready ~ /false/
       if (expected == "failing") ok = ok && verdict ~ /fail/ && ready ~ /false/

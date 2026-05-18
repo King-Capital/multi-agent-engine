@@ -224,7 +224,7 @@ export async function prepareTeamStep(
   await emitter.agentSpawn(session.id, leadId, "orch-1", teamConfig.lead.name, "lead",
     leadResolved.model, teamConfig["team-name"], teamConfig["team-color"]);
 
-  const leadOnly = step.lead_only === true || process.env.MAE_CERTIFICATION_MODE === "1";
+  const leadOnly = step.lead_only === true || (process.env.MAE_CERTIFICATION_MODE === "1" && step.read_only === true);
 
   // Lead gets either the task directly (lead-only mode) or the task + team roster
   // to produce a briefing for workers.
@@ -996,6 +996,8 @@ export async function runParallelStep(
     "",
     "If team outputs contain REVIEW_REPORT or SQUAD_REPORT schema blocks, preserve those raw blocks verbatim in a MACHINE_READABLE_APPENDIX before the final contract so deterministic gates can verify them.",
     "",
+    failedTeamNotice,
+    "",
     "MANDATORY FINAL OUTPUT: The last lines of your response MUST be exactly one machine-readable CERTIFICATION_CONTRACT block. Do not use a markdown heading for it. Do not wrap it in backticks or a code fence. Do not emit prose-only variants such as 'Certification Contract'. Use concrete values only; do not copy placeholder text such as pass|fail, <integer>, or true|false.",
     "CERTIFICATION_CONTRACT:",
     "schema_version: 1",
@@ -1012,7 +1014,6 @@ export async function runParallelStep(
     "CONTRACT SEMANTICS: if any failed_teams value is not none, verdict MUST be fail and certification_ready MUST be false.",
     "CONTRACT SEMANTICS: verdict pass and certification_ready true are allowed only when p0_count is 0, p1_count is 0, blockers is none, failed_teams is none, and all five perspectives are covered.",
     "END_CERTIFICATION_CONTRACT",
-    failedTeamNotice,
   ].join("\n");
 
   await emitter.message(session.id, synthId, "Orchestrator", "user",
