@@ -22,11 +22,15 @@ func TestRedactEventRedactsKnownAndExtraFields(t *testing.T) {
 		EventType: EventToolResult,
 		Timestamp: time.Now(),
 		Data: EventData{
-			TaskPrompt:  "token sk-ant-api03-" + strings.Repeat("a", 80),
-			ToolArgs:    "password=hunter2",
-			ToolResult:  "mae_" + strings.Repeat("a", 30),
-			ErrorMsg:    "api_key=abc123",
-			Extra:       map[string]json.RawMessage{"payload": rawExtra, "access_token": json.RawMessage(`"abc123"`)},
+			TaskPrompt: "token sk-ant-api03-" + strings.Repeat("a", 80),
+			ToolArgs:   "password=hunter2",
+			ToolResult: "mae_" + strings.Repeat("a", 30),
+			ErrorMsg:   "api_key=abc123",
+			TillDone: &TillDoneState{
+				Title: "deploy with token=title-secret",
+				Items: []TillDoneItem{{Description: "verify password=item-secret"}},
+			},
+			Extra: map[string]json.RawMessage{"payload": rawExtra, "access_token": json.RawMessage(`"abc123"`)},
 		},
 	}
 
@@ -36,7 +40,7 @@ func TestRedactEventRedactsKnownAndExtraFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(encoded)
-	for _, forbidden := range []string{"sk-ant-api03-", "hunter2", "mae_", "abc123", "super-secret-value", "ghp_"} {
+	for _, forbidden := range []string{"sk-ant-api03-", "hunter2", "mae_", "abc123", "super-secret-value", "ghp_", "title-secret", "item-secret"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("redacted event still contains %q: %s", forbidden, text)
 		}
