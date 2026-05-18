@@ -127,8 +127,12 @@ func RedactEvent(evt Event) Event {
 	evt.Data.FailedWorker = redactString(evt.Data.FailedWorker)
 	evt.Data.HealAction = redactString(evt.Data.HealAction)
 	evt.Data.ErrorMsg = redactString(evt.Data.ErrorMsg)
-	for key, raw := range evt.Data.Extra {
-		evt.Data.Extra[key] = redactRawJSON(key, raw)
+	if evt.Data.Extra != nil {
+		redactedExtra := make(map[string]json.RawMessage, len(evt.Data.Extra))
+		for key, raw := range evt.Data.Extra {
+			redactedExtra[key] = redactRawJSON(key, raw)
+		}
+		evt.Data.Extra = redactedExtra
 	}
 	return evt
 }
