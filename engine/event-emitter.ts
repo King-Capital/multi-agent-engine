@@ -164,7 +164,7 @@ export class EventEmitter {
     });
   }
 
-  participantEnd(sessionId: string, agentId: string, status: "ended" | "error" = "ended", opts: { lastEvent?: string; costUsd?: number; tokensUsed?: number; reason?: string } = {}) {
+  participantEnd(sessionId: string, agentId: string, status: "completed" | "failed" = "completed", opts: { lastEvent?: string; costUsd?: number; tokensUsed?: number; reason?: string } = {}) {
     return this.participantEvent(sessionId, agentId, "participant_end", {
       status,
       costUsd: opts.costUsd,
@@ -267,7 +267,7 @@ export class EventEmitter {
     model: string,
     teamName: string,
     teamColor: string,
-    participantKind?: ParticipantKind,
+    participantKindOrCaps?: ParticipantKind | ParticipantCapabilities,
   ) {
     await this.pgCreateAgent({
       sessionId,
@@ -276,7 +276,9 @@ export class EventEmitter {
       persona: name,
       config: { model, team_name: teamName, team_color: teamColor, parent_id: parentId },
     });
-    const kind = participantKind ?? participantKindForRole(role);
+    const isKindString = typeof participantKindOrCaps === "string";
+    const kind: ParticipantKind = isKindString ? participantKindOrCaps : participantKindForRole(role);
+    const caps: ParticipantCapabilities | undefined = isKindString ? { model, canReceiveSteer: true } : participantKindOrCaps;
     await this.participantStart(sessionId, agentId, {
       parentId,
       name,
@@ -285,7 +287,7 @@ export class EventEmitter {
       teamName,
       model,
       currentTask: `agent:${kind}`,
-      capabilities: { model, canReceiveSteer: true, canUseTools: true },
+      capabilities: caps,
     });
     return this.emit({
       session_id: sessionId,
@@ -308,7 +310,7 @@ export class EventEmitter {
       status: grade === "FAILED" ? "failed" : "completed",
       cost_usd: costUsd ?? 0,
     });
-    await this.participantEnd(sessionId, agentId, grade === "FAILED" ? "error" : "ended", {
+    await this.participantEnd(sessionId, agentId, grade === "FAILED" ? "failed" : "completed", {
       lastEvent: "agent_done",
       costUsd: costUsd ?? 0,
       reason: grade ?? "unknown",

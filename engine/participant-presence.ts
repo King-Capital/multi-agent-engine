@@ -21,7 +21,7 @@ export function findStaleParticipants(
   const stale: StaleParticipant[] = [];
 
   for (const participant of participants) {
-    if (participant.status === "ended" || participant.status === "error") continue;
+    if (participant.status === "completed" || participant.status === "failed") continue;
     const lastHeartbeatMs = timestampMs(participant.last_heartbeat_ts) ?? timestampMs(participant.started_at);
     if (lastHeartbeatMs === null) {
       stale.push({

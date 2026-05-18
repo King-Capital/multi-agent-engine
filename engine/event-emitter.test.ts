@@ -179,12 +179,12 @@ describe("EventEmitter", () => {
         role: "lead",
         teamName: "Correctness Review",
         model: "gpt-5.5",
-        capabilities: { canReceiveSteer: true, canUseTools: true, tools: ["read", "bash"] },
+        capabilities: { canReceiveSteer: true, tools: ["read", "bash"] },
       });
       await emitter.participantActivity("s1", "lead-1", { currentTool: "read", currentTask: "README.md" });
       await emitter.participantHeartbeat("s1", "lead-1", { costUsd: 0.12, tokensUsed: 42 });
       await emitter.participantStale("s1", "lead-1", "no activity for 60s");
-      await emitter.participantEnd("s1", "lead-1", "ended", { costUsd: 0.12, tokensUsed: 42 });
+      await emitter.participantEnd("s1", "lead-1", "completed", { costUsd: 0.12, tokensUsed: 42 });
 
       await new Promise((r) => setTimeout(r, 100));
 
@@ -202,7 +202,7 @@ describe("EventEmitter", () => {
       expect(bodies[1]!.data.current_tool).toBe("read");
       expect(bodies[2]!.data.cost_usd).toBe(0.12);
       expect(bodies[3]!.data.status).toBe("stale");
-      expect(bodies[4]!.data.status).toBe("ended");
+      expect(bodies[4]!.data.status).toBe("completed");
     });
 
     test("agentSpawn and agentDone bracket agents with participant events", async () => {

@@ -1,18 +1,16 @@
 export type AgentRole = "orchestrator" | "lead" | "sr" | "worker" | "scout";
 
 export type ParticipantKind = "orchestrator" | "lead" | "worker" | "sr" | "synthesis" | "validator" | "web-steer" | "cli-steer" | "system";
-export type ParticipantStatus = "starting" | "active" | "stale" | "ended" | "error";
+export type ParticipantStatus = "starting" | "active" | "idle" | "stale" | "completed" | "failed" | "blocked";
 
 export interface ParticipantCapabilities {
-  canReceiveSteer?: boolean;
-  canSendToLead?: boolean;
-  canSpawnWorkers?: boolean;
-  canWriteFiles?: boolean;
-  canUseTools?: boolean;
   tools?: string[];
-  domains?: DomainConfig;
+  domain_read?: string[];
+  domain_write?: string[];
+  domain_update?: string[];
+  can_delegate?: boolean;
+  canReceiveSteer?: boolean;
   model?: string;
-  provider?: string;
 }
 
 export interface ParticipantState {
