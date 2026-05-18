@@ -826,6 +826,12 @@ export async function runTeamStep(
     reviewed.workerResults, reviewed.reviews,
   );
 
+  await deps.emitter.agentDone(session.id, prepared.leadId, result.grade, result.costUsd, {
+    outputArtifact: result.outputArtifact,
+    taskReport: result.taskReport,
+  });
+  deps.untrackActivity(prepared.leadId);
+
   await deps.emitter.message(session.id, "orch-1", "Orchestrator", "user",
     `${prepared.teamConfig["team-name"]} complete. Lead reviewed ${reviewed.reviews.length} workers: ${reviewed.reviews.map(r => `${r.workerName}=${r.grade}`).join(", ")}. Grade: ${result.grade}. Cost: $${result.costUsd.toFixed(3)}.`);
 
@@ -970,7 +976,7 @@ export async function runParallelStep(
   log.info("Synthesizing parallel team outputs", { result_count: results.length, session_id: session.id });
 
   await emitter.agentSpawn(session.id, synthId, "orch-1", "Synthesis", "orchestrator",
-    synthResolved.model, "Synthesis", "#a855f7");
+    synthResolved.model, "Synthesis", "#a855f7", "synthesis");
 
   const teamOutputs = results.map((r, i) =>
     `### Team: ${teams[i]?.team ?? `Team ${i + 1}`}\nGrade: ${r.grade ?? "UNGRADED"}\n\n${r.output}`
