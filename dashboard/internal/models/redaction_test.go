@@ -34,7 +34,11 @@ func TestRedactEventRedactsKnownAndExtraFields(t *testing.T) {
 		},
 	}
 
+	originalExtra := string(evt.Data.Extra["payload"])
 	redacted := RedactEvent(evt)
+	if string(evt.Data.Extra["payload"]) != originalExtra {
+		t.Fatalf("RedactEvent mutated original Extra map: got %s want %s", string(evt.Data.Extra["payload"]), originalExtra)
+	}
 	encoded, err := json.Marshal(redacted)
 	if err != nil {
 		t.Fatal(err)
