@@ -31,14 +31,19 @@ type Store struct {
 	droppedCounts map[string]int64
 }
 
-// sanitizeID strips path traversal components from session IDs.
-// filepath.Base removes directory components (../ etc).
-func sanitizeID(id string) string {
-	safe := filepath.Base(id)
-	if safe == "." || safe == "" {
-		return "invalid"
+func sessionFilename(id string) (string, error) {
+	if err := ValidateSessionID(id); err != nil {
+		return "", err
 	}
-	return safe
+	return id + ".jsonl", nil
+}
+
+func (s *Store) sessionPath(id string) (string, error) {
+	name, err := sessionFilename(id)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(s.dir, name), nil
 }
 
 func NewStore(dir string) (*Store, error) {
@@ -67,6 +72,10 @@ func (s *Store) loadExisting() error {
 			continue
 		}
 		sessionID := e.Name()[:len(e.Name())-6]
+		if err := ValidateSessionID(sessionID); err != nil {
+			fmt.Fprintf(os.Stderr, "warn: skipped invalid session file %s: %v\n", e.Name(), err)
+			continue
+		}
 		if err := s.loadSession(sessionID); err != nil {
 			fmt.Fprintf(os.Stderr, "warn: failed to load session %s: %v\n", sessionID, err)
 		}
@@ -75,7 +84,11 @@ func (s *Store) loadExisting() error {
 }
 
 func (s *Store) loadSession(id string) error {
-	f, err := os.Open(filepath.Join(s.dir, sanitizeID(id)+".jsonl"))
+	fpath, err := s.sessionPath(id)
+	if err != nil {
+		return err
+	}
+	f, err := os.Open(fpath)
 	if err != nil {
 		return err
 	}
@@ -104,7 +117,10 @@ func (s *Store) Append(evt models.Event) error {
 		return fmt.Errorf("marshal event: %w", err)
 	}
 
-	fpath := filepath.Join(s.dir, sanitizeID(evt.SessionID)+".jsonl")
+	fpath, err := s.sessionPath(evt.SessionID)
+	if err != nil {
+		return err
+	}
 	f, err := os.OpenFile(fpath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("open event file: %w", err)
@@ -306,10 +322,11 @@ func (s *Store) ReapInactiveSessions(timeout time.Duration) int {
 
 			data, err := json.Marshal(evt)
 			if err == nil {
-				fpath := filepath.Join(s.dir, sanitizeID(sess.ID)+".jsonl")
-				if f, err := os.OpenFile(fpath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-					f.Write(append(data, '\n'))
-					f.Close()
+				if fpath, err := s.sessionPath(sess.ID); err == nil {
+					if f, err := os.OpenFile(fpath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+						f.Write(append(data, '\n'))
+						f.Close()
+					}
 				}
 			}
 			reaped++
@@ -335,8 +352,9 @@ func (s *Store) ClearAll() int {
 	defer s.mu.Unlock()
 	n := len(s.sessions)
 	for id := range s.sessions {
-		fpath := filepath.Join(s.dir, sanitizeID(id)+".jsonl")
-		os.Remove(fpath)
+		if fpath, err := s.sessionPath(id); err == nil {
+			os.Remove(fpath)
+		}
 	}
 	s.sessions = make(map[string]*models.Session)
 	s.listeners = make(map[string][]chan models.Event)
@@ -375,10 +393,11 @@ func (s *Store) SetSessionStatus(id, status string) bool {
 
 	data, err := json.Marshal(evt)
 	if err == nil {
-		fpath := filepath.Join(s.dir, sanitizeID(id)+".jsonl")
-		if f, err := os.OpenFile(fpath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-			f.Write(append(data, '\n'))
-			f.Close()
+		if fpath, err := s.sessionPath(id); err == nil {
+			if f, err := os.OpenFile(fpath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+				f.Write(append(data, '\n'))
+				f.Close()
+			}
 		}
 	}
 	return true
@@ -388,8 +407,9 @@ func (s *Store) DeleteSession(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, id)
-	fpath := filepath.Join(s.dir, sanitizeID(id)+".jsonl")
-	os.Remove(fpath)
+	if fpath, err := s.sessionPath(id); err == nil {
+		os.Remove(fpath)
+	}
 }
 
 func (s *Store) InjectSession(sess *models.Session) {
