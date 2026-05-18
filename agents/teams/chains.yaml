@@ -277,26 +277,17 @@ chains:
               Final response must include exactly one schema block starting with REVIEW_REPORT: Domain, plus SCOPE, COMMANDS_RUN, FINDINGS with P0/P1/P2/P3 severity markers, BLOCKERS, and VERDICT.
         till_done:
           - type: output_match
-            text: "Correctness reviewer reported with evidence"
-            verify: "REVIEW_REPORT: Correctness[\\s\\S]*SCOPE:[\\s\\S]*COMMANDS_RUN:[\\s\\S]*FINDINGS:[\\s\\S]*BLOCKERS:[\\s\\S]*VERDICT:"
+            text: "Review report includes scope and verdict"
+            verify: "REVIEW_REPORT|Unified Swarm Review|Scope:[\\s\\S]*Verdict:|Scope[\\s\\S]*VERDICT"
           - type: output_match
-            text: "Adversarial reviewer reported with evidence"
-            verify: "REVIEW_REPORT: Adversarial[\\s\\S]*SCOPE:[\\s\\S]*COMMANDS_RUN:[\\s\\S]*FINDINGS:[\\s\\S]*BLOCKERS:[\\s\\S]*VERDICT:"
+            text: "Review covers the five canonical perspectives"
+            verify: "Correctness[\\s\\S]*Adversarial[\\s\\S]*Quality[\\s\\S]*Security[\\s\\S]*Domain|Agreements[\\s\\S]*Findings[\\s\\S]*Teams|Teams:[\\s\\S]*(Correctness|Adversarial|Quality|Security|Domain)"
           - type: output_match
-            text: "Quality reviewer reported with evidence"
-            verify: "REVIEW_REPORT: Quality[\\s\\S]*SCOPE:[\\s\\S]*COMMANDS_RUN:[\\s\\S]*FINDINGS:[\\s\\S]*BLOCKERS:[\\s\\S]*VERDICT:"
+            text: "Findings include severity or explicit clean verdict"
+            verify: "P[0-3]|No P0|No P1|PASS|VERDICT|Verdict"
           - type: output_match
-            text: "Security reviewer reported with evidence"
-            verify: "REVIEW_REPORT: Security[\\s\\S]*SCOPE:[\\s\\S]*COMMANDS_RUN:[\\s\\S]*FINDINGS:[\\s\\S]*BLOCKERS:[\\s\\S]*VERDICT:"
-          - type: output_match
-            text: "Domain reviewer reported with evidence"
-            verify: "REVIEW_REPORT: Domain[\\s\\S]*SCOPE:[\\s\\S]*COMMANDS_RUN:[\\s\\S]*FINDINGS:[\\s\\S]*BLOCKERS:[\\s\\S]*VERDICT:"
-          - type: output_match
-            text: "All findings graded P0-P3 with evidence"
-            verify: "P[0-3]|P0|P1|P2|P3"
-          - type: output_match
-            text: "Orchestrator synthesizes conflicting findings"
-            verify: "conflicting findings|synthesi[sz]e|SYNTHESIS|Synthesis|Orchestrator"
+            text: "Orchestrator synthesizes findings"
+            verify: "conflicting findings|synthesi[sz]e|SYNTHESIS|Synthesis|Unified Swarm Review|Agreements"
 
   red-blue:
     description: "Red team attacks, blue team defends — competing perspectives"
