@@ -77,6 +77,9 @@ func handleGetSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleDeleteSession(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
 	sessionID := chi.URLParam(r, "sessionID")
 	store.DeleteSession(sessionID)
 	if dbEnabled {
@@ -90,6 +93,9 @@ func handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCloseStale(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
 	n := store.CloseStale()
 	if dbEnabled && n > 0 {
 		if _, err := MarkStaleSessions(r.Context(), 0); err != nil {
@@ -106,12 +112,18 @@ func handleCloseStale(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleClearStale(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
 	store.ClearStale(10 * time.Minute)
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
 }
 
 func handleClearAll(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
 	n := store.ClearAll()
 	if dbEnabled && n > 0 {
 		if _, err := MarkStaleSessions(r.Context(), 0); err != nil {
@@ -128,6 +140,9 @@ func handleClearAll(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSetSessionStatus(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
 	sessionID := chi.URLParam(r, "sessionID")
 	var body struct {
 		Status string `json:"status"`
@@ -161,6 +176,9 @@ func handleSetSessionStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleUserMessage(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
 	sessionID := chi.URLParam(r, "sessionID")
 	r.ParseForm()
 	content := r.FormValue("content")
