@@ -90,9 +90,9 @@ describe("chain-validator", () => {
       expect(step.system_prompt_append).toContain("BLOCKERS");
     }
 
-    expect(JSON.stringify(tillDone)).toContain("REVIEW_REPORT: Correctness");
-    expect(JSON.stringify(tillDone)).toContain("COMMANDS_RUN");
-    expect(JSON.stringify(tillDone)).toContain("VERDICT");
+    expect(JSON.stringify(tillDone)).toContain("REVIEW_REPORT");
+    expect(JSON.stringify(tillDone)).toContain("five canonical perspectives");
+    expect(JSON.stringify(tillDone)).toContain("Verdict");
   });
 
   test("plan-build-review includes deterministic verification without agent spawn", () => {
