@@ -21,6 +21,11 @@ export { TRACE_DIR };
 type TraceType =
   | "session.start"
   | "session.end"
+  | "participant.start"
+  | "participant.activity"
+  | "participant.heartbeat"
+  | "participant.stale"
+  | "participant.end"
   | "agent.start"
   | "agent.end"
   | "agent.error"
@@ -41,6 +46,11 @@ function mapLogToTraceType(entry: LogEntry): TraceType {
 
   const comp = (entry.component ?? "").toLowerCase();
   const msg = (entry.msg ?? "").toLowerCase();
+
+  // Participant lifecycle
+  if (msg.includes("participant event")) {
+    if (isTraceType(entry.trace_type)) return entry.trace_type;
+  }
 
   // Session lifecycle
   if (comp === "orchestrator") {
@@ -97,7 +107,9 @@ function mapLogToTraceType(entry: LogEntry): TraceType {
 
 function isTraceType(value: unknown): value is TraceType {
   return typeof value === "string" && [
-    "session.start", "session.end", "agent.start", "agent.end", "agent.error",
+    "session.start", "session.end", "participant.start", "participant.activity",
+    "participant.heartbeat", "participant.stale", "participant.end",
+    "agent.start", "agent.end", "agent.error",
     "chain.step.start", "chain.step.end", "tool.call", "llm.call",
     "self_heal", "verify", "orch.decision", "log",
   ].includes(value);
@@ -134,6 +146,28 @@ function extractTraceFields(entry: LogEntry, traceType: TraceType): Record<strin
       if (entry.total_cost !== undefined) fields.total_cost = entry.total_cost;
       if (entry.cost_usd !== undefined) fields.total_cost = entry.cost_usd;
       if (entry.total_tokens !== undefined) fields.total_tokens = entry.total_tokens;
+      break;
+
+    case "participant.start":
+    case "participant.activity":
+    case "participant.heartbeat":
+    case "participant.stale":
+    case "participant.end":
+      if (entry.participant_id !== undefined) fields.participant_id = entry.participant_id;
+      if (entry.name !== undefined) fields.name = entry.name;
+      if (entry.kind !== undefined) fields.kind = entry.kind;
+      if (entry.status !== undefined) fields.status = entry.status;
+      if (entry.role !== undefined) fields.role = entry.role;
+      if (entry.team !== undefined) fields.team = entry.team;
+      if (entry.model !== undefined) fields.model = entry.model;
+      if (entry.current_task !== undefined) fields.current_task = String(entry.current_task).slice(0, 500);
+      if (entry.current_tool !== undefined) fields.current_tool = entry.current_tool;
+      if (entry.last_event !== undefined) fields.last_event = entry.last_event;
+      if (entry.last_heartbeat_ts !== undefined) fields.last_heartbeat_ts = entry.last_heartbeat_ts;
+      if (entry.cost_usd !== undefined) fields.cost_usd = entry.cost_usd;
+      if (entry.tokens_used !== undefined) fields.tokens_used = entry.tokens_used;
+      if (entry.capabilities !== undefined) fields.capabilities = entry.capabilities;
+      if (entry.reason !== undefined) fields.reason = sanitizeAgentInput(String(entry.reason)).slice(0, 500);
       break;
 
     case "agent.start":

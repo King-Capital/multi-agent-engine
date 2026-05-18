@@ -7,6 +7,7 @@ import {
   accumulateWorkerCosts,
   delegateToLead,
   buildWorkerSystemPromptAppend,
+  runTeamStep,
 } from "./team-execution";
 import type {
   DelegateResult,
@@ -122,6 +123,21 @@ function makeStubEmitter(): EventEmitter {
     pgCreateAgent: noop,
     pgUpdateAgent: noop,
     trace: noop,
+  } as unknown as EventEmitter;
+}
+
+function makeRecordingEmitter(calls: Array<{ method: string; agentId?: string; role?: string; kind?: string }>): EventEmitter {
+  const noop = async () => {};
+  return {
+    ...makeStubEmitter(),
+    agentSpawn: async (_sessionId: string, agentId: string, _parentId: string, _name: string, role: string, _model: string, _teamName: string, _teamColor: string, kind?: string) => {
+      calls.push({ method: "agentSpawn", agentId, role, kind });
+    },
+    agentDone: async (_sessionId: string, agentId: string) => {
+      calls.push({ method: "agentDone", agentId });
+    },
+    message: noop,
+    costUpdate: noop,
   } as unknown as EventEmitter;
 }
 
@@ -713,5 +729,58 @@ describe("delegateToLead", () => {
 
     expect(session.totalCost).toBeCloseTo(0.15, 10);
     expect(session.totalTokens).toBe(800);
+  });
+});
+
+describe("runTeamStep participant lifecycle", () => {
+  test("normal multi-worker teams emit lead completion", async () => {
+    const calls: Array<{ method: string; agentId?: string; role?: string; kind?: string }> = [];
+    const untracked: string[] = [];
+    const emitter = makeRecordingEmitter(calls);
+    const adapter = makeMockAdapter({
+      delegate: async (opts) => {
+        if (opts.userPrompt.includes("For each worker, respond with this exact format:")) {
+          return makeResult(opts.persona.name, "review", {
+            output: [
+              "### REVIEW: Backend Engineer",
+              "GRADE: PASS",
+              "### REVIEW: Frontend Engineer",
+              "GRADE: PASS",
+              "### REVIEW: Infrastructure Engineer",
+              "GRADE: PASS",
+              "### REVIEW: Antagonist",
+              "GRADE: PASS",
+            ].join("\n"),
+          });
+        }
+        return makeResult(opts.persona.name, `mock-${opts.persona.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, {
+          output: `Completed by ${opts.persona.name}.`,
+        });
+      },
+    });
+    const session = makeSession({ workingDir: "/tmp" });
+
+    const result = await runTeamStep({
+      emitter,
+      messageSenders: new Map(),
+      trackActivity: () => {},
+      untrackActivity: (agentId) => untracked.push(agentId),
+      trackToolCall: () => {},
+      checkBudget: () => {},
+      getAdapter: () => adapter,
+    }, session, { team: "Engineering", read_only: true }, "Do the thing", "", "mock");
+
+    expect(result.grade).toBe("VERIFIED");
+    expect(calls.some((call) => call.method === "agentSpawn" && call.agentId === "Engineering-lead")).toBe(true);
+    expect(calls.some((call) => call.method === "agentDone" && call.agentId === "Engineering-lead")).toBe(true);
+    expect(untracked).toContain("Engineering-lead");
+  });
+
+  test("parallel synthesis spawn uses synthesis participant kind override", async () => {
+    const calls: Array<{ method: string; agentId?: string; role?: string; kind?: string }> = [];
+    const emitter = makeRecordingEmitter(calls);
+    await emitter.agentSpawn("s1", "synth-1", "orch-1", "Synthesis", "orchestrator", "opus", "Synthesis", "#a855f7", "synthesis");
+
+    expect(calls).toContainEqual({ method: "agentSpawn", agentId: "synth-1", role: "orchestrator", kind: "synthesis" });
   });
 });
