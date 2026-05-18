@@ -168,6 +168,40 @@ Validation required:
 - `git diff --check`
 - Optional but desired final milestone: approved full live Pi all-fixture certification from `pi-phase1-complete`
 
+### D-2026-05-18-P2 — Phase 2 consolidation source selection
+
+Date: 2026-05-18
+Phase: 2 — Participant presence/heartbeat
+Issue(s): #331
+
+Decision:
+
+Use Pi PR #356 as the canonical Phase 2 base, then manually cherry-pick low-risk Codex runtime completeness improvements: richer participant capability metadata at real spawn sites, retry/Sr./solo spawn coverage, stale emission from existing stall detection, and status normalization to `starting|active|idle|stale|completed|failed|blocked`. Do not merge Codex or Claude branches wholesale. Do not include Claude's standalone ParticipantTracker in Phase 2.
+
+Reason:
+
+Pi is already committed, pushed, reviewed to PASS, and fully validated. Codex adds useful runtime metadata and stale-on-existing-stall behavior that strengthens Phase 2 without adding a second source of truth. Claude's tracker is useful design material but is not wired; including it now would create ambiguous participant state ownership before Phase 3/6 validator/dashboard decisions.
+
+Alternatives considered:
+
+- Merge all three branches: rejected because it duplicates concepts and risks conflicting lifecycle semantics.
+- Use Codex branch as base: rejected because Pi already passed full review/PR gates.
+- Include Claude ParticipantTracker now: rejected because it is standalone and not the single source of truth.
+
+Impact:
+
+Final Phase 2 PR remains Pi-based and adds only targeted runtime completeness improvements. Participant terminal status vocabulary is normalized for dashboard/validator consumers.
+
+Validation required:
+
+- Targeted participant/event tests
+- `scripts/certify-live-swarm-test`
+- `scripts/certify-live-swarm --only failing --dashboard-url "${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}"`
+- `bun test`
+- `cd engine && bunx tsc --noEmit`
+- `git diff --check -- . ':(exclude).pi/skills/*' ':(exclude).idea/*'`
+- Focused re-review of Codex cherry-picks
+
 ### D-XXX — Title
 
 Date:

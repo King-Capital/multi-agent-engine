@@ -220,11 +220,26 @@ export async function prepareTeamStep(
 
   trackActivity(leadId, teamConfig.lead.name, "lead");
   const leadResolved = resolveModelForRole("lead", teamConfig.lead.model);
+  const leadOnly = step.lead_only === true || (process.env.MAE_CERTIFICATION_MODE === "1" && step.read_only === true);
+  const reviewOnly = isReviewOnlyStep(step);
+  const leadTools = reviewOnly ? readOnlyTools(step.tools_override ?? leadPersona.tools) : step.tools_override ?? leadPersona.tools;
+  const leadDomain = reviewOnly ? { ...leadPersona.domain, write: [], update: [] } : leadPersona.domain;
 
   await emitter.agentSpawn(session.id, leadId, "orch-1", teamConfig.lead.name, "lead",
-    leadResolved.model, teamConfig["team-name"], teamConfig["team-color"]);
-
-  const leadOnly = step.lead_only === true || (process.env.MAE_CERTIFICATION_MODE === "1" && step.read_only === true);
+    leadResolved.model, teamConfig["team-name"], teamConfig["team-color"], undefined, {
+      tools: leadTools,
+      domains: leadDomain,
+      domain_read: leadDomain.read,
+      domain_write: leadDomain.write,
+      domain_update: leadDomain.update,
+      readGlobs: leadDomain.read,
+      writeGlobs: leadDomain.write,
+      can_delegate: !leadOnly,
+      canSpawnWorkers: !leadOnly,
+      canReviewWorkers: true,
+      canWriteFiles: leadDomain.write.length > 0 || leadDomain.update.length > 0,
+      authority: 70,
+    });
 
   // Lead gets either the task directly (lead-only mode) or the task + team roster
   // to produce a briefing for workers.
@@ -253,9 +268,6 @@ export async function prepareTeamStep(
   const leadSystemPrompt = step.system_prompt_append
     ? buildSystemPrompt(leadPersona, "lead") + "\n\n" + step.system_prompt_append
     : buildSystemPrompt(leadPersona, "lead");
-  const reviewOnly = isReviewOnlyStep(step);
-  const leadTools = reviewOnly ? readOnlyTools(step.tools_override ?? leadPersona.tools) : step.tools_override ?? leadPersona.tools;
-
   // Emit the prompt being sent to the lead
   await emitter.message(session.id, leadId, "Orchestrator", "user",
     "📋 **Prompt to " + teamConfig.lead.name + ":**\n\n" + leadPrompt.slice(0, 3000));
@@ -267,7 +279,7 @@ export async function prepareTeamStep(
     model: leadResolved.model,
     thinking: leadResolved.thinking,
     tools: leadTools,
-    domain: reviewOnly ? { ...leadPersona.domain, write: [], update: [] } : leadPersona.domain,
+    domain: leadDomain,
     workingDir: session.workingDir,
     sessionDir: `data/sessions/${session.id}`,
     parentId: "orch-1",
@@ -393,9 +405,24 @@ export async function executeWorkers(
       }
 
       const workerResolved = resolveModelForRole("worker", member.model);
+      const workerDomain = reviewOnly ? { ...workerPersona.domain, write: [], update: [] } : workerPersona.domain;
+      const workerTools = reviewOnly ? readOnlyTools(workerPersona.tools) : workerPersona.tools;
 
       await emitter.agentSpawn(session.id, workerId, leadId, member.name, "worker",
-        workerResolved.model, teamConfig["team-name"], member.color ?? teamConfig["team-color"]);
+        workerResolved.model, teamConfig["team-name"], member.color ?? teamConfig["team-color"], undefined, {
+          tools: workerTools,
+          domains: workerDomain,
+          domain_read: workerDomain.read,
+          domain_write: workerDomain.write,
+          domain_update: workerDomain.update,
+          readGlobs: workerDomain.read,
+          writeGlobs: workerDomain.write,
+          can_delegate: false,
+          canSpawnWorkers: false,
+          canReviewWorkers: false,
+          canWriteFiles: workerDomain.write.length > 0 || workerDomain.update.length > 0,
+          authority: 40,
+        });
 
       // Extract this worker's assignment from the lead brief, or give full brief
       const assignment = parseAssignment(leadResult.output, member.name);
@@ -419,8 +446,8 @@ export async function executeWorkers(
         userPrompt: workerPrompt,
         model: workerResolved.model,
         thinking: workerResolved.thinking,
-        tools: reviewOnly ? readOnlyTools(workerPersona.tools) : workerPersona.tools,
-        domain: reviewOnly ? { ...workerPersona.domain, write: [], update: [] } : workerPersona.domain,
+        tools: workerTools,
+        domain: workerDomain,
         workingDir: workerDir,
         sessionDir: `data/sessions/${session.id}`,
         parentId: leadId,
@@ -976,7 +1003,20 @@ export async function runParallelStep(
   log.info("Synthesizing parallel team outputs", { result_count: results.length, session_id: session.id });
 
   await emitter.agentSpawn(session.id, synthId, "orch-1", "Synthesis", "orchestrator",
-    synthResolved.model, "Synthesis", "#a855f7", "synthesis");
+    synthResolved.model, "Synthesis", "#a855f7", "synthesis", {
+      tools: synthPersona.tools,
+      domains: synthPersona.domain,
+      domain_read: synthPersona.domain.read,
+      domain_write: synthPersona.domain.write,
+      domain_update: synthPersona.domain.update,
+      readGlobs: synthPersona.domain.read,
+      writeGlobs: synthPersona.domain.write,
+      can_delegate: false,
+      canSpawnWorkers: false,
+      canReviewWorkers: true,
+      canWriteFiles: synthPersona.domain.write.length > 0 || synthPersona.domain.update.length > 0,
+      authority: 65,
+    });
 
   const teamOutputs = results.map((r, i) =>
     `### Team: ${teams[i]?.team ?? `Team ${i + 1}`}\nGrade: ${r.grade ?? "UNGRADED"}\n\n${r.output}`

@@ -16,6 +16,7 @@ function mockEmitter() {
     stallDetected: handler("stallDetected"),
     nudgeSent: handler("nudgeSent"),
     budgetWarning: handler("budgetWarning"),
+    participantStale: handler("participantStale"),
     autoPause: handler("autoPause"),
     message: handler("message"),
   } as any;
@@ -101,8 +102,11 @@ describe("ActiveMonitor", () => {
     m.runTick();
 
     const stallEvents = emitter.calls.filter((c: { method: string }) => c.method === "stallDetected");
+    const staleEvents = emitter.calls.filter((c: { method: string }) => c.method === "participantStale");
     expect(stallEvents.length).toBe(1);
     expect(stallEvents[0].args[2]).toBe("Scout");
+    expect(staleEvents.length).toBe(1);
+    expect(staleEvents[0].args[1]).toBe("agent-1");
   });
 
   test("does not stall for active agents", () => {

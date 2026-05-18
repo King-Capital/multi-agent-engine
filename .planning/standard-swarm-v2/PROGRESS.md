@@ -88,6 +88,8 @@ Known historical risks:
 - [x] Stale/offline policy implemented
 - [x] Trace schema docs updated
 - [x] Targeted tests pass
+- [x] Consolidated Codex runtime capability metadata and stale-on-existing-stall behavior
+- [x] Deferred Claude ParticipantTracker as future source-of-truth work
 
 ### Phase 3 — Validator/verifier (#335)
 
@@ -203,6 +205,15 @@ Use targeted checks during tasks and the local phase/PR bundle at phase boundari
 | 2026-05-18 | 2 | `just check` after R2 full bundle | pass | `cd engine && bunx tsc --noEmit` |
 | 2026-05-18 | 2 | `git diff --check -- . ':(exclude).pi/skills/*' ':(exclude).idea/*'` after R2 full bundle | pass | No whitespace errors |
 | 2026-05-18 | 2 | third re-review swarm on `pi-phase2-participant-presence` | pass | F1-F3/R1/R2 closed; no material in-scope Critical/High/Medium/P3 blockers |
+| 2026-05-18 | 2 | consolidation decision: Pi base + Codex runtime metadata/stale, defer Claude tracker | impl | Added `DECISIONS.md` entry; normalized participant statuses to `starting|active|idle|stale|completed|failed|blocked` |
+| 2026-05-18 | 2 | `bun test engine/event-emitter.test.ts engine/team-execution.test.ts engine/worker-lifecycle.test.ts engine/active-monitor.test.ts engine/participant-presence.test.ts engine/trace-recorder.test.ts` after consolidation | pass | 82 pass, 0 fail |
+| 2026-05-18 | 2 | `cd engine && bunx tsc --noEmit` after consolidation | pass | Typecheck clean |
+| 2026-05-18 | 2 | `scripts/certify-live-swarm-test` after final consolidation | pass | Cert harness regression checks pass |
+| 2026-05-18 | 2 | `scripts/certify-live-swarm --only failing --dashboard-url ${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}` after final consolidation | pass | Echo smoke passes |
+| 2026-05-18 | 2 | `bun test` after final consolidation | pass | 568 pass, 1 skip, 0 fail |
+| 2026-05-18 | 2 | `cd engine && bunx tsc --noEmit` after final consolidation | pass | Typecheck clean |
+| 2026-05-18 | 2 | `git diff --check -- . ':(exclude).pi/skills/*' ':(exclude).idea/*'` after final consolidation | pass | No whitespace errors |
+| 2026-05-18 | 2 | focused final consolidation re-review | pass | No material in-scope Critical/High/Medium/P3 blockers; accepted Pi base + Codex metadata/stale + status normalization; Claude tracker deferred |
 
 ## Phase 1 evidence
 
@@ -219,7 +230,7 @@ Certification hardening is evidenced by deterministic fixtures, not only green c
 
 ## Open blockers
 
-None currently for Phase 2 implementation. Review swarm still required before PR.
+None currently for Phase 2 implementation. Focused re-review of final consolidation still required before updating PR #356 as ready.
 
 ## Open risks
 

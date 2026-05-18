@@ -260,7 +260,23 @@ Post-R2 targeted checks:
 | `bun test` | pass | 568 pass, 1 skip, 0 fail |
 | `just check` | pass | `cd engine && bunx tsc --noEmit` after full test bundle |
 
-Third re-review swarm passed: F1-F3/R1/R2 closed with no material in-scope Critical/High/Medium/P3 blockers. Live Pi remains milestone-only and requires explicit approval.
+Third re-review swarm passed: F1-F3/R1/R2 closed with no material in-scope Critical/High/Medium/P3 blockers.
+
+Final consolidation selected Pi PR #356 as the base, cherry-picked Codex runtime metadata/stale behavior, and deferred Claude ParticipantTracker. Status vocabulary was normalized to `starting|active|idle|stale|completed|failed|blocked`.
+
+Post-consolidation targeted checks:
+
+| Command | Result | Evidence |
+|---|---|---|
+| `bun test engine/event-emitter.test.ts engine/team-execution.test.ts engine/worker-lifecycle.test.ts engine/active-monitor.test.ts engine/participant-presence.test.ts engine/trace-recorder.test.ts` | pass | 82 pass, 0 fail; covers capabilities, stale-on-stall, status normalization, lifecycle regressions |
+| `cd engine && bunx tsc --noEmit` | pass | Typecheck clean |
+| `scripts/certify-live-swarm-test` | pass | Cert harness regression checks pass |
+| `scripts/certify-live-swarm --only failing --dashboard-url "${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}"` | pass | Echo smoke passes |
+| `bun test` | pass | 568 pass, 1 skip, 0 fail |
+| `cd engine && bunx tsc --noEmit` | pass | Typecheck clean after full bundle |
+| `git diff --check -- . ':(exclude).pi/skills/*' ':(exclude).idea/*'` | pass | No whitespace errors |
+
+Focused final consolidation re-review passed: no material in-scope Critical/High/Medium/P3 blockers. Live Pi remains milestone-only and requires explicit approval.
 
 ## Evidence requirements for phase completion
 

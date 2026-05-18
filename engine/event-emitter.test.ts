@@ -184,7 +184,7 @@ describe("EventEmitter", () => {
       await emitter.participantActivity("s1", "lead-1", { currentTool: "read", currentTask: "README.md" });
       await emitter.participantHeartbeat("s1", "lead-1", { costUsd: 0.12, tokensUsed: 42 });
       await emitter.participantStale("s1", "lead-1", "no activity for 60s");
-      await emitter.participantEnd("s1", "lead-1", "ended", { costUsd: 0.12, tokensUsed: 42 });
+      await emitter.participantEnd("s1", "lead-1", "completed", { costUsd: 0.12, tokensUsed: 42 });
 
       await new Promise((r) => setTimeout(r, 100));
 
@@ -202,7 +202,7 @@ describe("EventEmitter", () => {
       expect(bodies[1]!.data.current_tool).toBe("read");
       expect(bodies[2]!.data.cost_usd).toBe(0.12);
       expect(bodies[3]!.data.status).toBe("stale");
-      expect(bodies[4]!.data.status).toBe("ended");
+      expect(bodies[4]!.data.status).toBe("completed");
     });
 
     test("agentSpawn and agentDone bracket agents with participant events", async () => {
@@ -445,6 +445,13 @@ describe("EventEmitter", () => {
       expect(body.data.agent_role).toBe("worker");
       expect(body.data.model).toBe("opus");
       expect(body.data.team_name).toBe("TeamA");
+
+      const participantStart = fetchMock.calls
+        .filter((c) => c.url.includes("/api/events"))
+        .map((c) => JSON.parse(c.init.body as string))
+        .find((event: { event_type?: string }) => event.event_type === "participant_start");
+      expect(participantStart.data.capabilities.model).toBe("opus");
+      expect(participantStart.data.capabilities.canSteer).toBe(true);
     });
 
     test("costUpdate includes token and cost data", async () => {

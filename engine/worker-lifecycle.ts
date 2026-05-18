@@ -68,9 +68,25 @@ export async function retryWorker(
   log.info("Retrying worker with reworked prompt", { worker: member.name, attempt, session_id: session.id });
 
   const retryResolved = resolveModelForRole("worker", member.model);
+  const reviewOnly = isReviewOnlyStep(step);
+  const workerDomain = reviewOnly ? { ...workerPersona.domain, write: [], update: [] } : workerPersona.domain;
+  const workerTools = reviewOnly ? readOnlyTools(workerPersona.tools) : workerPersona.tools;
 
   await emitter.agentSpawn(session.id, workerId, leadId, `${member.name} (retry ${attempt})`, "worker",
-    retryResolved.model, teamConfig["team-name"], member.color ?? teamConfig["team-color"]);
+    retryResolved.model, teamConfig["team-name"], member.color ?? teamConfig["team-color"], undefined, {
+      tools: workerTools,
+      domains: workerDomain,
+      domain_read: workerDomain.read,
+      domain_write: workerDomain.write,
+      domain_update: workerDomain.update,
+      readGlobs: workerDomain.read,
+      writeGlobs: workerDomain.write,
+      can_delegate: false,
+      canSpawnWorkers: false,
+      canReviewWorkers: false,
+      canWriteFiles: workerDomain.write.length > 0 || workerDomain.update.length > 0,
+      authority: 40,
+    });
 
   const retryUserPrompt = [
     `RETRY (attempt ${attempt}): Your previous output was reviewed and needs rework.`,
@@ -84,7 +100,6 @@ export async function retryWorker(
   await emitter.message(session.id, workerId, teamConfig.lead.name, "user",
     `📋 **Retry assignment to ${member.name} (attempt ${attempt}):**\n\n${retryUserPrompt.slice(0, 3000)}`);
 
-  const reviewOnly = isReviewOnlyStep(step);
   const workerSystemPromptAppend = buildWorkerSystemPromptAppend(step.system_prompt_append);
   const workerOpts: DelegateOptions = {
     persona: workerPersona,
@@ -94,8 +109,8 @@ export async function retryWorker(
     userPrompt: retryUserPrompt,
     model: retryResolved.model,
     thinking: retryResolved.thinking,
-    tools: reviewOnly ? readOnlyTools(workerPersona.tools) : workerPersona.tools,
-    domain: reviewOnly ? { ...workerPersona.domain, write: [], update: [] } : workerPersona.domain,
+    tools: workerTools,
+    domain: workerDomain,
     workingDir: session.workingDir,
     sessionDir: `data/sessions/${session.id}`,
     parentId: leadId,
@@ -200,6 +215,8 @@ export async function spawnSenior(
 
   const srPreamble = loadPreamble("sr");
   const reviewOnly = isReviewOnlyStep(step);
+  const srTools = reviewOnly ? readOnlyTools(mergedTools) : mergedTools;
+  const srDomain = reviewOnly ? { read: mergedRead, write: [], update: [] } : { read: mergedRead, write: mergedWrite, update: mergedUpdate };
   const srSystemPrompt = [
     srPreamble,
     "",
@@ -233,7 +250,20 @@ export async function spawnSenior(
 
   await emitter.agentSpawn(session.id, srId, leadId,
     `Sr. (${domainNames.join("+")})`, "sr",
-    srResolved.model, teamConfig["team-name"], "#ffaa00");
+    srResolved.model, teamConfig["team-name"], "#ffaa00", undefined, {
+      tools: srTools,
+      domains: srDomain,
+      domain_read: srDomain.read,
+      domain_write: srDomain.write,
+      domain_update: srDomain.update,
+      readGlobs: srDomain.read,
+      writeGlobs: srDomain.write,
+      can_delegate: false,
+      canSpawnWorkers: false,
+      canReviewWorkers: false,
+      canWriteFiles: srDomain.write.length > 0 || srDomain.update.length > 0,
+      authority: 55,
+    });
 
   await emitter.message(session.id, srId, teamConfig.lead.name, "user",
     `📋 **Sr. assignment (${domainNames.join("+")})**:\n\n${srPrompt.slice(0, 3000)}`);
@@ -244,8 +274,8 @@ export async function spawnSenior(
     userPrompt: srPrompt,
     model: srResolved.model,
     thinking: srResolved.thinking,
-    tools: reviewOnly ? readOnlyTools(mergedTools) : mergedTools,
-    domain: reviewOnly ? { read: mergedRead, write: [], update: [] } : { read: mergedRead, write: mergedWrite, update: mergedUpdate },
+    tools: srTools,
+    domain: srDomain,
     workingDir: session.workingDir,
     sessionDir: `data/sessions/${session.id}`,
     parentId: leadId,
