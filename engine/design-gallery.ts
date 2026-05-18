@@ -85,7 +85,11 @@ export function listVariants(outputDir: string): DesignVariant[] {
 }
 
 function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function escapeAttr(s: string): string {
+  return escapeHtml(s).replace(/`/g, "&#96;");
 }
 
 function buildGalleryIndex(outputDir: string): string {
@@ -125,7 +129,7 @@ function buildGalleryIndex(outputDir: string): string {
   </nav>
   <div class="preview">
     ${variants.length > 0
-      ? `<iframe name="preview" src="/${variants[0]}"></iframe>`
+      ? `<iframe name="preview" src="/${escapeAttr(encodeURIComponent(variants[0]!))}"></iframe>`
       : '<div class="empty">Design variants will appear here as the agent produces them.</div>'}
   </div>
   <script>

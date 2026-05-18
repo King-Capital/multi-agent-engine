@@ -146,22 +146,22 @@ export async function delegateWithHealing(ctx: SelfHealContext): Promise<Delegat
     log.info("Attempting deterministic autofix", { workingDir: opts.workingDir });
     try {
       // Run common autofixers -- they either fix the issue or no-op harmlessly
-      const fixProc = Bun.spawn(["bash", "-c", [
-        // TypeScript/JS projects
-        "[ -f tsconfig.json ] && bunx tsc --noEmit 2>&1 | head -20",
-        // Go projects
-        "[ -f go.mod ] && go vet ./... 2>&1 | head -20",
-        // General lint --fix
-        "[ -f .eslintrc* ] && bunx eslint --fix . 2>/dev/null || true",
-      ].join("; ")], {
-        cwd: opts.workingDir,
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      const fixOutput = await new Response(fixProc.stdout).text();
-      const fixExit = await fixProc.exited;
-      if (fixExit === 0 && fixOutput.trim()) {
-        log.debug("Autofix output", { output: fixOutput.slice(0, 200) });
+      const commands = [
+        ["bash", "-c", "[ -f tsconfig.json ] && bunx tsc --noEmit 2>&1 | head -20"],
+        ["bash", "-c", "[ -f go.mod ] && go vet ./... 2>&1 | head -20"],
+        ["bash", "-c", "[ -f .eslintrc ] || [ -f .eslintrc.json ] || [ -f eslint.config.js ] || exit 0; bunx eslint --fix . 2>/dev/null || true"],
+      ];
+      for (const command of commands) {
+        const fixProc = Bun.spawn(command, {
+          cwd: opts.workingDir,
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const fixOutput = await new Response(fixProc.stdout).text();
+        const fixExit = await fixProc.exited;
+        if (fixExit === 0 && fixOutput.trim()) {
+          log.debug("Autofix output", { output: fixOutput.slice(0, 200) });
+        }
       }
     } catch { /* autofix is best-effort */ }
   }
