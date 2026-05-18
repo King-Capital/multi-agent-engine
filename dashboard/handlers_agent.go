@@ -16,13 +16,20 @@ import (
 	"mae.local/dashboard/templates"
 )
 
-// sanitizeSlug strips path traversal components from agent slugs.
-func sanitizeSlug(slug string) string {
-	safe := filepath.Base(slug)
-	if safe == "." || safe == "" || strings.ContainsAny(safe, `/\`) {
-		return "invalid"
+var validAgentSlug = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+
+func validateAgentSlug(slug string) error {
+	if len(slug) == 0 || len(slug) > 128 || !validAgentSlug.MatchString(slug) {
+		return fmt.Errorf("invalid slug: %q", slug)
 	}
-	return safe
+	return nil
+}
+
+func personaPath(slug string) (string, error) {
+	if err := validateAgentSlug(slug); err != nil {
+		return "", err
+	}
+	return filepath.Join("..", "agents", "personas", slug+".md"), nil
 }
 
 func handleAgentsList(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +39,7 @@ func handleAgentsList(w http.ResponseWriter, r *http.Request) {
 
 func handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")
-	if sanitizeSlug(slug) != slug {
+	if err := validateAgentSlug(slug); err != nil {
 		http.Error(w, "invalid slug", http.StatusBadRequest)
 		return
 	}
@@ -109,10 +116,20 @@ func parsePersona(path string) *templates.AgentInfo {
 		hasDelegate := false
 		hasWrite := false
 		for _, t := range tools {
-			if t == "delegate" { hasDelegate = true }
-			if t == "write" || t == "edit" { hasWrite = true }
+			if t == "delegate" {
+				hasDelegate = true
+			}
+			if t == "write" || t == "edit" {
+				hasWrite = true
+			}
 		}
-		if hasDelegate { role = "lead" } else if hasWrite { role = "worker" } else { role = "worker" }
+		if hasDelegate {
+			role = "lead"
+		} else if hasWrite {
+			role = "worker"
+		} else {
+			role = "worker"
+		}
 	}
 
 	skills := parseSkillsWithUseWhen(fm)
@@ -156,7 +173,9 @@ func parsePersona(path string) *templates.AgentInfo {
 func parseYAMLList(fm, key string) []string {
 	re := regexp.MustCompile(`(?m)^` + key + `:\s*\n((?:\s+-\s+.+\n?)*)`)
 	m := re.FindStringSubmatch(fm)
-	if m == nil { return nil }
+	if m == nil {
+		return nil
+	}
 	var items []string
 	scanner := bufio.NewScanner(strings.NewReader(m[1]))
 	for scanner.Scan() {
@@ -194,7 +213,9 @@ func parseSkillsWithUseWhen(fm string) []templates.SkillInfo {
 func parseNestedYAMLList(fm, key string) []string {
 	re := regexp.MustCompile(`(?m)` + key + `:\s*\[(.+?)\]`)
 	m := re.FindStringSubmatch(fm)
-	if m == nil { return nil }
+	if m == nil {
+		return nil
+	}
 	parts := strings.Split(m[1], ",")
 	var items []string
 	for _, p := range parts {
@@ -205,11 +226,11 @@ func parseNestedYAMLList(fm, key string) []string {
 
 func handleGetAgentPrompt(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")
-	if sanitizeSlug(slug) != slug {
+	path, err := personaPath(slug)
+	if err != nil {
 		http.Error(w, "invalid slug", http.StatusBadRequest)
 		return
 	}
-	path := filepath.Join("..", "agents", "personas", slug+".md")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -235,11 +256,11 @@ func handleSaveAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slug := chi.URLParam(r, "slug")
-	if sanitizeSlug(slug) != slug {
+	path, err := personaPath(slug)
+	if err != nil {
 		http.Error(w, "invalid slug", http.StatusBadRequest)
 		return
 	}
-	path := filepath.Join("..", "agents", "personas", slug+".md")
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -295,7 +316,7 @@ func handleSaveAgent(w http.ResponseWriter, r *http.Request) {
 
 func handleAIAssist(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")
-	if sanitizeSlug(slug) != slug {
+	if err := validateAgentSlug(slug); err != nil {
 		http.Error(w, "invalid slug", http.StatusBadRequest)
 		return
 	}
