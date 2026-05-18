@@ -242,6 +242,61 @@ describe("trace-recorder", () => {
     recorder.close?.();
   });
 
+  test("records participant lifecycle and heartbeat fields", () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+    const sessionId = "test-participants";
+
+    recorder.write(makeEntry({
+      session_id: sessionId,
+      component: "event-emitter",
+      msg: "Participant event",
+      trace_type: "participant.start",
+      agent_id: "pi-correctness-lead",
+      participant_id: "pi-correctness-lead",
+      name: "Correctness Lead",
+      kind: "lead",
+      status: "active",
+      role: "lead",
+      team: "Correctness Review",
+      model: "gpt-5.5",
+      capabilities: { canUseTools: true, tools: ["read"] },
+    }));
+    recorder.write(makeEntry({
+      session_id: sessionId,
+      component: "event-emitter",
+      msg: "Participant event",
+      trace_type: "participant.heartbeat",
+      agent_id: "pi-correctness-lead",
+      participant_id: "pi-correctness-lead",
+      status: "active",
+      current_tool: "read",
+      last_event: "tool_call",
+      cost_usd: 0.12,
+      tokens_used: 42,
+    }));
+    recorder.write(makeEntry({
+      session_id: sessionId,
+      component: "event-emitter",
+      msg: "Participant event",
+      trace_type: "participant.stale",
+      agent_id: "pi-correctness-lead",
+      participant_id: "pi-correctness-lead",
+      status: "stale",
+      reason: "no activity for 60s",
+    }));
+
+    const content = readFileSync(join(TEST_TRACE_DIR, `${sessionId}.jsonl`), "utf-8");
+    const events = content.trim().split("\n").map((line) => JSON.parse(line));
+
+    expect(events.map((event: { type: string }) => event.type)).toEqual(["participant.start", "participant.heartbeat", "participant.stale"]);
+    expect(events[0]!.participant_id).toBe("pi-correctness-lead");
+    expect(events[0]!.capabilities.tools).toEqual(["read"]);
+    expect(events[1]!.current_tool).toBe("read");
+    expect(events[1]!.tokens_used).toBe(42);
+    expect(events[2]!.status).toBe("stale");
+    recorder.close?.();
+  });
+
   test("stores agent output artifact metadata without full output", () => {
     const recorder = createTraceRecorder(TEST_TRACE_DIR);
     const sessionId = "test-agent-output";
