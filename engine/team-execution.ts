@@ -63,6 +63,7 @@ export interface PreparedTeamStep {
   leadId: string;
   leadOpts: DelegateOptions;
   leadResolved: { model: string; thinking: import("./types").ThinkingLevel };
+  leadOnly: boolean;
 }
 
 export interface LeadDelegationResult {
@@ -223,24 +224,30 @@ export async function prepareTeamStep(
   await emitter.agentSpawn(session.id, leadId, "orch-1", teamConfig.lead.name, "lead",
     leadResolved.model, teamConfig["team-name"], teamConfig["team-color"]);
 
-  // Lead gets the task + team roster -- produces a briefing for workers
+  const leadOnly = step.lead_only === true || process.env.MAE_CERTIFICATION_MODE === "1";
+
+  // Lead gets either the task directly (lead-only mode) or the task + team roster
+  // to produce a briefing for workers.
   const members = teamConfig.members.map((m) => `- ${m.name}: ${m["consult-when"] ?? "general tasks"}`).join("\n");
-  const prefilledAssignments = teamConfig.members.map((m) => {
+  const prefilledAssignments = leadOnly ? [] : teamConfig.members.map((m) => {
     const focus = m["consult-when"] ?? "general tasks";
     return `\n### ASSIGNMENT: ${m.name}\nFocus: ${focus}\nOne task only: [one narrow, concrete review task this worker can do very well]\nFiles: [specific target files/directories]\nExpected output: findings with file path, line number, severity (P0-P3), description, fix`;
   });
   const leadPrompt = [
     `Task: ${task}`,
     previousOutput ? `\nContext from previous step:\n${previousOutput}` : "",
-    `\nYour team:\n${members}`,
-    `\nYour ONLY job: produce worker assignments. Do NOT do the review yourself.`,
-    `Assign every worker exactly one narrow task. Do not give broad multi-part review blobs.`,
-    `Start all workers immediately by filling every assignment below; each worker owns its task until complete.`,
-    `Scan the directory structure (ls, find) to identify target files, then fill in the assignments below.`,
-    `Keep it fast — 5 tool calls max. The workers will do the deep analysis.`,
+    leadOnly
+      ? `\nLEAD-ONLY MODE: do the assigned work yourself. Do not produce worker assignments and do not attempt to spawn or brief workers.`
+      : `\nYour team:\n${members}`,
+    leadOnly ? `Return the requested report directly with concrete evidence.` : `\nYour ONLY job: produce worker assignments. Do NOT do the review yourself.`,
+    leadOnly ? `If the task mentions CERTIFICATION_CONTRACT, do not emit it. CERTIFICATION_CONTRACT is synthesis-only. Your team output must follow the REVIEW_REPORT or SQUAD_REPORT schema requested by this step.` : "",
+    leadOnly ? "" : `Assign every worker exactly one narrow task. Do not give broad multi-part review blobs.`,
+    leadOnly ? "" : `Start all workers immediately by filling every assignment below; each worker owns its task until complete.`,
+    leadOnly ? `Scan the relevant files and run lightweight evidence commands as needed.` : `Scan the directory structure (ls, find) to identify target files, then fill in the assignments below.`,
+    leadOnly ? "" : `Keep it fast — 5 tool calls max. The workers will do the deep analysis.`,
     ...prefilledAssignments,
     step.till_done ? `\nTill done:\n${step.till_done.map((t) => `- [ ] ${typeof t === "string" ? t : t.text}`).join("\n")}` : "",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
   // Apply per-step overrides from chain config
   const leadSystemPrompt = step.system_prompt_append
@@ -274,7 +281,7 @@ export async function prepareTeamStep(
     sendMessage: buildSendMessage(messageSenders, session.id, leadId),
   };
 
-  return { teamConfig, leadPersona, leadId, leadOpts, leadResolved };
+  return { teamConfig, leadPersona, leadId, leadOpts, leadResolved, leadOnly };
 }
 
 // ---------------------------------------------------------------------------
@@ -313,8 +320,8 @@ export async function delegateToLead(
   const leadSummary = summarizeOutput(leadResult.output, 2000);
   await emitter.message(session.id, leadId, teamConfig.lead.name, "user", leadSummary);
 
-  // Early return if lead failed or no workers
-  if (leadResult.grade === "FAILED" || !teamConfig.members.length) {
+  // Early return if lead failed, this step is lead-only, or no workers exist.
+  if (leadResult.grade === "FAILED" || prepared.leadOnly || !teamConfig.members.length) {
     await emitter.agentDone(session.id, leadId, leadResult.grade, leadResult.costUsd, {
       outputArtifact: leadResult.outputArtifact,
       taskReport: leadResult.taskReport,
@@ -837,6 +844,7 @@ export function buildParallelTeamStep(step: ChainStep, teamStep: ParallelTeamSte
   return {
     team: teamStep.team,
     read_only: teamStep.read_only ?? step.read_only,
+    lead_only: teamStep.lead_only ?? step.lead_only,
     tools_override: teamStep.tools_override ?? step.tools_override,
     system_prompt_append: systemPromptAppend,
     till_done: teamStep.till_done ?? step.till_done,
@@ -979,13 +987,31 @@ export async function runParallelStep(
     "",
     teamOutputs,
     "",
-    "Produce a unified report. If team outputs contain REVIEW_REPORT or SQUAD_REPORT schema blocks, preserve those raw blocks verbatim in a final MACHINE_READABLE_APPENDIX so deterministic gates can verify them.",
-    "",
+    "Produce a unified report with these sections before the final contract:",
     "1. **Agreements** — findings all teams agree on",
     "2. **Conflicts** — where teams disagree, resolve each with reasoning",
     "3. **Unique findings** — found by only one team, validate or dismiss",
     "4. **Final prioritized list** (P0-P3)",
     "5. **GRADE:** PASS | FEEDBACK | FAILED",
+    "",
+    "If team outputs contain REVIEW_REPORT or SQUAD_REPORT schema blocks, preserve those raw blocks verbatim in a MACHINE_READABLE_APPENDIX before the final contract so deterministic gates can verify them.",
+    "",
+    "MANDATORY FINAL OUTPUT: The last lines of your response MUST be exactly one machine-readable CERTIFICATION_CONTRACT block. Do not use a markdown heading for it. Do not wrap it in backticks or a code fence. Do not emit prose-only variants such as 'Certification Contract'. Use concrete values only; do not copy placeholder text such as pass|fail, <integer>, or true|false.",
+    "CERTIFICATION_CONTRACT:",
+    "schema_version: 1",
+    `session_id: ${session.id}`,
+    `artifact_ref: synth-${session.id.slice(0, 8)}`,
+    "verdict: choose exactly one concrete value: pass or fail",
+    "p0_count: output one non-negative integer",
+    "p1_count: output one non-negative integer",
+    "perspectives_covered: correctness, adversarial, quality, security, domain",
+    "blockers: none, or semicolon-separated concrete P0/P1 blockers",
+    failedTeams.length > 0 ? `failed_teams: ${failedTeams.map(f => f.name).join(", ")}` : "failed_teams: none",
+    "certification_ready: choose exactly one concrete value: true or false",
+    "CONTRACT SEMANTICS: if p0_count > 0 or p1_count > 0, verdict MUST be fail and certification_ready MUST be false.",
+    "CONTRACT SEMANTICS: if any failed_teams value is not none, verdict MUST be fail and certification_ready MUST be false.",
+    "CONTRACT SEMANTICS: verdict pass and certification_ready true are allowed only when p0_count is 0, p1_count is 0, blockers is none, failed_teams is none, and all five perspectives are covered.",
+    "END_CERTIFICATION_CONTRACT",
     failedTeamNotice,
   ].join("\n");
 
@@ -994,7 +1020,7 @@ export async function runParallelStep(
 
   const synthOpts: DelegateOptions = {
     persona: synthPersona,
-    systemPrompt: "You are synthesizing parallel team outputs into a unified report. Be objective. Resolve conflicts with evidence. Deduplicate findings.",
+    systemPrompt: "You are synthesizing parallel team outputs into a unified report. Be objective. Resolve conflicts with evidence. Deduplicate findings. Your response must end with the exact CERTIFICATION_CONTRACT block requested by the user prompt; never replace it with prose, markdown headings, or code fences.",
     userPrompt: synthesisPrompt,
     model: synthResolved.model,
     thinking: synthResolved.thinking,

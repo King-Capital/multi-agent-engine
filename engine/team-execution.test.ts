@@ -194,6 +194,7 @@ describe("buildParallelTeamStep", () => {
       parallel: [{ team: "Architecture Squad" }],
       tools_override: ["read"],
       system_prompt_append: "Parent instructions.",
+      lead_only: true,
     });
 
     const built = buildParallelTeamStep(step, step.parallel![0]!);
@@ -201,6 +202,15 @@ describe("buildParallelTeamStep", () => {
     expect(built.team).toBe("Architecture Squad");
     expect(built.tools_override).toEqual(["read"]);
     expect(built.system_prompt_append).toBe("Parent instructions.");
+    expect(built.lead_only).toBe(true);
+  });
+
+  test("allows parallel teams to opt into lead-only execution", () => {
+    const step = makeStep({ parallel: [{ team: "Correctness Review", lead_only: true }] });
+
+    const built = buildParallelTeamStep(step, step.parallel![0]!);
+
+    expect(built.lead_only).toBe(true);
   });
 });
 
@@ -525,6 +535,7 @@ describe("delegateToLead", () => {
         teamColor: "#ff0000",
       },
       leadResolved: { model: "opus", thinking: "medium" as const },
+      leadOnly: false,
     };
 
     const deps = {
@@ -568,6 +579,7 @@ describe("delegateToLead", () => {
         teamColor: "#ff0000",
       },
       leadResolved: { model: "opus", thinking: "medium" as const },
+      leadOnly: false,
     };
 
     const deps = {
@@ -608,6 +620,7 @@ describe("delegateToLead", () => {
         teamColor: "#ff0000",
       },
       leadResolved: { model: "opus", thinking: "medium" as const },
+      leadOnly: false,
     };
 
     const deps = {
@@ -619,6 +632,48 @@ describe("delegateToLead", () => {
     const result = await delegateToLead(deps, session, prepared, adapter);
 
     expect(result.earlyReturn).toBeDefined();
+  });
+
+  test("returns earlyReturn for explicit lead-only steps without relying on prompt text", async () => {
+    const session = makeSession();
+    const adapter = makeMockAdapter({
+      delegate: async () => makeResult("Lead", "lead", {
+        output: "REVIEW_REPORT: Correctness\nSCOPE: target\nCOMMANDS_RUN: none\nFINDINGS: none\nBLOCKERS: none\nVERDICT: pass",
+        grade: "VERIFIED",
+      }),
+    });
+
+    const prepared: PreparedTeamStep = {
+      teamConfig: makeTeamConfig(),
+      leadPersona: { name: "Lead", model: "opus", expertise: "", skills: [], tools: ["read"], domain: { read: ["**/*"], write: [], update: [] } },
+      leadId: "test-lead",
+      leadOpts: {
+        persona: { name: "Lead", model: "opus", expertise: "", skills: [], tools: ["read"], domain: { read: ["**/*"], write: [], update: [] } },
+        systemPrompt: "You are a lead",
+        userPrompt: "Do the thing directly",
+        model: "opus",
+        thinking: "medium" as const,
+        tools: ["read"],
+        domain: { read: ["**/*"], write: [], update: [] },
+        workingDir: "/tmp",
+        sessionDir: "data/sessions/test",
+        teamName: "TestTeam",
+        teamColor: "#ff0000",
+      },
+      leadResolved: { model: "opus", thinking: "medium" as const },
+      leadOnly: true,
+    };
+
+    const deps = {
+      emitter: makeStubEmitter(),
+      checkBudget: () => {},
+      untrackActivity: () => {},
+    };
+
+    const result = await delegateToLead(deps, session, prepared, adapter);
+
+    expect(result.earlyReturn).toBeDefined();
+    expect(result.earlyReturn!.output).toContain("REVIEW_REPORT: Correctness");
   });
 
   test("accumulates cost and tokens on session", async () => {
@@ -645,6 +700,7 @@ describe("delegateToLead", () => {
         teamColor: "#ff0000",
       },
       leadResolved: { model: "opus", thinking: "medium" as const },
+      leadOnly: false,
     };
 
     const deps = {

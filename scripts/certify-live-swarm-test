@@ -1,0 +1,351 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MAE_CERT_SOURCE_ONLY=1 source "$root/scripts/certify-live-swarm"
+
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/mae-cert-test.XXXXXX")"
+trap 'rm -rf "$tmpdir"' EXIT
+
+pass_count=0
+
+write_case() {
+  local name="$1"
+  local body="$2"
+  printf '%s\n' "$body" > "$tmpdir/$name.txt"
+}
+
+expect_success() {
+  local label="$1"
+  shift
+  if "$@"; then
+    pass_count=$((pass_count + 1))
+  else
+    echo "FAIL expected success: $label" >&2
+    exit 1
+  fi
+}
+
+expect_failure() {
+  local label="$1"
+  shift
+  if ( "$@" ) >/dev/null 2>&1; then
+    echo "FAIL expected failure: $label" >&2
+    exit 1
+  else
+    pass_count=$((pass_count + 1))
+  fi
+}
+
+write_case clean "VERDICT: PASS
+No P0/P1 blockers found."
+expect_failure "clean no blocker language is not a blocker" has_actual_blocker "$tmpdir/clean.txt"
+
+write_case blocker_severity_first "P1 finding: command injection in server.ts"
+expect_success "severity-first blocker detected" has_actual_blocker "$tmpdir/blocker_severity_first.txt"
+
+write_case blocker_signal_first "Finding: P0 unsafe exec command injection"
+expect_success "signal-first blocker detected" has_actual_blocker "$tmpdir/blocker_signal_first.txt"
+
+write_case seeded "P1 finding: command injection via exec(\"nslookup \" + name)"
+expect_success "seeded evidence accepts normal lowercase n text" has_seeded_command_injection_evidence "$tmpdir/seeded.txt"
+
+write_case seeded_inverse "command injection through child_process exec is P0"
+expect_success "seeded evidence accepts evidence before severity" has_seeded_command_injection_evidence "$tmpdir/seeded_inverse.txt"
+
+write_case prompt_echo "Prompt says find command injection, but no severity assigned."
+expect_failure "prompt echo without severity rejected" has_seeded_command_injection_evidence "$tmpdir/prompt_echo.txt"
+
+write_case negated_ready "This is not certification ready because it lacks the required readiness marker."
+expect_failure "negated readiness rejected" marks_certification_ready "$tmpdir/negated_ready.txt"
+
+write_case false_ready "Certification ready: false
+certification_ready: false"
+expect_failure "false readiness rejected" marks_certification_ready "$tmpdir/false_ready.txt"
+
+write_case true_ready "Certification ready: true"
+expect_success "true readiness accepted" marks_certification_ready "$tmpdir/true_ready.txt"
+
+write_case prompt_echo_ready "The fixture lacks CERTIFICATION_READY marker."
+expect_failure "prompt echo readiness marker rejected" marks_certification_ready "$tmpdir/prompt_echo_ready.txt"
+
+write_case explicit_marker "CERTIFICATION_READY"
+expect_success "exact explicit marker is ready" marks_certification_ready "$tmpdir/explicit_marker.txt"
+
+trace_dir="$tmpdir/traces"
+session_id="00000000-0000-0000-0000-000000000001"
+mkdir -p "$trace_dir/$session_id/artifacts"
+printf 'synthesis output\n' > "$trace_dir/$session_id/artifacts/synth-00000000-output-abc.txt"
+printf '%s\n' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000001","agent_id":"worker","output_artifact":"00000000-0000-0000-0000-000000000001/artifacts/worker-output-abc.txt"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000001","agent_id":"synth-00000000","output_artifact":"00000000-0000-0000-0000-000000000001/artifacts/synth-00000000-output-abc.txt"}' \
+  > "$trace_dir/$session_id.jsonl"
+artifact="$(review_report_path "$session_id" "$tmpdir/fallback.txt")"
+[[ "$artifact" == "$trace_dir/$session_id/artifacts/synth-00000000-output-abc.txt" ]] || {
+  echo "FAIL expected synthesis artifact, got $artifact" >&2
+  exit 1
+}
+pass_count=$((pass_count + 1))
+
+nograde_session="00000000-0000-0000-0000-000000000002"
+mkdir -p "$trace_dir/$nograde_session/artifacts"
+printf 'CERTIFICATION_CONTRACT:\nschema_version: 1\nverdict: pass\np0_count: 0\np1_count: 0\nperspectives_covered: correctness, adversarial, quality, security, domain\nblockers: none\nfailed_teams: none\ncertification_ready: true\nEND_CERTIFICATION_CONTRACT\n' > "$trace_dir/$nograde_session/artifacts/pi-orchestrator-output-final.txt"
+printf '%s\n' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000002","agent_id":"pi-orchestrator","output_artifact":"00000000-0000-0000-0000-000000000002/artifacts/pi-orchestrator-output-draft.txt"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000002","agent_id":"pi-orchestrator","output_artifact":"00000000-0000-0000-0000-000000000002/artifacts/pi-orchestrator-output-final.txt"}' \
+  > "$trace_dir/$nograde_session.jsonl"
+nograde_artifact="$(review_report_path "$nograde_session" "$tmpdir/fallback.txt")"
+[[ "$nograde_artifact" == "$trace_dir/$nograde_session/artifacts/pi-orchestrator-output-final.txt" ]] || {
+  echo "FAIL expected no-grade pi orchestrator artifact, got $nograde_artifact" >&2
+  exit 1
+}
+pass_count=$((pass_count + 1))
+
+write_case contract_clean "CERTIFICATION_CONTRACT:
+schema_version: 1
+session_id: test
+artifact_ref: test
+verdict: pass
+p0_count: 0
+p1_count: 0
+perspectives_covered: correctness, adversarial, quality, security, domain
+blockers: none
+failed_teams: none
+certification_ready: true
+END_CERTIFICATION_CONTRACT"
+expect_success "clean contract validates" validate_certification_contract "$tmpdir/contract_clean.txt" clean
+
+write_case contract_clean_legacy "VERDICT:       PASS
+P0_BLOCKERS:   0
+P1_BLOCKERS:   0
+PERSPECTIVES:  correctness=CLEAN adversarial=CLEAN quality=CLEAN security=CLEAN domain=CLEAN
+CERTIFICATION:  The clean fixture contains no P0/P1 blockers and passes all five canonical review perspectives."
+expect_failure "legacy clean contract rejected" validate_certification_contract "$tmpdir/contract_clean_legacy.txt" clean
+
+write_case contract_placeholder "CERTIFICATION_CONTRACT:
+schema_version: 1
+verdict: pass|fail
+p0_count: <integer>
+p1_count: <integer>
+perspectives_covered: correctness, adversarial, quality, security, domain
+blockers: none
+failed_teams: none
+certification_ready: true|false
+END_CERTIFICATION_CONTRACT"
+expect_failure "placeholder contract rejected" validate_certification_contract "$tmpdir/contract_placeholder.txt" clean
+
+write_case failing_contradictory "CERTIFICATION_CONTRACT:
+schema_version: 1
+session_id: test
+artifact_ref: test
+verdict: pass
+p0_count: 0
+p1_count: 0
+perspectives_covered: correctness, adversarial, quality, security, domain
+blockers: none
+failed_teams: none
+certification_ready: false
+END_CERTIFICATION_CONTRACT"
+expect_failure "failing contract requires fail verdict" validate_certification_contract "$tmpdir/failing_contradictory.txt" failing
+
+printf '%s\n' '{"event_type":"worker_failed","session_id":"00000000-0000-0000-0000-000000000001"}' >> "$trace_dir/$session_id.jsonl"
+expect_success "operational failure detected" trace_has_operational_failures "$trace_dir/$session_id.jsonl"
+
+write_case contract_missing_ready "CERTIFICATION_CONTRACT:
+schema_version: 1
+verdict: pass
+p0_count: 0
+p1_count: 0
+perspectives_covered: correctness, adversarial, quality, security, domain
+blockers: none
+failed_teams: none
+END_CERTIFICATION_CONTRACT"
+expect_failure "contract missing certification_ready rejected" validate_certification_contract "$tmpdir/contract_missing_ready.txt" clean
+
+write_case contract_failed_team_ready "CERTIFICATION_CONTRACT:
+schema_version: 1
+verdict: pass
+p0_count: 0
+p1_count: 0
+perspectives_covered: correctness, adversarial, quality, security, domain
+blockers: none
+failed_teams: Security Review
+certification_ready: true
+END_CERTIFICATION_CONTRACT"
+expect_failure "contract with failed team rejected" validate_certification_contract "$tmpdir/contract_failed_team_ready.txt" clean
+
+make_health_trace() {
+  local id="$1"
+  local lead_count="${2:-5}"
+  local extra="${3:-}"
+  local leads=("pi-correctness-lead" "pi-adversarial-lead" "pi-quality-lead" "pi-security-lead" "pi-domain-lead")
+  local teams=("Correctness Review" "Adversarial Review" "Quality Review" "Security Review" "Domain Review")
+  mkdir -p "$trace_dir/$id/artifacts"
+  {
+    printf '%s\n' '{"type":"session.start","session_id":"'"$id"'"}'
+    local i=0
+    while [[ "$i" -lt "$lead_count" && "$i" -lt "${#leads[@]}" ]]; do
+      printf '%s\n' '{"type":"agent.end","session_id":"'"$id"'","agent_id":"'"${leads[$i]}"'","team":"'"${teams[$i]}"'"}'
+      i=$((i + 1))
+    done
+    if [[ -n "$extra" ]]; then
+      printf '%s\n' "$extra"
+    fi
+    printf '%s\n' '{"type":"session.end","session_id":"'"$id"'","status":"completed"}'
+  } > "$trace_dir/$id.jsonl"
+}
+
+health_session="00000000-0000-0000-0000-000000000003"
+make_health_trace "$health_session" 5
+adapter=pi
+mkdir -p "$tmpdir/mae-cert.current/failing"
+workdir="$(cd "$tmpdir/mae-cert.current" && pwd -P)"
+expect_success "healthy live trace with 5 leads accepted" require_trace_health "$health_session" failing
+
+normalized_path_session="00000000-0000-0000-0000-000000000011"
+normalized_path_event='{"type":"tool.call","session_id":"00000000-0000-0000-0000-000000000011","args_preview":"'"$workdir"'/failing/README.md"}'
+make_health_trace "$normalized_path_session" 5 "$normalized_path_event"
+expect_success "tool call inside normalized cert dir accepted" require_trace_health "$normalized_path_session" failing
+
+missing_lead_session="00000000-0000-0000-0000-000000000004"
+make_health_trace "$missing_lead_session" 4
+expect_failure "missing lead completion rejected (4 of 5)" require_trace_health "$missing_lead_session" failing
+
+wrong_five_leads_session="00000000-0000-0000-0000-000000000018"
+mkdir -p "$trace_dir/$wrong_five_leads_session/artifacts"
+printf '%s\n' \
+  '{"type":"session.start","session_id":"00000000-0000-0000-0000-000000000018"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000018","agent_id":"pi-correctness-lead","team":"Correctness Review","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000018","agent_id":"pi-quality-lead","team":"Quality Review","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000018","agent_id":"pi-planning-lead","team":"Planning","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000018","agent_id":"pi-engineering-lead","team":"Engineering","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000018","agent_id":"pi-validation-lead","team":"Validation","grade":"VERIFIED"}' \
+  '{"type":"session.end","session_id":"00000000-0000-0000-0000-000000000018","status":"completed"}' \
+  > "$trace_dir/$wrong_five_leads_session.jsonl"
+expect_failure "five wrong/non-canonical leads rejected" require_trace_health "$wrong_five_leads_session" failing
+
+empty_output_session="00000000-0000-0000-0000-000000000005"
+make_health_trace "$empty_output_session" 5
+printf 'ERROR: Empty output\n' > "$trace_dir/$empty_output_session/artifacts/pi-security-reviewer-output-empty.txt"
+printf '%s\n' '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000005","agent_id":"pi-security-reviewer","grade":"FAILED","output_artifact":"00000000-0000-0000-0000-000000000005/artifacts/pi-security-reviewer-output-empty.txt"}' >> "$trace_dir/$empty_output_session.jsonl"
+expect_failure "unsuperseded empty output artifact rejected" require_trace_health "$empty_output_session" failing
+
+retried_empty_output_session="00000000-0000-0000-0000-000000000013"
+make_health_trace "$retried_empty_output_session" 5
+printf 'ERROR: Empty output\n' > "$trace_dir/$retried_empty_output_session/artifacts/pi-security-engineer-output-empty.txt"
+printf 'REVIEW_REPORT: Security SCOPE: retry completed COMMANDS_RUN: none FINDINGS: none BLOCKERS: none VERDICT: pass\nGRADE: PASS\n' > "$trace_dir/$retried_empty_output_session/artifacts/pi-security-engineer-output-success.txt"
+printf '%s\n' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000013","agent_id":"pi-security-engineer","grade":"FAILED","output_artifact":"00000000-0000-0000-0000-000000000013/artifacts/pi-security-engineer-output-empty.txt"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000013","agent_id":"pi-security-engineer","grade":"VERIFIED","output_artifact":"00000000-0000-0000-0000-000000000013/artifacts/pi-security-engineer-output-success.txt"}' \
+  >> "$trace_dir/$retried_empty_output_session.jsonl"
+expect_success "superseded empty output retry accepted" require_trace_health "$retried_empty_output_session" failing
+
+scope_drift_session="00000000-0000-0000-0000-000000000006"
+make_health_trace "$scope_drift_session" 5 '{"type":"tool.call","session_id":"00000000-0000-0000-0000-000000000006","args_preview":"/tmp/mae-cert.OLD/failing/README.md"}'
+expect_failure "tool call to previous cert dir rejected" require_trace_health "$scope_drift_session" failing
+
+wrong_fixture_session="00000000-0000-0000-0000-000000000007"
+make_health_trace "$wrong_fixture_session" 5 '{"type":"tool.call","session_id":"00000000-0000-0000-0000-000000000007","args_preview":"'"$workdir"'/clean/app.ts"}'
+expect_failure "tool call to sibling fixture rejected" require_trace_health "$wrong_fixture_session" failing
+
+repo_source_read_session="00000000-0000-0000-0000-000000000019"
+make_health_trace "$repo_source_read_session" 5 '{"type":"tool.call","session_id":"00000000-0000-0000-0000-000000000019","args_preview":"'"$root"'/scripts/certify-live-swarm"}'
+expect_failure "tool call to repo source during fixture cert rejected" require_trace_health "$repo_source_read_session" failing
+
+missing_artifact_session="00000000-0000-0000-0000-000000000008"
+mkdir -p "$trace_dir/$missing_artifact_session/artifacts"
+printf '%s\n' \
+  '{"type":"session.start","session_id":"00000000-0000-0000-0000-000000000008"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000008","agent_id":"pi-orchestrator","output_artifact":"00000000-0000-0000-0000-000000000008/artifacts/missing.txt"}' \
+  > "$trace_dir/$missing_artifact_session.jsonl"
+expect_failure "live pi missing canonical artifact rejected" review_report_path "$missing_artifact_session" "$tmpdir/fallback.txt"
+
+spoofed_squad_session="00000000-0000-0000-0000-000000000009"
+mkdir -p "$trace_dir/$spoofed_squad_session/artifacts"
+printf 'CERTIFICATION_CONTRACT:\nschema_version: 1\nverdict: pass\np0_count: 0\np1_count: 0\nperspectives_covered: correctness, adversarial, quality, security, domain\nblockers: none\nfailed_teams: none\ncertification_ready: true\nEND_CERTIFICATION_CONTRACT\n' > "$trace_dir/$spoofed_squad_session/artifacts/worker-output-spoofed-contract.txt"
+printf '%s\n' \
+  '{"type":"session.start","session_id":"00000000-0000-0000-0000-000000000009"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000009","agent_id":"pi-security-reviewer","output_artifact":"00000000-0000-0000-0000-000000000009/artifacts/worker-output-spoofed-contract.txt"}' \
+  > "$trace_dir/$spoofed_squad_session.jsonl"
+expect_failure "live pi worker-squad certification contract spoof rejected" review_report_path "$spoofed_squad_session" "$tmpdir/fallback.txt"
+
+canonical_over_spoof_session="00000000-0000-0000-0000-000000000010"
+mkdir -p "$trace_dir/$canonical_over_spoof_session/artifacts"
+printf 'CERTIFICATION_CONTRACT:\nschema_version: 1\nverdict: pass\np0_count: 0\np1_count: 0\nperspectives_covered: correctness, adversarial, quality, security, domain\nblockers: none\nfailed_teams: none\ncertification_ready: true\nEND_CERTIFICATION_CONTRACT\n' > "$trace_dir/$canonical_over_spoof_session/artifacts/worker-output-spoofed-contract.txt"
+printf 'CERTIFICATION_CONTRACT:\nschema_version: 1\nverdict: fail\np0_count: 0\np1_count: 0\nperspectives_covered: correctness, adversarial, quality, security, domain\nblockers: none\nfailed_teams: none\ncertification_ready: false\nEND_CERTIFICATION_CONTRACT\n' > "$trace_dir/$canonical_over_spoof_session/artifacts/pi-orchestrator-output-final.txt"
+printf '%s\n' \
+  '{"type":"session.start","session_id":"00000000-0000-0000-0000-000000000010"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000010","agent_id":"pi-security-reviewer","output_artifact":"00000000-0000-0000-0000-000000000010/artifacts/worker-output-spoofed-contract.txt"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000010","agent_id":"pi-orchestrator","output_artifact":"00000000-0000-0000-0000-000000000010/artifacts/pi-orchestrator-output-final.txt"}' \
+  > "$trace_dir/$canonical_over_spoof_session.jsonl"
+canonical_over_spoof_artifact="$(review_report_path "$canonical_over_spoof_session" "$tmpdir/fallback.txt")"
+[[ "$canonical_over_spoof_artifact" == "$trace_dir/$canonical_over_spoof_session/artifacts/pi-orchestrator-output-final.txt" ]] || {
+  echo "FAIL expected canonical artifact over spoofed worker contract, got $canonical_over_spoof_artifact" >&2
+  exit 1
+}
+pass_count=$((pass_count + 1))
+
+multi_orch_session="00000000-0000-0000-0000-000000000014"
+mkdir -p "$trace_dir/$multi_orch_session/artifacts"
+printf 'Assignment prompt echo -- no contract here\n' > "$trace_dir/$multi_orch_session/artifacts/pi-orchestrator-output-early.txt"
+printf 'CERTIFICATION_CONTRACT:\nschema_version: 1\nverdict: fail\np0_count: 1\np1_count: 0\nperspectives_covered: correctness, adversarial, quality, security, domain\nblockers: missing readiness marker\nfailed_teams: none\ncertification_ready: false\nEND_CERTIFICATION_CONTRACT\n' > "$trace_dir/$multi_orch_session/artifacts/pi-orchestrator-output-synth.txt"
+printf 'Periodic prose report -- no strict contract\n' > "$trace_dir/$multi_orch_session/artifacts/pi-orchestrator-output-late.txt"
+printf '%s\n' \
+  '{"type":"session.start","session_id":"00000000-0000-0000-0000-000000000014"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000014","agent_id":"pi-orchestrator","output_artifact":"00000000-0000-0000-0000-000000000014/artifacts/pi-orchestrator-output-early.txt"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000014","agent_id":"pi-orchestrator","output_artifact":"00000000-0000-0000-0000-000000000014/artifacts/pi-orchestrator-output-synth.txt"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000014","agent_id":"pi-orchestrator","output_artifact":"00000000-0000-0000-0000-000000000014/artifacts/pi-orchestrator-output-late.txt"}' \
+  > "$trace_dir/$multi_orch_session.jsonl"
+multi_orch_artifact="$(review_report_path "$multi_orch_session" "$tmpdir/fallback.txt")"
+[[ "$multi_orch_artifact" == "$trace_dir/$multi_orch_session/artifacts/pi-orchestrator-output-synth.txt" ]] || {
+  echo "FAIL expected canonical artifact with CERTIFICATION_CONTRACT preferred over later prose output, got $multi_orch_artifact" >&2
+  exit 1
+}
+pass_count=$((pass_count + 1))
+
+worker_spawn_session="00000000-0000-0000-0000-000000000015"
+mkdir -p "$trace_dir/$worker_spawn_session/artifacts"
+printf '%s\n' \
+  '{"type":"session.start","session_id":"00000000-0000-0000-0000-000000000015"}' \
+  '{"type":"agent.start","session_id":"00000000-0000-0000-0000-000000000015","team":"Correctness Review","msg":"Delegating to team"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000015","agent_id":"Correctness Review-lead","team":"Correctness Review","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000015","agent_id":"Adversarial Review-lead","team":"Adversarial Review","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000015","agent_id":"Quality Review-lead","team":"Quality Review","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000015","agent_id":"Security Review-lead","team":"Security Review","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000015","agent_id":"Domain Review-lead","team":"Domain Review","grade":"VERIFIED"}' \
+  '{"type":"agent.start","session_id":"00000000-0000-0000-0000-000000000015","agent_id":"Security Review-input-auditor","team":"Security Review","msg":"Lead briefed, spawning workers"}' \
+  > "$trace_dir/$worker_spawn_session.jsonl"
+adapter=pi
+workdir="$tmpdir/cert-root"
+mkdir -p "$workdir"
+expect_failure "live pi Phase 1 worker spawn rejected" require_trace_health "$worker_spawn_session"
+
+lead_only_session="00000000-0000-0000-0000-000000000016"
+printf '%s\n' \
+  '{"type":"session.start","session_id":"00000000-0000-0000-0000-000000000016"}' \
+  '{"type":"agent.start","session_id":"00000000-0000-0000-0000-000000000016","team":"Correctness Review","msg":"Delegating to team"}' \
+  '{"type":"agent.start","session_id":"00000000-0000-0000-0000-000000000016","agent_id":"pi-correctness-lead","team":"Correctness Review","msg":"Spawning pi-rpc agent"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000016","agent_id":"pi-correctness-lead","team":"Correctness Review","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000016","agent_id":"pi-adversarial-lead","team":"Adversarial Review","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000016","agent_id":"pi-quality-lead","team":"Quality Review","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000016","agent_id":"pi-security-lead","team":"Security Review","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000016","agent_id":"pi-domain-lead","team":"Domain Review","grade":"VERIFIED"}' \
+  > "$trace_dir/$lead_only_session.jsonl"
+expect_success "live pi Phase 1 lead-only trace accepted" require_trace_health "$lead_only_session"
+
+leaked_contract_session="00000000-0000-0000-0000-000000000017"
+mkdir -p "$trace_dir/$leaked_contract_session/artifacts"
+printf 'CERTIFICATION_CONTRACT:\nschema_version: 1\nverdict: fail\np0_count: 1\np1_count: 0\nperspectives_covered: correctness, adversarial, quality, security, domain\nblockers: lead leaked final contract\nfailed_teams: none\ncertification_ready: false\nEND_CERTIFICATION_CONTRACT\n' > "$trace_dir/$leaked_contract_session/artifacts/pi-correctness-lead-output-leaked.txt"
+printf '%s\n' \
+  '{"type":"session.start","session_id":"00000000-0000-0000-0000-000000000017"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000017","agent_id":"pi-correctness-lead","team":"Correctness Review","grade":"VERIFIED","output_artifact":"00000000-0000-0000-0000-000000000017/artifacts/pi-correctness-lead-output-leaked.txt"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000017","agent_id":"pi-adversarial-lead","team":"Adversarial Review","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000017","agent_id":"pi-quality-lead","team":"Quality Review","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000017","agent_id":"pi-security-lead","team":"Security Review","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000017","agent_id":"pi-domain-lead","team":"Domain Review","grade":"VERIFIED"}' \
+  > "$trace_dir/$leaked_contract_session.jsonl"
+expect_failure "live pi non-synthesis certification contract rejected" require_trace_health "$leaked_contract_session"
+
+adapter=echo
+
+printf 'certify-live-swarm tests passed: %s\n' "$pass_count"

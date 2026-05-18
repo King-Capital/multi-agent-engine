@@ -1,0 +1,185 @@
+# Standard Swarm v2 Decision Log
+
+Canonical PRD: `../standard-swarm-v2-prd-workflow.md`
+
+Use this file to record implementation decisions during future goal sessions.
+
+## Existing planning decisions
+
+### D-001 — v2 before v2.1
+
+Decision:
+
+Implement Standard Swarm v2 production hardening first. Defer A2A, scoped sub-buses, authority-weighted peer conflict resolution, and peer challenge until after a post-v2 evidence gate.
+
+Reason:
+
+The foundation must prove lifecycle, observability, validation, spawn discipline, and steer traceability before adding peer communication complexity.
+
+### D-002 — Validator is deterministic first
+
+Decision:
+
+Validator/verifier must check trace/artifact evidence deterministically. LLM commentary may be optional but cannot override deterministic evidence checks.
+
+Reason:
+
+Validator should prevent drift from evidence, not become another opinion agent.
+
+### D-003 — Practical validation, not routine live swarms
+
+Decision:
+
+Use targeted tests and local full verification bundles for each phase. Do not run full live Pi swarms as routine validation. Live Pi requires explicit user approval and is milestone-only.
+
+Reason:
+
+Live swarms are expensive, slow, noisy, and unsuitable as normal feedback loops.
+
+### D-004 — Structured workflow per phase
+
+Decision:
+
+Every phase follows Scope → Tasks → Implementation → Lint/Type/Test → Fixes.
+
+Reason:
+
+This reduces drift and makes phase completion auditable.
+
+### D-005 — Docs are source of truth
+
+Decision:
+
+Use the PRD/execution docs as the default basis for implementation decisions. Keep docs updated as work progresses. Do not rethink or rewrite working code paths without evidence and an explicit decision entry.
+
+Reason:
+
+The docs exist to reduce drift and prevent agents from repeatedly re-litigating already-working parts of MAE.
+
+### D-006 — Observed failures become regressions
+
+Decision:
+
+Every observed certification/orchestration failure that reaches manual debugging must become a regression fixture/test before the fix is considered complete, when practical.
+
+Reason:
+
+MAE has repeatedly rediscovered failures such as missing lead lifecycle, empty output artifacts, and scope drift. Regression tests prevent recurrence.
+
+### D-007 — Older certification foundation issues are v2 prerequisites
+
+Decision:
+
+Treat #288, #318, #319, #320, #321, #322, #323, and #326 as certification-foundation inputs to Standard Swarm v2, not unrelated backlog. Phase 0 must triage them, Phase 1 must absorb open lifecycle/parser/artifact/contract blockers, and Phase 3 must absorb open validator/contract-boundary blockers.
+
+Reason:
+
+The v2 plan depends on trusted certification evidence. These older issues describe known ways certification can false-pass or false-fail, so omitting them would make the v2 execution packet incomplete.
+
+## Future decisions template
+
+### D-008 — Certification runs are lead-only
+
+Date: 2026-05-18
+Phase: 1
+Issue(s): #330
+
+Decision:
+
+When `MAE_CERTIFICATION_MODE=1`, all teams run in lead-only mode (no worker spawning). Leads review the fixture directly.
+
+Reason:
+
+Full worker swarms on minimal certification fixtures are wasteful (~$2/run for a single README), produce empty outputs from agents with nothing to do, and create operational failures that obscure the actual certification result. Leads are sufficient for fixture review.
+
+Alternatives considered:
+
+- Worker count limits per team (more complex, still spawns some unnecessary agents)
+- Separate cert chain without workers (duplicates chain config)
+
+Impact:
+
+Cert runs are ~5x cheaper and ~3x faster. Harness checks for 5 lead completions instead of 5 worker spawns + 5 lead reviews.
+
+Validation required:
+
+- `scripts/certify-live-swarm-test`
+- Live Pi cert run with lead-only mode
+
+### D-009 — Separate operational from substantive trace failures
+
+Date: 2026-05-18
+Phase: 1
+Issue(s): #322, #323
+
+Decision:
+
+`trace_has_operational_failures` checks only for session.end errors, agent.error, worker_failed, and error events. Individual agent FAILED grades are NOT operational failures — they are substantive outcomes handled by empty output checks and certification contract validation.
+
+Reason:
+
+Conflating operational failures (session crash) with substantive failures (agent graded FAILED) prevented the harness from reaching contract validation. The certification contract is the authority on pass/fail.
+
+### D-010 — Chain runner does not throw on degraded cert steps
+
+Date: 2026-05-18
+Phase: 1
+Issue(s): #330
+
+Decision:
+
+In certification mode, chain steps with FEEDBACK/FAILED grades are logged as "degraded" instead of "failed" and do not throw. The session completes, and the cert harness evaluates the evidence.
+
+Reason:
+
+Cert mode runs once without retries. Throwing on FEEDBACK prevents the session from completing and the synthesis from producing a certification contract.
+
+### D-011 — Fresh final consolidation branch from main
+
+Date: 2026-05-18
+Phase: 1
+Issue(s): #330, #318, #319, #320, #321, #322, #323, #326
+
+Decision:
+
+Create final PR branch `pi-phase1-complete` fresh from `main` and port the converged implementation as Pi base + Codex hardening gates + Claude runtime fixes. Do not merge agent branches wholesale.
+
+Reason:
+
+All six cross-reviews agreed on the same merge path, but source worktrees had different strengths and hygiene risks. A fresh branch avoids unrelated main-checkout dirt and makes final validation evidence attributable to one exact state.
+
+Alternatives considered:
+
+- Use Pi source branch directly: rejected because final branch should start from `main` and explicitly port accepted deltas.
+- Use Claude consolidation branch: rejected because branch naming and ownership should follow the agreed Pi base.
+- Blind-merge all worktrees: rejected because it could pull rejected or duplicate changes.
+
+Impact:
+
+Final PR contains only the accepted Phase 1 implementation, planning/review evidence, and regression harness updates.
+
+Validation required:
+
+- `scripts/certify-live-swarm-test`
+- `bun test engine/team-execution.test.ts`
+- `just check`
+- `bun test`
+- `scripts/certify-live-swarm --only failing --dashboard-url "${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}"`
+- `git diff --check`
+- Optional but desired final milestone: approved full live Pi all-fixture certification from `pi-phase1-complete`
+
+### D-XXX — Title
+
+Date:
+Phase:
+Issue(s):
+
+Decision:
+
+Reason:
+
+Alternatives considered:
+
+Impact:
+
+Validation required:
