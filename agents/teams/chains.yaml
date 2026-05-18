@@ -72,8 +72,11 @@ chains:
     steps:
       - parallel:
           - team: Red Team
+            read_only: true
           - team: Blue Team
+            read_only: true
           - team: Validation
+            read_only: true
         till_done:
           - "Red team adversarial + security review complete"
           - "Blue team correctness + quality review complete"
@@ -152,6 +155,7 @@ chains:
     description: "5-squad parallel review swarm: orchestrator assigns paths, leads spin out full workforce immediately"
     steps:
       - team: Architecture Coordination
+        read_only: true
         system_prompt_append: |
           ARCH COORDINATOR MODE: Produce the swarm coordination brief before any SME squad begins.
           Identify the files, components, and risk areas each SME squad must cover.
@@ -247,47 +251,57 @@ chains:
       - parallel:
           - team: Correctness Review
             read_only: true
+            lead_only: true
             system_prompt_append: |
               REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
+              CERTIFICATION_CONTRACT is synthesis-only. Do not emit CERTIFICATION_CONTRACT from this review lead; emit REVIEW_REPORT only.
               Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
               Final response must include exactly one schema block starting with REVIEW_REPORT: Correctness, plus SCOPE, COMMANDS_RUN, FINDINGS with P0/P1/P2/P3 severity markers, BLOCKERS, and VERDICT.
           - team: Adversarial Review
             read_only: true
+            lead_only: true
             system_prompt_append: |
               REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
+              CERTIFICATION_CONTRACT is synthesis-only. Do not emit CERTIFICATION_CONTRACT from this review lead; emit REVIEW_REPORT only.
               Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
               Final response must include exactly one schema block starting with REVIEW_REPORT: Adversarial, plus SCOPE, COMMANDS_RUN, FINDINGS with P0/P1/P2/P3 severity markers, BLOCKERS, and VERDICT.
           - team: Quality Review
             read_only: true
+            lead_only: true
             system_prompt_append: |
               REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
+              CERTIFICATION_CONTRACT is synthesis-only. Do not emit CERTIFICATION_CONTRACT from this review lead; emit REVIEW_REPORT only.
               Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
               Final response must include exactly one schema block starting with REVIEW_REPORT: Quality, plus SCOPE, COMMANDS_RUN, FINDINGS with P0/P1/P2/P3 severity markers, BLOCKERS, and VERDICT.
           - team: Security Review
             read_only: true
+            lead_only: true
             system_prompt_append: |
               REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
+              CERTIFICATION_CONTRACT is synthesis-only. Do not emit CERTIFICATION_CONTRACT from this review lead; emit REVIEW_REPORT only.
               Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
               Final response must include exactly one schema block starting with REVIEW_REPORT: Security, plus SCOPE, COMMANDS_RUN, FINDINGS with P0/P1/P2/P3 severity markers, BLOCKERS, and VERDICT.
           - team: Domain Review
             read_only: true
+            lead_only: true
             system_prompt_append: |
               REVIEW-ONLY MODE: inspect and report only. Do not edit files, apply patches, run fix scripts, or mutate worktrees unless the user explicitly asks for a fix phase.
+              CERTIFICATION_CONTRACT is synthesis-only. Do not emit CERTIFICATION_CONTRACT from this review lead; emit REVIEW_REPORT only.
               Use lightweight evidence commands only; if setup/dependencies are missing, report BLOCKERS instead of repairing the environment.
               Final response must include exactly one schema block starting with REVIEW_REPORT: Domain, plus SCOPE, COMMANDS_RUN, FINDINGS with P0/P1/P2/P3 severity markers, BLOCKERS, and VERDICT.
         till_done:
           - type: output_match
-            text: "Review report includes scope and verdict"
-            verify: "REVIEW_REPORT|Unified Swarm Review|Scope:[\\s\\S]*Verdict:|Scope[\\s\\S]*VERDICT"
+            text: "Review report includes final certification report derived from REVIEW_REPORT inputs"
+            verify: "(Unified Certification Report|Swarm Review Report|Unified Swarm Review)[\\s\\S]*CERTIFICATION_CONTRACT:"
           - type: output_match
             text: "Review covers the five canonical perspectives"
-            verify: "Correctness[\\s\\S]*Adversarial[\\s\\S]*Quality[\\s\\S]*Security[\\s\\S]*Domain|Agreements[\\s\\S]*Findings[\\s\\S]*Teams|Teams:[\\s\\S]*(Correctness|Adversarial|Quality|Security|Domain)"
+            verify: "perspectives_covered:[^\\n]*correctness[^\\n]*adversarial[^\\n]*quality[^\\n]*security[^\\n]*domain"
           - type: output_match
-            text: "Findings include severity or explicit clean verdict"
-            verify: "P[0-3]|No P0|No P1|PASS|VERDICT|Verdict"
+            text: "Findings include severity or explicit clean Verdict"
+            verify: "(P[0-3]|No P0|No P1|VERDICT|Verdict|p0_count:\\s*[0-9]+[\\s\\S]*p1_count:\\s*[0-9]+)"
           - type: output_match
-            text: "Orchestrator synthesizes findings"
-            verify: "conflicting findings|synthesi[sz]e|SYNTHESIS|Synthesis|Unified Swarm Review|Agreements"
+            text: "Orchestrator emits concrete certification contract"
+            verify: "CERTIFICATION_CONTRACT:[\\s\\S]*schema_version:\\s*1\\s*[\\s\\S]*verdict:\\s*(pass|fail)\\s*[\\s\\S]*p0_count:\\s*[0-9]+\\s*[\\s\\S]*p1_count:\\s*[0-9]+\\s*[\\s\\S]*perspectives_covered:[^\\n]*correctness[^\\n]*adversarial[^\\n]*quality[^\\n]*security[^\\n]*domain[\\s\\S]*blockers:[^\\n]+[\\s\\S]*failed_teams:[^\\n]+[\\s\\S]*certification_ready:\\s*(true|false)\\s*[\\s\\S]*END_CERTIFICATION_CONTRACT"
 
   red-blue:
     description: "Red team attacks, blue team defends — competing perspectives"
@@ -314,7 +328,9 @@ chains:
           - "Files prioritized for review"
       - parallel:
           - team: Red Team
+            read_only: true
           - team: Blue Team
+            read_only: true
         till_done:
           - "Flagged files reviewed from both perspectives"
           - "Findings synthesized"
@@ -336,7 +352,9 @@ chains:
           max_retries: 1
       - parallel:
           - team: Red Team
+            read_only: true
           - team: Blue Team
+            read_only: true
         till_done:
           - "Built code reviewed from both perspectives"
           - "All P0/P1 issues flagged"

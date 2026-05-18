@@ -362,6 +362,8 @@ Models: 15 sonnet, 13 opus, 4 gpt-5.5
 Estimated cost: $6.69-$26.77 (config-only estimate)
 ```
 
+`swarm-review` is the canonical lean PR/code review swarm. Its five parallel review teams set `lead_only: true`, so MAE spawns only the Correctness, Adversarial, Quality, Security, and Domain leads instead of each team's full worker set.
+
 When the first argument is not a configured chain name, MAE treats the arguments as goal text and picks the closest configured chain with deterministic local keyword matching. Use `mae task` when you want live LLM classification.
 
 ---

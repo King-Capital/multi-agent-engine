@@ -61,6 +61,30 @@ export class PiAdapter implements PlatformAdapter {
     return 0;
   }
 
+  private resultFromFinalText(agentId: string, agentName: string, finalText: string, costUsd: number, tokensUsed: number): DelegateResult {
+    if (!finalText.trim()) {
+      return {
+        agentId,
+        agentName,
+        output: "ERROR: Empty output",
+        grade: "FAILED",
+        findings: ["empty_output"],
+        costUsd,
+        tokensUsed,
+      };
+    }
+
+    return {
+      agentId,
+      agentName,
+      output: finalText,
+      grade: this.extractGrade(finalText),
+      findings: this.extractFindings(finalText),
+      costUsd,
+      tokensUsed,
+    };
+  }
+
   private _available: boolean | null = null;
 
   async isAvailable(): Promise<boolean> {
@@ -329,7 +353,9 @@ export class PiAdapter implements PlatformAdapter {
                   if (lastAssistant) {
                     const content = lastAssistant.content;
                     if (Array.isArray(content)) {
-                      const textBlock = content.find((b: { type: string }) => b.type === "text");
+                      const textBlock = [...content].reverse().find((b: { type: string; text?: string }) =>
+                        b.type === "text" && typeof b.text === "string" && b.text.trim().length > 0
+                      );
                       if (textBlock?.text) finalText = textBlock.text;
                     }
                     const usage = lastAssistant.usage;
@@ -349,15 +375,7 @@ export class PiAdapter implements PlatformAdapter {
 
                   // Agent done — kill RPC process and resolve
                   proc.kill();
-                  safeResolve({
-                    agentId,
-                    agentName: opts.persona.name,
-                    output: finalText || "ERROR: Empty output",
-                    grade: this.extractGrade(finalText),
-                    findings: this.extractFindings(finalText),
-                    costUsd: totalCost,
-                    tokensUsed: totalTokens,
-                  });
+                  safeResolve(this.resultFromFinalText(agentId, opts.persona.name, finalText, totalCost, totalTokens));
                   return;
                 }
               } catch (e) {
@@ -403,15 +421,7 @@ export class PiAdapter implements PlatformAdapter {
           return;
         }
 
-        safeResolve({
-          agentId,
-          agentName: opts.persona.name,
-          output: finalText || "ERROR: Empty output",
-          grade: this.extractGrade(finalText),
-          findings: this.extractFindings(finalText),
-          costUsd: totalCost,
-          tokensUsed: totalTokens,
-        });
+        safeResolve(this.resultFromFinalText(agentId, opts.persona.name, finalText, totalCost, totalTokens));
       };
 
       // Race: processStream vs proc.exited (handles hung stream)
@@ -437,15 +447,7 @@ export class PiAdapter implements PlatformAdapter {
             tokensUsed: totalTokens,
           });
         } else {
-          safeResolve({
-            agentId,
-            agentName: opts.persona.name,
-            output: finalText || "ERROR: Empty output",
-            grade: this.extractGrade(finalText),
-            findings: this.extractFindings(finalText),
-            costUsd: totalCost,
-            tokensUsed: totalTokens,
-          });
+          safeResolve(this.resultFromFinalText(agentId, opts.persona.name, finalText, totalCost, totalTokens));
         }
       }).catch((err) => {
         log.error("Exit race error", { agent_id: agentId, error: (err as Error)?.message });

@@ -97,6 +97,11 @@ dashboard-seed:
 # Run all tests
 test:
     cd engine && bun test
+    scripts/certify-live-swarm-test
+
+# Run certification harness parser tests only
+cert-test:
+    scripts/certify-live-swarm-test
 
 # Build the engine CLI as a standalone binary
 build:

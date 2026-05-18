@@ -97,10 +97,12 @@ Every team has:
 
 1. The chain runner activates a team for a step
 2. The lead receives the task and the context from previous steps
-3. The lead briefs workers with specific assignments
+3. By default, the lead briefs workers with specific assignments
 4. Workers execute in parallel within their domain constraints
 5. The lead reviews worker output and produces a synthesized result
 6. The chain runner checks till_done criteria
+
+Some review chains can set `lead_only: true` on a team step. In lead-only mode, MAE spawns only the team lead; the lead performs the review/work directly and no team members are spawned. Use this for bounded review swarms where the desired shape is one lead per perspective instead of full squads.
 
 ### Domain Locking
 

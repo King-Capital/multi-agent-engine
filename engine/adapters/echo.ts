@@ -81,6 +81,8 @@ export class EchoAdapter implements PlatformAdapter {
       "REVIEW_REPORT: Quality SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
       "REVIEW_REPORT: Security SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
       "REVIEW_REPORT: Domain SCOPE: files inspected COMMANDS_RUN: none FINDINGS: P3 none BLOCKERS: none VERDICT: pass",
+      "Unified Certification Report Teams: 5/5 GRADE: PASS",
+      "CERTIFICATION_CONTRACT:\nschema_version: 1\nsession_id: echo\nartifact_ref: echo\nverdict: pass\np0_count: 0\np1_count: 0\nperspectives_covered: correctness, adversarial, quality, security, domain\nblockers: none\nfailed_teams: none\ncertification_ready: true\nEND_CERTIFICATION_CONTRACT",
       "Orchestrator synthesizes across all squads",
       "Orchestrator synthesizes conflicting findings",
     ].join(". ");
