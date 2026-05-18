@@ -1,4 +1,5 @@
 import { resolveModel } from "./config";
+import { isInternalUrl } from "./security";
 
 interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -18,6 +19,9 @@ interface CallLLMOpts {
 export async function callLLM(opts: CallLLMOpts): Promise<string> {
   const gatewayUrl = process.env.MAE_LLM_GATEWAY_URL ?? process.env.LITELLM_URL;
   if (!gatewayUrl) throw new Error("LLM gateway not configured. Set MAE_LLM_GATEWAY_URL or LITELLM_URL.");
+  if (isInternalUrl(gatewayUrl) && process.env.MAE_ALLOW_INTERNAL_LLM_GATEWAY !== "1") {
+    throw new Error("Refusing to send LLM payloads to an internal/private gateway URL without MAE_ALLOW_INTERNAL_LLM_GATEWAY=1");
+  }
   const apiKey = process.env.MAE_LLM_GATEWAY_KEY ?? process.env.LITELLM_API_KEY ?? "";
 
   const model = resolveModel(opts.model ?? "quality");
