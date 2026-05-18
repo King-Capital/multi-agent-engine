@@ -288,9 +288,24 @@ export async function runAgent(
 
   const agentResolved = resolveModelForRole("worker", agentConfig.model);
   const reviewOnly = step ? isReviewOnlyStep(step) : false;
+  const agentTools = reviewOnly ? readOnlyTools(persona.tools) : persona.tools;
+  const agentDomain = reviewOnly ? { ...persona.domain, write: [], update: [] } : persona.domain;
 
   await emitter.agentSpawn(session.id, agentId, parentId, agentConfig.name, "worker",
-    agentResolved.model, teamName, teamColor);
+    agentResolved.model, teamName, teamColor, undefined, {
+      tools: agentTools,
+      domains: agentDomain,
+      domain_read: agentDomain.read,
+      domain_write: agentDomain.write,
+      domain_update: agentDomain.update,
+      readGlobs: agentDomain.read,
+      writeGlobs: agentDomain.write,
+      can_delegate: false,
+      canSpawnWorkers: false,
+      canReviewWorkers: false,
+      canWriteFiles: agentDomain.write.length > 0 || agentDomain.update.length > 0,
+      authority: 40,
+    });
 
   const prompt = [
     `Task: ${task}`,
@@ -303,8 +318,8 @@ export async function runAgent(
     userPrompt: prompt,
     model: agentResolved.model,
     thinking: agentResolved.thinking,
-    tools: reviewOnly ? readOnlyTools(persona.tools) : persona.tools,
-    domain: reviewOnly ? { ...persona.domain, write: [], update: [] } : persona.domain,
+    tools: agentTools,
+    domain: agentDomain,
     workingDir: session.workingDir,
     sessionDir: `data/sessions/${session.id}`,
     parentId,

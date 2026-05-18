@@ -37,7 +37,7 @@
 Phase 2 adds participant events as the canonical visibility layer for orchestrator, leads, workers, synthesis, validators, web/CLI steer actors, and system actors. Agent lifecycle events remain for backward compatibility; participant events are the stable source for presence, activity, stale/offline policy, and later dashboard agent-pool views.
 
 ```jsonl
-{"ts":"...","type":"participant.start","id":"...","parent_id":"orch-1","session_id":"...","agent_id":"pi-correctness-lead","participant_id":"pi-correctness-lead","kind":"lead","status":"active","name":"Correctness Lead","role":"lead","team":"Correctness Review","model":"gpt-5.5","current_task":"agent:lead","last_heartbeat_ts":"...","capabilities":{"canReceiveSteer":true,"canUseTools":true,"tools":["read","bash"]}}
+{"ts":"...","type":"participant.start","id":"...","parent_id":"orch-1","session_id":"...","agent_id":"pi-correctness-lead","participant_id":"pi-correctness-lead","kind":"lead","status":"active","name":"Correctness Lead","role":"lead","team":"Correctness Review","model":"gpt-5.5","current_task":"agent:lead","last_heartbeat_ts":"...","capabilities":{"canReceiveSteer":true,"canSteer":true,"canUseTools":true,"canSpawnWorkers":true,"canReviewWorkers":true,"can_delegate":true,"authority":70,"tools":["read","bash"],"domain_read":["engine/**"],"domain_write":[],"domain_update":[]}}
 
 {"ts":"...","type":"participant.activity","id":"...","session_id":"...","agent_id":"pi-correctness-lead","participant_id":"pi-correctness-lead","status":"active","current_tool":"read","current_task":"README.md","last_event":"tool_call","last_heartbeat_ts":"..."}
 
@@ -45,7 +45,7 @@ Phase 2 adds participant events as the canonical visibility layer for orchestrat
 
 {"ts":"...","type":"participant.stale","id":"...","session_id":"...","agent_id":"pi-correctness-lead","participant_id":"pi-correctness-lead","status":"stale","reason":"no activity for 60s","last_heartbeat_ts":"..."}
 
-{"ts":"...","type":"participant.end","id":"...","session_id":"...","agent_id":"pi-correctness-lead","participant_id":"pi-correctness-lead","status":"ended|error","last_event":"agent_done","last_heartbeat_ts":"...","cost_usd":0.12,"tokens_used":4200}
+{"ts":"...","type":"participant.end","id":"...","session_id":"...","agent_id":"pi-correctness-lead","participant_id":"pi-correctness-lead","status":"completed|failed|blocked","last_event":"agent_done","last_heartbeat_ts":"...","cost_usd":0.12,"tokens_used":4200}
 ```
 
 Participant fields:
@@ -54,7 +54,7 @@ Participant fields:
 |-------|------|----------|-------------|
 | `participant_id` | string | yes | Stable participant ID, usually matching `agent_id` |
 | `kind` | string | start | `orchestrator|lead|worker|sr|synthesis|validator|web-steer|cli-steer|system` |
-| `status` | string | yes | `starting|active|stale|ended|error` |
+| `status` | string | yes | `starting|active|idle|stale|completed|failed|blocked` |
 | `name` | string | start | Human-readable participant name |
 | `role` | string | no | Agent role or future steer/system role |
 | `team` | string | no | Owning team/squad when applicable |

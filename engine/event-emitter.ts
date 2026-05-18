@@ -164,7 +164,7 @@ export class EventEmitter {
     });
   }
 
-  participantEnd(sessionId: string, agentId: string, status: "ended" | "error" = "ended", opts: { lastEvent?: string; costUsd?: number; tokensUsed?: number; reason?: string } = {}) {
+  participantEnd(sessionId: string, agentId: string, status: "completed" | "failed" | "blocked" = "completed", opts: { lastEvent?: string; costUsd?: number; tokensUsed?: number; reason?: string } = {}) {
     return this.participantEvent(sessionId, agentId, "participant_end", {
       status,
       costUsd: opts.costUsd,
@@ -268,6 +268,7 @@ export class EventEmitter {
     teamName: string,
     teamColor: string,
     participantKind?: ParticipantKind,
+    capabilities?: ParticipantCapabilities,
   ) {
     await this.pgCreateAgent({
       sessionId,
@@ -285,7 +286,13 @@ export class EventEmitter {
       teamName,
       model,
       currentTask: `agent:${kind}`,
-      capabilities: { model, canReceiveSteer: true, canUseTools: true },
+      capabilities: {
+        model,
+        canReceiveSteer: true,
+        canSteer: true,
+        canUseTools: true,
+        ...capabilities,
+      },
     });
     return this.emit({
       session_id: sessionId,
@@ -308,7 +315,7 @@ export class EventEmitter {
       status: grade === "FAILED" ? "failed" : "completed",
       cost_usd: costUsd ?? 0,
     });
-    await this.participantEnd(sessionId, agentId, grade === "FAILED" ? "error" : "ended", {
+    await this.participantEnd(sessionId, agentId, grade === "FAILED" ? "failed" : "completed", {
       lastEvent: "agent_done",
       costUsd: costUsd ?? 0,
       reason: grade ?? "unknown",

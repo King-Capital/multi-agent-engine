@@ -126,12 +126,12 @@ function makeStubEmitter(): EventEmitter {
   } as unknown as EventEmitter;
 }
 
-function makeRecordingEmitter(calls: Array<{ method: string; agentId?: string; role?: string; kind?: string }>): EventEmitter {
+function makeRecordingEmitter(calls: Array<{ method: string; agentId?: string; role?: string; kind?: string; capabilities?: { canSpawnWorkers?: boolean; domain_read?: string[] } }>): EventEmitter {
   const noop = async () => {};
   return {
     ...makeStubEmitter(),
-    agentSpawn: async (_sessionId: string, agentId: string, _parentId: string, _name: string, role: string, _model: string, _teamName: string, _teamColor: string, kind?: string) => {
-      calls.push({ method: "agentSpawn", agentId, role, kind });
+    agentSpawn: async (_sessionId: string, agentId: string, _parentId: string, _name: string, role: string, _model: string, _teamName: string, _teamColor: string, kind?: string, capabilities?: { canSpawnWorkers?: boolean; domain_read?: string[] }) => {
+      calls.push({ method: "agentSpawn", agentId, role, kind, capabilities });
     },
     agentDone: async (_sessionId: string, agentId: string) => {
       calls.push({ method: "agentDone", agentId });
@@ -734,7 +734,7 @@ describe("delegateToLead", () => {
 
 describe("runTeamStep participant lifecycle", () => {
   test("normal multi-worker teams emit lead completion", async () => {
-    const calls: Array<{ method: string; agentId?: string; role?: string; kind?: string }> = [];
+    const calls: Array<{ method: string; agentId?: string; role?: string; kind?: string; capabilities?: { canSpawnWorkers?: boolean; domain_read?: string[] } }> = [];
     const untracked: string[] = [];
     const emitter = makeRecordingEmitter(calls);
     const adapter = makeMockAdapter({
@@ -771,16 +771,19 @@ describe("runTeamStep participant lifecycle", () => {
     }, session, { team: "Engineering", read_only: true }, "Do the thing", "", "mock");
 
     expect(result.grade).toBe("VERIFIED");
-    expect(calls.some((call) => call.method === "agentSpawn" && call.agentId === "Engineering-lead")).toBe(true);
+    const leadSpawn = calls.find((call) => call.method === "agentSpawn" && call.agentId === "Engineering-lead");
+    expect(leadSpawn).toBeDefined();
+    expect(leadSpawn!.capabilities?.canSpawnWorkers).toBe(true);
+    expect(leadSpawn!.capabilities?.domain_read?.length).toBeGreaterThan(0);
     expect(calls.some((call) => call.method === "agentDone" && call.agentId === "Engineering-lead")).toBe(true);
     expect(untracked).toContain("Engineering-lead");
   });
 
   test("parallel synthesis spawn uses synthesis participant kind override", async () => {
-    const calls: Array<{ method: string; agentId?: string; role?: string; kind?: string }> = [];
+    const calls: Array<{ method: string; agentId?: string; role?: string; kind?: string; capabilities?: { canSpawnWorkers?: boolean; domain_read?: string[] } }> = [];
     const emitter = makeRecordingEmitter(calls);
     await emitter.agentSpawn("s1", "synth-1", "orch-1", "Synthesis", "orchestrator", "opus", "Synthesis", "#a855f7", "synthesis");
 
-    expect(calls).toContainEqual({ method: "agentSpawn", agentId: "synth-1", role: "orchestrator", kind: "synthesis" });
+    expect(calls).toContainEqual({ method: "agentSpawn", agentId: "synth-1", role: "orchestrator", kind: "synthesis", capabilities: undefined });
   });
 });

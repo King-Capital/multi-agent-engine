@@ -24,8 +24,8 @@ describe("participant presence stale detection", () => {
 
   test("ignores terminal participants", () => {
     const stale = findStaleParticipants([
-      participant({ participant_id: "done-1", status: "ended", last_heartbeat_ts: "2026-05-18T00:00:00.000Z" }),
-      participant({ participant_id: "error-1", status: "error", last_heartbeat_ts: "2026-05-18T00:00:00.000Z" }),
+      participant({ participant_id: "done-1", status: "completed", last_heartbeat_ts: "2026-05-18T00:00:00.000Z" }),
+      participant({ participant_id: "error-1", status: "failed", last_heartbeat_ts: "2026-05-18T00:00:00.000Z" }),
     ], new Date("2026-05-18T00:01:00.000Z"), 30_000);
 
     expect(stale).toEqual([]);
