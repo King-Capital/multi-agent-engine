@@ -79,6 +79,22 @@ func redactAny(value any) any {
 	}
 }
 
+func redactTillDone(state *TillDoneState) *TillDoneState {
+	if state == nil {
+		return nil
+	}
+	redacted := *state
+	redacted.Title = redactString(redacted.Title)
+	if state.Items != nil {
+		redacted.Items = make([]TillDoneItem, len(state.Items))
+		for i, item := range state.Items {
+			redacted.Items[i] = item
+			redacted.Items[i].Description = redactString(item.Description)
+		}
+	}
+	return &redacted
+}
+
 func RedactEvent(evt Event) Event {
 	evt.SessionID = redactString(evt.SessionID)
 	evt.AgentID = redactString(evt.AgentID)
@@ -101,6 +117,7 @@ func RedactEvent(evt Event) Event {
 	evt.Data.ToolResult = redactString(evt.Data.ToolResult)
 	evt.Data.ToolStatus = redactString(evt.Data.ToolStatus)
 	evt.Data.FilePath = redactString(evt.Data.FilePath)
+	evt.Data.TillDone = redactTillDone(evt.Data.TillDone)
 	evt.Data.BlockedPath = redactString(evt.Data.BlockedPath)
 	evt.Data.BlockedAction = redactString(evt.Data.BlockedAction)
 	evt.Data.BlockReason = redactString(evt.Data.BlockReason)
