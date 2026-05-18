@@ -189,6 +189,25 @@ describe("Logger", () => {
     expect(entries2.length).toBe(1);
   });
 
+  test("redacts secrets in stderr and sink entries", () => {
+    const entries: LogEntry[] = [];
+    addSink({ write: (entry) => { entries.push(entry); } });
+    const log = createLogger("secrets");
+
+    log.info("token sk-ant-api03-" + "a".repeat(80), {
+      api_key: "plain-secret",
+      nested: { Authorization: "Bearer ghp_" + "a".repeat(40) },
+    });
+
+    const parsed = JSON.parse(stderrOutput[0]!);
+    expect(parsed.msg).toContain("[REDACTED_SECRET]");
+    expect(parsed.msg).not.toContain("sk-ant-api03-");
+    expect(parsed.api_key).toBe("[REDACTED_SECRET]");
+    expect(parsed.nested.Authorization).toBe("[REDACTED_SECRET]");
+    expect(entries[0]!.msg).toContain("[REDACTED_SECRET]");
+    expect(entries[0]!.api_key).toBe("[REDACTED_SECRET]");
+  });
+
   test("inline ctx overrides parent context for same key", () => {
     const log = createLogger("test", { session_id: "original" });
     log.info("override", { session_id: "overridden" });

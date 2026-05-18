@@ -13,6 +13,8 @@
  *   const agentLog = sessionLog.child({ agent_id: "pi-frontend-dev", component: "pi-adapter" });
  */
 
+import { redactSecrets, redactUnknown } from "./security";
+
 export type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR" | "CRITICAL";
 
 export interface LogEntry {
@@ -88,14 +90,14 @@ export function createLogger(
   const log = (level: LogLevel, msg: string, ctx?: Record<string, unknown>) => {
     if (LOG_LEVELS[level] < LOG_LEVELS[globalMinLevel]) return;
 
-    const entry: LogEntry = {
+    const entry: LogEntry = redactUnknown({
       ts: new Date().toISOString(),
       level,
       component,
-      msg,
+      msg: redactSecrets(msg),
       ...context,
       ...ctx,
-    };
+    });
 
     // Always write to stderr as JSONL
     process.stderr.write(JSON.stringify(entry) + "\n");
