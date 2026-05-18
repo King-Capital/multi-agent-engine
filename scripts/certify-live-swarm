@@ -1,0 +1,98 @@
+#!/bin/bash
+set -euo pipefail
+
+usage() {
+  cat <<USAGE
+Usage: scripts/certify-live-swarm [--live-pi] [--dashboard-url URL]
+
+Runs MAE production certification checks:
+  1. dashboard health/SSE smoke
+  2. clean fixture review should avoid P0/P1 blockers
+  3. seeded security fixture should produce P0/P1 evidence
+  4. deterministic failing fixture must not be marked ready
+
+Default adapter is echo for cheap CI smoke. --live-pi uses the real Pi adapter.
+USAGE
+}
+
+live_pi=0
+dashboard_url="${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --live-pi) live_pi=1; shift ;;
+    --dashboard-url) dashboard_url="${2:-}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+adapter="echo"
+if [[ "$live_pi" == 1 ]]; then
+  adapter="pi"
+fi
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+workdir="$(mktemp -d "${TMPDIR:-/tmp}/mae-cert.XXXXXX")"
+trap 'rm -rf "$workdir"' EXIT
+
+log() { printf '\n==> %s\n' "$*"; }
+fail() { echo "CERTIFICATION FAILED: $*" >&2; exit 1; }
+
+log "dashboard health: $dashboard_url"
+curl -fsS "$dashboard_url/api/health" >/dev/null || fail "dashboard health failed"
+spa_status="$(curl -s -o /dev/null -w '%{http_code}' "$dashboard_url/")"
+[[ "$spa_status" == "200" ]] || fail "dashboard SPA HTTP $spa_status"
+
+mkdir -p "$workdir/clean" "$workdir/seeded" "$workdir/failing"
+cat > "$workdir/clean/app.ts" <<'TS'
+export function add(a: number, b: number): number {
+  return a + b;
+}
+TS
+cat > "$workdir/seeded/server.ts" <<'TS'
+import { exec } from "node:child_process";
+
+export function lookup(name: string): void {
+  exec("nslookup " + name); // seeded command-injection bug: reviewer should flag P0/P1
+}
+TS
+cat > "$workdir/failing/README.md" <<'MD'
+This fixture intentionally lacks the required CERTIFICATION_READY marker.
+MD
+
+run_review() {
+  local name="$1"
+  local prompt="$2"
+  local outfile="$workdir/${name}.out"
+  log "running $name review with adapter=$adapter"
+  (
+    cd "$root"
+    MAE_DASHBOARD_URL="$dashboard_url" mae chain swarm-review "$prompt" --adapter "$adapter"
+  ) >"$outfile" 2>&1 || return $?
+  echo "$outfile"
+}
+
+clean_prompt="Certification clean fixture: inspect $workdir/clean only. Report review findings. Clean fixture should have no P0/P1 blockers. Do not modify files."
+seeded_prompt="Certification seeded fixture: inspect $workdir/seeded only. Find the seeded command-injection/security bug with file evidence and P0/P1 severity. Do not modify files."
+
+clean_out="$(run_review clean "$clean_prompt")" || fail "clean review command failed; see $workdir/clean.out"
+if grep -Eiq 'P0|P1|critical|high' "$clean_out"; then
+  fail "clean fixture produced blocker language; see $clean_out"
+fi
+
+seeded_out="$(run_review seeded "$seeded_prompt")" || fail "seeded review command failed; see $workdir/seeded.out"
+if ! grep -Eiq 'P0|P1|command.?injection|exec\(' "$seeded_out"; then
+  fail "seeded fixture did not produce expected P0/P1 command-injection evidence; see $seeded_out"
+fi
+
+log "deterministic failing fixture"
+if mae validate-chain swarm-review "Must include CERTIFICATION_READY for $workdir/failing" | grep -q 'CERTIFICATION_READY'; then
+  fail "validate-chain unexpectedly claimed failing marker"
+fi
+
+log "trace completeness smoke"
+latest_trace="$(find "${MAE_TRACE_DIR:-$HOME/.mae/traces}" -maxdepth 1 -name '*.jsonl' -type f -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -1 || true)"
+[[ -n "$latest_trace" ]] || fail "no trace JSONL files found"
+grep -q 'session' "$latest_trace" || fail "latest trace lacks session events: $latest_trace"
+
+log "CERTIFICATION PASS adapter=$adapter dashboard=$dashboard_url trace=$latest_trace"
