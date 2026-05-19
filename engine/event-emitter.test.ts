@@ -521,4 +521,124 @@ describe("EventEmitter", () => {
       expect(body.data.task_report).toBe("s1/RALPH/agent.md");
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Phase 5: Steer participant events
+  // -------------------------------------------------------------------------
+
+  describe("steer action events", () => {
+    test("emits participant_start, steer_action, and participant_end for a steer interaction", async () => {
+      const emitter = new EventEmitter("http://test:8400");
+      const participantId = await emitter.steerAction("s1", {
+        sender: "user",
+        source: "web",
+        authority: 90,
+        intent: "freeform",
+        target: "orchestrator",
+        content: "focus on auth module",
+        certification_impact: "blocks_unattended",
+        message_id: "msg-123",
+      });
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      expect(participantId).toMatch(/^web-steer-\d+$/);
+      const bodies = fetchMock.calls
+        .filter((c) => c.url.includes("/api/events"))
+        .map((c) => JSON.parse(c.init.body as string));
+
+      const eventTypes = bodies.map((b: { event_type: string }) => b.event_type);
+      expect(eventTypes).toContain("participant_start");
+      expect(eventTypes).toContain("steer_action");
+      expect(eventTypes).toContain("participant_end");
+
+      const start = bodies.find((b: { event_type: string }) => b.event_type === "participant_start");
+      expect(start.data.kind).toBe("web-steer");
+      expect(start.data.role).toBe("steer");
+      expect(start.data.capabilities.authority).toBe(90);
+      expect(start.data.capabilities.canSteer).toBe(true);
+      expect(start.data.capabilities.canSpawnWorkers).toBe(false);
+
+      const action = bodies.find((b: { event_type: string }) => b.event_type === "steer_action");
+      expect(action.data.sender).toBe("user");
+      expect(action.data.source).toBe("web");
+      expect(action.data.authority).toBe(90);
+      expect(action.data.intent).toBe("freeform");
+      expect(action.data.target).toBe("orchestrator");
+      expect(action.data.content).toBe("focus on auth module");
+      expect(action.data.certification_impact).toBe("blocks_unattended");
+      expect(action.data.message_id).toBe("msg-123");
+
+      const end = bodies.find((b: { event_type: string }) => b.event_type === "participant_end");
+      expect(end.data.status).toBe("completed");
+    });
+
+    test("CLI steer gets cli-steer participant kind", async () => {
+      const emitter = new EventEmitter("http://test:8400");
+      const participantId = await emitter.steerAction("s1", {
+        sender: "user",
+        source: "cli",
+        authority: 90,
+        intent: "pause",
+        target: "orchestrator",
+        content: "!pause",
+        certification_impact: "blocks_unattended",
+      });
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      expect(participantId).toMatch(/^cli-steer-\d+$/);
+      const bodies = fetchMock.calls
+        .filter((c) => c.url.includes("/api/events"))
+        .map((c) => JSON.parse(c.init.body as string));
+
+      const start = bodies.find((b: { event_type: string }) => b.event_type === "participant_start");
+      expect(start.data.kind).toBe("cli-steer");
+      expect(start.data.name).toBe("CLI Operator");
+    });
+
+    test("steer participant IDs are unique across multiple steer actions", async () => {
+      const emitter = new EventEmitter("http://test:8400");
+      const ids: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        ids.push(await emitter.steerAction("s1", {
+          sender: "user",
+          source: "web",
+          authority: 90,
+          intent: "freeform",
+          target: "orchestrator",
+          content: `message ${i}`,
+          certification_impact: "blocks_unattended",
+        }));
+      }
+
+      const unique = new Set(ids);
+      expect(unique.size).toBe(3);
+    });
+
+    test("API steer (unknown source) uses web-steer kind", async () => {
+      const emitter = new EventEmitter("http://test:8400");
+      await emitter.steerAction("s1", {
+        sender: "user",
+        source: "api",
+        authority: 90,
+        intent: "budget",
+        target: "orchestrator",
+        content: "!budget 50",
+        reason: "50",
+        certification_impact: "blocks_unattended",
+      });
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      const bodies = fetchMock.calls
+        .filter((c) => c.url.includes("/api/events"))
+        .map((c) => JSON.parse(c.init.body as string));
+
+      const start = bodies.find((b: { event_type: string }) => b.event_type === "participant_start");
+      // API steer uses web-steer kind (not cli)
+      expect(start.data.kind).toBe("web-steer");
+      expect(start.data.name).toBe("API Operator");
+    });
+  });
 });

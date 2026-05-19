@@ -41,6 +41,8 @@ import type {
   PlatformAdapter,
   SessionState,
   OrchestratorAction,
+  SteerSource,
+  SteerIntent,
 } from "./types";
 import { transitionStatus } from "./session-state";
 
@@ -107,20 +109,60 @@ export class Orchestrator {
     this.defaultAdapter = name;
   }
 
+  /**
+   * Infer steer source from message metadata.
+   * CLI TUI uses `tui-` prefixed message IDs; dashboard web posts go through
+   * the SSE listener; direct API calls have no prefix.
+   */
+  private inferSteerSource(messageId?: string): SteerSource {
+    if (!messageId) return "unknown";
+    if (messageId.startsWith("tui-")) return "cli";
+    return "web";
+  }
+
+  /**
+   * Classify the intent of a steer message.
+   */
+  private classifySteerIntent(message: string): SteerIntent {
+    if (message.startsWith("!")) {
+      const cmd = message.slice(1).split(/\s+/)[0]?.toLowerCase() ?? "";
+      if (cmd === "pause" || cmd === "resume" || cmd === "stop" || cmd === "budget") return cmd;
+      return "unknown";
+    }
+    if (message.trim().toLowerCase() === "ping") return "ping";
+    return "freeform";
+  }
+
   sendUserMessage(sessionId: string, message: string, messageId?: string, targetAgentId?: string): void {
+    const source = this.inferSteerSource(messageId);
+    const intent = this.classifySteerIntent(message);
+
     if (message.startsWith("!")) {
       const parts = message.slice(1).split(/\s+/);
       const cmd = parts[0] ?? "";
       const args = parts.slice(1).join(" ");
-      this.handleSteerCommand(sessionId, cmd, args);
+      this.handleSteerCommand(sessionId, cmd, args, source, messageId);
       return;
     }
     const ackMetadata = messageId ? { ack_for: messageId } : {};
     const normalizedMessage = message.trim().toLowerCase();
     if (normalizedMessage === "ping") {
       void this.emitter.message(sessionId, "orch-1", "Orchestrator", "user", "pong", ackMetadata);
+      // Ping is diagnostic, no steer event
       return;
     }
+
+    // Freeform steer message — emit steer participant event
+    void this.emitter.steerAction(sessionId, {
+      sender: "user",
+      source,
+      authority: 90,
+      intent,
+      target: targetAgentId ?? "orchestrator",
+      content: message,
+      certification_impact: "blocks_unattended",
+      message_id: messageId,
+    });
 
     void this.emitter.message(
       sessionId,
@@ -140,13 +182,28 @@ export class Orchestrator {
     sendUserMessage(this.messageSenders, sessionId, message, targetAgentId);
   }
 
-  private async handleSteerCommand(sessionId: string, command: string, args: string): Promise<void> {
+  private async handleSteerCommand(sessionId: string, command: string, args: string, source: SteerSource = "unknown", messageId?: string): Promise<void> {
     const ts = new Date().toISOString();
+    const intent: SteerIntent = (command === "pause" || command === "resume" || command === "stop" || command === "budget") ? command : "unknown";
     const emit = (type: string, msg: string) =>
       Promise.all([
         this.emitter.message(sessionId, "orch-1", "Orchestrator", "user", msg),
         this.emitter.emit({ session_id: sessionId, agent_id: "orch-1", event_type: type, timestamp: ts, data: {} }),
       ]);
+
+    // Emit steer participant event for all commands
+    void this.emitter.steerAction(sessionId, {
+      sender: "user",
+      source,
+      authority: 90,
+      intent,
+      target: "orchestrator",
+      content: args ? `!${command} ${args}` : `!${command}`,
+      reason: args || undefined,
+      certification_impact: "blocks_unattended",
+      message_id: messageId,
+    });
+
     switch (command) {
       case "pause": {
         this.pausedSessions.add(sessionId);
@@ -192,7 +249,7 @@ export class Orchestrator {
         await this.emitter.message(sessionId, "orch-1", "Orchestrator", "user",
           `Unknown command: !${command}. Available: !pause, !resume, !stop, !budget <amount>`);
     }
-    log.info("Steer command received", { session_id: sessionId, command });
+    log.info("Steer command received", { session_id: sessionId, command, source });
   }
 
   private drainMessageBuffer(sessionId: string): string {

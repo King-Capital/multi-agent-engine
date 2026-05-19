@@ -185,4 +185,46 @@ describe("steering commands (#147)", () => {
       expect(paused.has("sess-1")).toBe(false);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Phase 5: Steer source inference and intent classification
+  // -------------------------------------------------------------------------
+
+  describe("steer source inference", () => {
+    test("tui- prefix identifies CLI source", () => {
+      // Mirrors Orchestrator.inferSteerSource logic
+      const infer = (messageId?: string) => {
+        if (!messageId) return "unknown";
+        if (messageId.startsWith("tui-")) return "cli";
+        return "web";
+      };
+      expect(infer("tui-12345-abc")).toBe("cli");
+      expect(infer("msg-12345")).toBe("web");
+      expect(infer(undefined)).toBe("unknown");
+      expect(infer("")).toBe("unknown");
+    });
+  });
+
+  describe("steer intent classification", () => {
+    test("classifies ! commands as steer intents", () => {
+      const classify = (message: string) => {
+        if (message.startsWith("!")) {
+          const cmd = message.slice(1).split(/\s+/)[0]?.toLowerCase() ?? "";
+          if (cmd === "pause" || cmd === "resume" || cmd === "stop" || cmd === "budget") return cmd;
+          return "unknown";
+        }
+        if (message.trim().toLowerCase() === "ping") return "ping";
+        return "freeform";
+      };
+
+      expect(classify("!pause")).toBe("pause");
+      expect(classify("!resume")).toBe("resume");
+      expect(classify("!stop")).toBe("stop");
+      expect(classify("!budget 100")).toBe("budget");
+      expect(classify("!unknown")).toBe("unknown");
+      expect(classify("ping")).toBe("ping");
+      expect(classify("focus on auth")).toBe("freeform");
+      expect(classify("@lead check tests")).toBe("freeform");
+    });
+  });
 });

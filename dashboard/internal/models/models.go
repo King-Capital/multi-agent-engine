@@ -41,6 +41,7 @@ const (
 	EventPause        EventType = "pause"
 	EventResume       EventType = "resume"
 	EventWaiting      EventType = "waiting"
+	EventSteerAction  EventType = "steer_action"
 )
 
 type Agent struct {

@@ -40,6 +40,31 @@ export interface ParticipantEventData extends ParticipantState {
   reason?: string;
 }
 
+// --- Steer event types (Phase 5) ---
+
+export type SteerSource = "web" | "cli" | "api" | "unknown";
+
+export type SteerIntent =
+  | "pause"
+  | "resume"
+  | "stop"
+  | "budget"
+  | "freeform"
+  | "ping"
+  | "unknown";
+
+export interface SteerEventData {
+  sender: string;
+  source: SteerSource;
+  authority: number;
+  intent: SteerIntent;
+  target: string;
+  content: string;
+  reason?: string;
+  certification_impact: "blocks_unattended" | "none";
+  message_id?: string;
+}
+
 // --- Team Template & Expertise Types (#184) ---
 
 export interface TeamTemplate {

@@ -112,6 +112,8 @@ export interface ValidatorContext {
 	expectedFixture?: "clean" | "seeded" | "failing";
 	isLivePi: boolean;
 	strictSpawnDecisions?: boolean;
+	/** When true, any steer event fails validation (unattended certification). */
+	unattended?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -773,6 +775,67 @@ function checkTeamContracts(events: TraceEvent[], traceDir: string): ValidationC
 	};
 }
 
+// ---------------------------------------------------------------------------
+// Phase 5: Steer event checks
+// ---------------------------------------------------------------------------
+
+function isSteerEvent(evt: TraceEvent): boolean {
+	return evt.type === "steer.action" || evt.event_type === "steer_action";
+}
+
+function isSteerParticipant(evt: TraceEvent): boolean {
+	if (!isAgentStart(evt)) return false;
+	const kind = evt.data?.kind as string | undefined;
+	return kind === "web-steer" || kind === "cli-steer";
+}
+
+function checkSteerEvents(events: TraceEvent[], unattended: boolean): ValidationCheck {
+	const steerEvents = events.filter(isSteerEvent);
+	const steerParticipants = events.filter(isSteerParticipant);
+	const steerCount = steerEvents.length;
+
+	// Collect steer intents for evidence detail
+	const intents: string[] = steerEvents
+		.map((evt) => {
+			const intent = (evt.data?.intent as string) ?? "unknown";
+			const source = (evt.data?.source as string) ?? "unknown";
+			return `${source}:${intent}`;
+		});
+
+	if (unattended) {
+		// Unattended certification: any steer event is a failure
+		return {
+			name: "steer_events_valid",
+			passed: steerCount === 0,
+			evidence: steerCount === 0
+				? "Unattended certification: no steer events"
+				: `Unattended certification failed: ${steerCount} steer event(s) detected`,
+			details: steerCount > 0
+				? `intents: ${intents.join(", ")}; participants: ${steerParticipants.map((e) => agentId(e)).join(", ")}`
+				: undefined,
+		};
+	}
+
+	// Interactive certification: steer events are allowed but must not hide failures.
+	// Check that no steer event has certification_impact other than the expected values.
+	const suspiciousSteer = steerEvents.filter((evt) => {
+		const impact = evt.data?.certification_impact as string | undefined;
+		// All steer events should declare their certification impact
+		return impact !== "blocks_unattended" && impact !== "none";
+	});
+
+	return {
+		name: "steer_events_valid",
+		passed: suspiciousSteer.length === 0,
+		evidence: suspiciousSteer.length === 0
+			? `Interactive certification: ${steerCount} steer event(s) recorded, all with valid certification impact`
+			: `${suspiciousSteer.length} steer event(s) with invalid certification impact`,
+		details: steerCount > 0
+			? `intents: ${intents.join(", ")}`
+			: undefined,
+	};
+}
+
 function checkNoStaleParticipants(events: TraceEvent[]): ValidationCheck {
 	const staleEvents = events.filter(
 		(evt) => evt.type === "participant.stale" || evt.event_type === "participant_stale",
@@ -892,6 +955,11 @@ export function validateCertificationEvidence(ctx: ValidatorContext): Validation
 	checks.push(spawnDecisions);
 	if (!spawnDecisions.passed) blockingReasons.push(spawnDecisions.evidence);
 
+	// 14. Steer events (Phase 5)
+	const steerCheck = checkSteerEvents(events, ctx.unattended === true);
+	checks.push(steerCheck);
+	if (!steerCheck.passed) blockingReasons.push(steerCheck.evidence);
+
 	const allPassed = checks.every((c) => c.passed);
 
 	return {
@@ -901,7 +969,7 @@ export function validateCertificationEvidence(ctx: ValidatorContext): Validation
 		lifecycle_valid: lifecycle.passed,
 		contract_matches_evidence: contractCheck.passed,
 		scope_valid: scopeDrift.passed && wrongFixture.passed,
-		steering_valid: true, // Phase 5 will implement steer checks
+		steering_valid: steerCheck.passed,
 		spawn_policy_valid: (ctx.isLivePi ? checks.find((c) => c.name === "no_worker_spawns")?.passed ?? true : true) && spawnDecisions.passed,
 		blocking_reasons: blockingReasons,
 		checks,
