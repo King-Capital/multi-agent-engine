@@ -1100,6 +1100,22 @@ describe("certification-validator", () => {
 			expect(check?.details).toContain("invalid certification_impact");
 		});
 
+		test("accepts certification_impact 'none' in interactive mode", () => {
+			const sid = makeSessionId(114);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				steerActionEvent(sid, { certification_impact: "none" }),
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			const check = findCheck(result, "interactive_steering_valid");
+			expect(check?.passed).toBe(true);
+		});
+
 		// --- Evidence-hiding detection (from claude) ---
 
 		test("interactive mode fails when steer stop hides incomplete lead lifecycle", () => {

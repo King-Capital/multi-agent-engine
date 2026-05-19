@@ -229,6 +229,8 @@ const SSE_EVENT_TYPES = [
   "budget_warning",
   "severity_alert",
   "auto_pause",
+  "steer_action",
+  "spawn_decision",
 ] as const;
 
 /**

@@ -49,6 +49,30 @@ import { transitionStatus } from "./session-state";
 
 const log = createLogger("orchestrator");
 
+/**
+ * Infer steer source from message metadata.
+ * CLI TUI uses `tui-` prefixed message IDs; dashboard web posts go through
+ * the SSE listener; direct API calls have no prefix.
+ */
+export function inferSteerSource(messageId?: string): SteerSource {
+  if (!messageId) return "unknown";
+  if (messageId.startsWith("tui-")) return "cli";
+  return "web";
+}
+
+/**
+ * Classify the intent of a steer message.
+ */
+export function classifySteerIntent(message: string): SteerIntent {
+  if (message.startsWith("!")) {
+    const cmd = message.slice(1).split(/\s+/)[0]?.toLowerCase() ?? "";
+    if (cmd === "pause" || cmd === "resume" || cmd === "stop" || cmd === "budget") return cmd;
+    return "unknown";
+  }
+  if (message.trim().toLowerCase() === "ping") return "ping";
+  return "freeform";
+}
+
 export class Orchestrator {
   private adapters: Map<string, PlatformAdapter> = new Map();
   private defaultAdapter: string = "";
@@ -110,33 +134,16 @@ export class Orchestrator {
     this.defaultAdapter = name;
   }
 
-  /**
-   * Infer steer source from message metadata.
-   * CLI TUI uses `tui-` prefixed message IDs; dashboard web posts go through
-   * the SSE listener; direct API calls have no prefix.
-   */
   private inferSteerSource(messageId?: string): SteerSource {
-    if (!messageId) return "unknown";
-    if (messageId.startsWith("tui-")) return "cli";
-    return "web";
+    return inferSteerSource(messageId);
   }
 
-  /**
-   * Classify the intent of a steer message.
-   */
   private classifySteerIntent(message: string): SteerIntent {
-    if (message.startsWith("!")) {
-      const cmd = message.slice(1).split(/\s+/)[0]?.toLowerCase() ?? "";
-      if (cmd === "pause" || cmd === "resume" || cmd === "stop" || cmd === "budget") return cmd;
-      return "unknown";
-    }
-    if (message.trim().toLowerCase() === "ping") return "ping";
-    return "freeform";
+    return classifySteerIntent(message);
   }
 
   sendUserMessage(sessionId: string, message: string, messageId?: string, targetAgentId?: string): void {
     const source = this.inferSteerSource(messageId);
-    const intent = this.classifySteerIntent(message);
 
     if (message.startsWith("!")) {
       const parts = message.slice(1).split(/\s+/);
@@ -154,6 +161,7 @@ export class Orchestrator {
     }
 
     // Freeform steer message — emit steer participant event
+    const intent = this.classifySteerIntent(message);
     void this.emitter.steerAction(sessionId, {
       sender: "user",
       source,

@@ -190,7 +190,8 @@ export class EventEmitter {
    */
   private nextSteerParticipantId(source: SteerSource): string {
     this.steerParticipantCounter++;
-    return `${source}-steer-${this.steerParticipantCounter}`;
+    const kind = source === "cli" ? "cli-steer" : "web-steer";
+    return `${kind}-${this.steerParticipantCounter}`;
   }
 
   /**
@@ -221,38 +222,40 @@ export class EventEmitter {
       },
     });
 
-    // 2. steer_action event with full structured data
-    const payload: Record<string, unknown> = {
-      sender: data.sender,
-      source: data.source,
-      authority: data.authority,
-      intent: data.intent,
-      target: data.target,
-      content: redactSecrets(data.content),
-      certification_impact: data.certification_impact,
-      ...(data.reason ? { reason: redactSecrets(data.reason) } : {}),
-      ...(data.message_id ? { message_id: data.message_id } : {}),
-    };
+    try {
+      // 2. steer_action event with full structured data
+      const payload: Record<string, unknown> = {
+        sender: data.sender,
+        source: data.source,
+        authority: data.authority,
+        intent: data.intent,
+        target: data.target,
+        content: redactSecrets(data.content),
+        certification_impact: data.certification_impact,
+        ...(data.reason ? { reason: redactSecrets(data.reason) } : {}),
+        ...(data.message_id ? { message_id: data.message_id } : {}),
+      };
 
-    log.info("Steer action", {
-      trace_type: "steer.action",
-      session_id: sessionId,
-      participant_id: participantId,
-      ...payload,
-    });
+      log.info("Steer action", {
+        trace_type: "steer.action",
+        session_id: sessionId,
+        participant_id: participantId,
+        ...payload,
+      });
 
-    await this.emit({
-      session_id: sessionId,
-      agent_id: participantId,
-      event_type: "steer_action",
-      timestamp,
-      data: payload,
-    });
-
-    // 3. participant_end (transient — steer interaction is complete)
-    await this.participantEnd(sessionId, participantId, "completed", {
-      lastEvent: "steer_action",
-    });
+      await this.emit({
+        session_id: sessionId,
+        agent_id: participantId,
+        event_type: "steer_action",
+        timestamp,
+        data: payload,
+      });
+    } finally {
+      // 3. participant_end (transient — always close the bracket)
+      await this.participantEnd(sessionId, participantId, "completed", {
+        lastEvent: "steer_action",
+      });
+    }
 
     return participantId;
   }

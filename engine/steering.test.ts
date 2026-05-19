@@ -1,5 +1,6 @@
 import { afterEach, describe, test, expect, mock } from "bun:test";
 import { listenForUserMessages, sendUserMessage, broadcastControlMessage } from "./messaging";
+import { inferSteerSource, classifySteerIntent } from "./orchestrator";
 
 const originalFetch = globalThis.fetch;
 
@@ -192,39 +193,23 @@ describe("steering commands (#147)", () => {
 
   describe("steer source inference", () => {
     test("tui- prefix identifies CLI source", () => {
-      // Mirrors Orchestrator.inferSteerSource logic
-      const infer = (messageId?: string) => {
-        if (!messageId) return "unknown";
-        if (messageId.startsWith("tui-")) return "cli";
-        return "web";
-      };
-      expect(infer("tui-12345-abc")).toBe("cli");
-      expect(infer("msg-12345")).toBe("web");
-      expect(infer(undefined)).toBe("unknown");
-      expect(infer("")).toBe("unknown");
+      expect(inferSteerSource("tui-12345-abc")).toBe("cli");
+      expect(inferSteerSource("msg-12345")).toBe("web");
+      expect(inferSteerSource(undefined)).toBe("unknown");
+      expect(inferSteerSource("")).toBe("unknown");
     });
   });
 
   describe("steer intent classification", () => {
     test("classifies ! commands as steer intents", () => {
-      const classify = (message: string) => {
-        if (message.startsWith("!")) {
-          const cmd = message.slice(1).split(/\s+/)[0]?.toLowerCase() ?? "";
-          if (cmd === "pause" || cmd === "resume" || cmd === "stop" || cmd === "budget") return cmd;
-          return "unknown";
-        }
-        if (message.trim().toLowerCase() === "ping") return "ping";
-        return "freeform";
-      };
-
-      expect(classify("!pause")).toBe("pause");
-      expect(classify("!resume")).toBe("resume");
-      expect(classify("!stop")).toBe("stop");
-      expect(classify("!budget 100")).toBe("budget");
-      expect(classify("!unknown")).toBe("unknown");
-      expect(classify("ping")).toBe("ping");
-      expect(classify("focus on auth")).toBe("freeform");
-      expect(classify("@lead check tests")).toBe("freeform");
+      expect(classifySteerIntent("!pause")).toBe("pause");
+      expect(classifySteerIntent("!resume")).toBe("resume");
+      expect(classifySteerIntent("!stop")).toBe("stop");
+      expect(classifySteerIntent("!budget 100")).toBe("budget");
+      expect(classifySteerIntent("!unknown")).toBe("unknown");
+      expect(classifySteerIntent("ping")).toBe("ping");
+      expect(classifySteerIntent("focus on auth")).toBe("freeform");
+      expect(classifySteerIntent("@lead check tests")).toBe("freeform");
     });
   });
 });

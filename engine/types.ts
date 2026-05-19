@@ -42,6 +42,8 @@ export interface ParticipantEventData extends ParticipantState {
 
 // --- Steer event types (Phase 5) ---
 
+/** Origin of a steer interaction. "api" is reserved for future direct API usage
+ *  (currently unreachable — all paths resolve to web/cli/unknown). */
 export type SteerSource = "web" | "cli" | "api" | "unknown";
 
 export type SteerIntent =
