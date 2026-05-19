@@ -210,7 +210,7 @@ Issue(s): #340
 
 Decision:
 
-Use explicit lead-authored `SPAWN_DECISION` blocks as the only strict-mode authorization for worker creation. Strict mode is enabled by `strict_spawn: true`, `MAE_SPAWN_DECISION_STRICT=1`, `MAE_STANDARD_SWARM_V2_STRICT=1`, or `MAE_CERTIFICATION_MODE=1`. A valid matching decision is emitted as a `spawn_decision` dashboard event and `spawn.decision` trace event before `agent_spawn`; `main_bus` remains rejected until the v2.1 sub-bus design exists. Compatibility aliases from earlier branch work are accepted at parser/validator boundaries and canonicalized into the flat Phase 4 schema.
+Use explicit lead-authored `SPAWN_DECISION` blocks as the only strict-mode authorization for worker creation. Strict mode is enabled by `strict_spawn: true`, `MAE_SPAWN_DECISION_STRICT=1`, `MAE_STANDARD_SWARM_V2_STRICT=1`, or `MAE_CERTIFICATION_MODE=1`. Valid decisions are the strict-mode worker roster: unknown workers, duplicate decisions, unsafe path constraints, unavailable tools, and missing decisions fail before worker resources are created. A valid matching decision is emitted as a `spawn_decision` dashboard event and `spawn.decision` trace event before worktree creation and before `agent_spawn`; `main_bus` remains rejected until the v2.1 sub-bus design exists. Compatibility aliases from earlier branch work are accepted at parser/validator boundaries and canonicalized into the flat Phase 4 schema.
 
 Reason:
 
@@ -224,7 +224,7 @@ Alternatives considered:
 
 Impact:
 
-Legacy non-strict runs keep existing worker behavior and emit decision events only when the lead provided explicit `SPAWN_DECISION` blocks. Strict runs reject missing or invalid decisions before any worker spawn. Worker prompts are derived from the structured decision when present.
+Legacy non-strict runs keep existing worker behavior and emit decision events only when the lead provided explicit `SPAWN_DECISION` blocks. Strict runs reject missing or invalid decisions before any worker spawn. Worker prompts are derived from the structured decision when present, decision tool/path constraints are applied to delegate options, and retry/Sr. recovery spawns emit derived decisions. Adapter traces carry `mae_agent_id` to bind Pi/Echo/A2A local ids back to canonical worker authorization.
 
 Validation required:
 

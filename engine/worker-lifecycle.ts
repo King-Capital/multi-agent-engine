@@ -16,6 +16,13 @@ import { parseReviews } from "./output-parsing";
 import { buildStreamHandler, buildSendMessage } from "./stream-handler";
 import { buildWorkerSystemPromptAppend, isReviewOnlyStep, readOnlyTools } from "./review-mode";
 import { buildParticipantCapabilities } from "./participant-capabilities";
+import {
+  applySpawnDecisionConstraints,
+  isSpawnDecisionStrictMode,
+  validateSpawnDecision,
+  validateSpawnDecisionForExecution,
+  type SpawnDecision,
+} from "./spawn-decision";
 import type { EventEmitter } from "./event-emitter";
 import type { OrchestratorLoop } from "./orchestrator-loop";
 import type {
@@ -45,6 +52,17 @@ function assertSessionActive(session: SessionState, phase: string): void {
   }
 }
 
+function safeDerivedPaths(paths: string[], fallback: string): string[] {
+  const safe = paths.filter((path) => {
+    const trimmed = path.trim();
+    if (!trimmed) return false;
+    if (trimmed.startsWith("/") || /^[A-Za-z]:[\\/]/.test(trimmed)) return false;
+    if (trimmed.split(/[\\/]+/).includes("..")) return false;
+    return ![".", "./", "*", "**", "**/*", "/*"].includes(trimmed);
+  });
+  return [...new Set(safe.length > 0 ? safe : [fallback])];
+}
+
 /**
  * Retry a worker with a reworked prompt from the lead's review.
  */
@@ -72,11 +90,38 @@ export async function retryWorker(
   const reviewOnly = isReviewOnlyStep(step);
   const workerDomain = reviewOnly ? { ...workerPersona.domain, write: [], update: [] } : workerPersona.domain;
   const workerTools = reviewOnly ? readOnlyTools(workerPersona.tools) : workerPersona.tools;
+  let effectiveWorkerTools = workerTools;
+  let effectiveWorkerDomain = workerDomain;
+  if (isSpawnDecisionStrictMode(step)) {
+    const retryDecision: SpawnDecision = {
+      need_worker: true,
+      worker_name: `${member.name} (retry ${attempt})`,
+      spawn_type: "worker",
+      reason: `Retry authorized after lead review requested rework for ${member.name}.`,
+      why_lead_cannot_do_it: "The original specialist owns the reworked assignment evidence.",
+      constraints: {
+        allowed_paths: safeDerivedPaths([...workerDomain.read, ...workerDomain.write, ...workerDomain.update], member.path),
+        allowed_tools: workerTools,
+        forbidden_paths: [".env", "node_modules"],
+      },
+      bus_policy: "isolated",
+      expected_output_schema: "REWORKED_WORKER_RESULT",
+      timeout_seconds: 600,
+    };
+    const validation = validateSpawnDecisionForExecution(retryDecision, workerTools);
+    if (!validation.valid) {
+      throw new Error(`Invalid retry SPAWN_DECISION: ${validation.errors.join(", ")}`);
+    }
+    const constrained = applySpawnDecisionConstraints(workerTools, workerDomain, retryDecision, reviewOnly);
+    effectiveWorkerTools = constrained.tools;
+    effectiveWorkerDomain = constrained.domain;
+    await emitter.spawnDecision(session.id, workerId, leadId, retryDecision, validation);
+  }
 
   await emitter.agentSpawn(session.id, workerId, leadId, `${member.name} (retry ${attempt})`, "worker",
     retryResolved.model, teamConfig["team-name"], member.color ?? teamConfig["team-color"], undefined,
     buildParticipantCapabilities({
-      tools: workerTools, domain: workerDomain, model: retryResolved.model,
+      tools: effectiveWorkerTools, domain: effectiveWorkerDomain, model: retryResolved.model,
     }));
 
   const retryUserPrompt = [
@@ -100,10 +145,12 @@ export async function retryWorker(
     userPrompt: retryUserPrompt,
     model: retryResolved.model,
     thinking: retryResolved.thinking,
-    tools: workerTools,
-    domain: workerDomain,
+    tools: effectiveWorkerTools,
+    domain: effectiveWorkerDomain,
     workingDir: session.workingDir,
     sessionDir: `data/sessions/${session.id}`,
+    maeAgentId: workerId,
+    maeAgentName: `${member.name} (retry ${attempt})`,
     parentId: leadId,
     teamName: teamConfig["team-name"],
     teamColor: member.color ?? teamConfig["team-color"],
@@ -238,12 +285,39 @@ export async function spawnSenior(
   ].join("\n");
 
   const srResolved = resolveModelForRole("sr");
+  let effectiveSrTools = srTools;
+  let effectiveSrDomain = srDomain;
+  if (isSpawnDecisionStrictMode(step)) {
+    const srDecision: SpawnDecision = {
+      need_worker: true,
+      worker_name: `Sr. (${domainNames.join("+")})`,
+      spawn_type: "sr",
+      reason: `Sr. recovery authorized for ${failedReview.workerName} after lead review requested cross-domain help.`,
+      why_lead_cannot_do_it: "The failed review requires combined specialist domains beyond the lead-only path.",
+      constraints: {
+        allowed_paths: safeDerivedPaths([...srDomain.read, ...srDomain.write, ...srDomain.update], "agents/personas"),
+        allowed_tools: srTools,
+        forbidden_paths: [".env", "node_modules"],
+      },
+      bus_policy: "isolated",
+      expected_output_schema: "SR_RECOVERY_RESULT",
+      timeout_seconds: 900,
+    };
+    const validation = validateSpawnDecisionForExecution(srDecision, srTools);
+    if (!validation.valid) {
+      throw new Error(`Invalid Sr SPAWN_DECISION: ${validation.errors.join(", ")}`);
+    }
+    const constrained = applySpawnDecisionConstraints(srTools, srDomain, srDecision, reviewOnly);
+    effectiveSrTools = constrained.tools;
+    effectiveSrDomain = constrained.domain;
+    await emitter.spawnDecision(session.id, srId, leadId, srDecision, validation);
+  }
 
   await emitter.agentSpawn(session.id, srId, leadId,
     `Sr. (${domainNames.join("+")})`, "sr",
     srResolved.model, teamConfig["team-name"], "#ffaa00", undefined,
     buildParticipantCapabilities({
-      tools: srTools, domain: srDomain, model: srResolved.model, authority: 55,
+      tools: effectiveSrTools, domain: effectiveSrDomain, model: srResolved.model, authority: 55,
     }));
 
   await emitter.message(session.id, srId, teamConfig.lead.name, "user",
@@ -255,10 +329,12 @@ export async function spawnSenior(
     userPrompt: srPrompt,
     model: srResolved.model,
     thinking: srResolved.thinking,
-    tools: srTools,
-    domain: srDomain,
+    tools: effectiveSrTools,
+    domain: effectiveSrDomain,
     workingDir: session.workingDir,
     sessionDir: `data/sessions/${session.id}`,
+    maeAgentId: srId,
+    maeAgentName: `Sr. (${domainNames.join("+")})`,
     parentId: leadId,
     teamName: teamConfig["team-name"],
     teamColor: "#ffaa00",

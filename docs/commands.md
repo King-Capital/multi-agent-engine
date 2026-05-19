@@ -398,7 +398,9 @@ mae validate-cert ./trace.jsonl --expected clean --live-pi
 mae validate-cert ./trace.jsonl --strict-spawn --json
 ```
 
-Strict spawn validation is part of Standard Swarm v2 Phase 4. A valid worker spawn must have a prior `spawn_decision` dashboard event, backed by a `spawn.decision` JSONL trace entry, with scoped paths, allowed tools, forbidden paths, isolated bus policy, expected output schema, and timeout. Runtime strict mode can also be enabled from chain config with `strict_spawn: true`. The parser accepts legacy aliases such as `allowed_read_paths`, `allowed_write_paths`, and `expected_output`, but canonical runtime output uses `allowed_paths` and `expected_output_schema`.
+Strict spawn validation is part of Standard Swarm v2 Phase 4. A valid worker spawn must have a prior `spawn_decision` dashboard event, backed by a `spawn.decision` JSONL trace entry, with scoped paths, allowed tools, forbidden paths, isolated bus policy, expected output schema, and timeout. Runtime strict mode can also be enabled from chain config with `strict_spawn: true`.
+
+In strict execution, the decision is the authorized worker roster: MAE spawns only configured team members with valid decisions, applies `allowed_tools` and `allowed_paths` to the delegate options, rejects broad or out-of-repo path constraints, rejects forbidden paths already covered by allowed scopes, and emits decisions before worktree creation and before `agent_spawn`. Retry workers and Sr. recovery agents emit derived decisions before their spawn events. Adapter `agent.start` traces include `mae_agent_id` so `validate-cert --strict-spawn` can bind Pi/Echo/A2A local ids back to the canonical worker decision. The parser accepts legacy aliases such as `allowed_read_paths`, `allowed_write_paths`, and `expected_output`, but canonical runtime output uses `allowed_paths` and `expected_output_schema`.
 
 ---
 

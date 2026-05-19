@@ -5,6 +5,7 @@ import {
   isSpawnDecisionStrictMode,
   parseSpawnDecisions,
   validateSpawnDecision,
+  validateSpawnDecisionForExecution,
 } from "./spawn-decision";
 
 describe("spawn decisions", () => {
@@ -146,5 +147,29 @@ END_SPAWN_DECISION
     expect(decision!.constraints.allowed_paths).toEqual(["engine/api.ts", "engine/auth.ts", "reports/backend.md"]);
     expect(decision!.expected_output_schema).toBe("REVIEW_REPORT: Backend");
     expect(validateSpawnDecision(decision!).valid).toBe(true);
+  });
+
+  test("execution validation rejects unsafe paths, unavailable tools, and forbidden overlaps", () => {
+    const [decision] = parseSpawnDecisions(`
+SPAWN_DECISION:
+need_worker: true
+worker_name: Security Auditor
+spawn_type: worker
+reason: Verify broad scope.
+why_lead_cannot_do_it: Security-specific review is needed.
+constraints:
+  allowed_paths: engine/**
+  allowed_tools: read, sudo
+  forbidden_paths: engine/secrets.ts
+bus_policy: isolated
+expected_output_schema: REVIEW_REPORT with findings
+timeout_seconds: 600
+END_SPAWN_DECISION
+`);
+
+    const result = validateSpawnDecisionForExecution(decision!, ["read"]);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain("tool not available to worker: sudo");
+    expect(result.errors).toContain("forbidden path is covered by allowed path: engine/secrets.ts");
   });
 });

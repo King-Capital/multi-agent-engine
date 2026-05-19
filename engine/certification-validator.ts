@@ -9,7 +9,7 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
-import { validateSpawnDecision, type SpawnDecision } from "./spawn-decision";
+import { coerceSpawnDecisionPayload, validateSpawnDecision, type SpawnDecision } from "./spawn-decision";
 
 // ---------------------------------------------------------------------------
 // VALIDATION_CONTRACT schema
@@ -44,6 +44,9 @@ interface TraceEvent {
 	event_type?: string;
 	session_id?: string;
 	agent_id?: string;
+	mae_agent_id?: string;
+	mae_agent_name?: string;
+	parent_id?: string;
 	team?: string;
 	grade?: string;
 	status?: string;
@@ -146,7 +149,11 @@ function readTraceEvents(traceFile: string): TraceEvent[] {
 }
 
 function agentId(evt: TraceEvent): string {
-	return evt.agent_id ?? evt.data?.agent_id ?? "";
+	return evt.agent_id ?? evt.data?.agent_id ?? evt.data?.participant_id ?? "";
+}
+
+function maeAgentId(evt: TraceEvent): string {
+	return evt.mae_agent_id ?? "";
 }
 
 function teamName(evt: TraceEvent): string {
@@ -166,7 +173,7 @@ function isAgentEnd(evt: TraceEvent): boolean {
 }
 
 function isAgentStart(evt: TraceEvent): boolean {
-	return evt.type === "agent.start" || evt.event_type === "agent_spawn";
+	return evt.type === "agent.start" || evt.event_type === "agent_spawn" || evt.event_type === "participant_start" || evt.type === "participant.start";
 }
 
 function isToolCall(evt: TraceEvent): boolean {
@@ -197,6 +204,9 @@ function isWorkerSpawn(evt: TraceEvent): boolean {
 	if (id.endsWith("-lead")) return false;
 	if (id.startsWith("synth-")) return false;
 	if (id === "pi-orchestrator" || id === "echo-orchestrator") return false;
+	if (evt.event_type === "participant_start" || evt.type === "participant.start") {
+		return evt.data?.kind === "worker" || evt.data?.role === "worker";
+	}
 	if (evt.data?.agent_role === "worker") return true;
 	// Heuristic: non-lead, non-synth, non-orchestrator agent.start is a worker
 	return true;
@@ -450,56 +460,94 @@ function eventSpawnDecision(evt: TraceEvent): SpawnDecision | null {
 		: Object.keys(eventData).length > 0
 		? eventData
 		: evt as unknown as Record<string, unknown>;
-	const constraints = recordValue(data.constraints);
-	const allowedPaths = [
-		...listValue(firstValue(constraints, ["allowed_paths", "allowed_read_paths"])),
-		...listValue(constraints.allowed_write_paths),
-	];
+	return coerceSpawnDecisionPayload(data, { defaultNeedWorker: true });
+}
+
+function hasUnsafeTracePath(value: string): boolean {
+	const path = value.trim();
+	if (!path) return true;
+	if (path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)) return true;
+	if (path.split(/[\\/]+/).includes("..")) return true;
+	return [".", "./", "*", "**", "**/*", "/*"].includes(path);
+}
+
+function tracePathCovers(allowedPath: string, forbiddenPath: string): boolean {
+	const allowed = allowedPath.replace(/\/+$/g, "");
+	const forbidden = forbiddenPath.replace(/\/+$/g, "");
+	if (allowed === forbidden) return true;
+	if (allowed.endsWith("/**")) {
+		const prefix = allowed.slice(0, -3).replace(/\/+$/g, "");
+		return forbidden === prefix || forbidden.startsWith(`${prefix}/`);
+	}
+	if (allowed.endsWith("/*")) {
+		const prefix = allowed.slice(0, -2).replace(/\/+$/g, "");
+		return forbidden.startsWith(`${prefix}/`) && !forbidden.slice(prefix.length + 1).includes("/");
+	}
+	return forbidden.startsWith(`${allowed}/`);
+}
+
+function validateTraceSpawnDecision(decision: SpawnDecision): ValidationCheck | null {
+	const validation = validateSpawnDecision(decision);
+	const errors = [...validation.errors];
+	if (decision.need_worker) {
+		for (const path of [...decision.constraints.allowed_paths, ...decision.constraints.forbidden_paths]) {
+			if (hasUnsafeTracePath(path)) errors.push(`unsafe path constraint: ${path}`);
+		}
+		for (const tool of decision.constraints.allowed_tools) {
+			if (tool === "*") errors.push(`unsafe allowed tool: ${tool}`);
+		}
+		for (const forbidden of decision.constraints.forbidden_paths) {
+			for (const allowed of decision.constraints.allowed_paths) {
+				if (tracePathCovers(allowed, forbidden)) {
+					errors.push(`forbidden path is covered by allowed path: ${forbidden}`);
+				}
+			}
+		}
+	}
+	if (errors.length === 0) return null;
 	return {
-		need_worker: true,
-		worker_name: typeof data.worker_name === "string" ? data.worker_name : undefined,
-		spawn_type: data.spawn_type === "sr" ? "sr" : "worker",
-		reason: typeof data.reason === "string" ? data.reason : "",
-		why_lead_cannot_do_it: typeof data.why_lead_cannot_do_it === "string" ? data.why_lead_cannot_do_it : "",
-		constraints: {
-			allowed_paths: allowedPaths,
-			allowed_tools: listValue(constraints.allowed_tools),
-			forbidden_paths: listValue(constraints.forbidden_paths),
-		},
-		bus_policy: data.bus_policy === "main_bus" ? "main_bus" : "isolated",
-		expected_output_schema: typeof firstValue(data, ["expected_output_schema", "expected_output"]) === "string"
-			? firstValue(data, ["expected_output_schema", "expected_output"]) as string
-			: "",
-		timeout_seconds: typeof data.timeout_seconds === "number" ? data.timeout_seconds : Number(data.timeout_seconds ?? 0),
+		name: "spawn_decisions_valid",
+		passed: false,
+		evidence: "Invalid SPAWN_DECISION evidence",
+		details: `${decision.worker_name ?? "(unknown)"} invalid: ${errors.join(", ")}`,
 	};
 }
 
 function checkSpawnDecisions(events: TraceEvent[], strict: boolean): ValidationCheck {
 	const spawns = events.map((event, index) => ({ event, index })).filter(({ event }) => isWorkerSpawn(event));
 	const decisionEvents = events
-		.map((event, index) => ({ decision: eventSpawnDecision(event), index }))
-		.filter((entry): entry is { decision: SpawnDecision; index: number } => entry.decision !== null);
-	const decisionsByWorker = new Map(
-		decisionEvents
-			.filter(({ decision }) => decision.worker_name)
-			.map(({ decision, index }) => [normalizeWorkerName(decision.worker_name!), { decision, index }]),
-	);
+		.map((event, index) => ({ event, decision: eventSpawnDecision(event), index }))
+		.filter((entry): entry is { event: TraceEvent; decision: SpawnDecision; index: number } => entry.decision !== null);
 	const failures: string[] = [];
+	const seenDecisionKeys = new Set<string>();
 
-	for (const { decision } of decisionEvents) {
-		const validation = validateSpawnDecision(decision);
-		if (!validation.valid) {
-			failures.push(`${decision.worker_name ?? "(unknown)"} invalid: ${validation.errors.join(", ")}`);
+	for (const { event, decision } of decisionEvents) {
+		const validation = validateTraceSpawnDecision(decision);
+		if (validation) {
+			failures.push(validation.details ?? validation.evidence);
 		}
+		const key = `${event.session_id ?? ""}:${agentId(event)}:${normalizeWorkerName(decision.worker_name ?? "")}`;
+		if (seenDecisionKeys.has(key)) {
+			failures.push(`${decision.worker_name ?? (agentId(event) || "(unknown)")} has duplicate SPAWN_DECISION evidence`);
+		}
+		seenDecisionKeys.add(key);
 	}
 
 	if (strict) {
 		for (const { event: spawn, index: spawnIndex } of spawns) {
 			const id = agentId(spawn);
+			const canonicalId = maeAgentId(spawn) || id;
 			const name = String(spawn.data?.agent_name ?? id);
 			const key = normalizeWorkerName(name);
-			const idKey = normalizeWorkerName(id);
-			const matchingDecision = decisionsByWorker.get(key) ?? decisionsByWorker.get(idKey);
+			const idKey = normalizeWorkerName(canonicalId);
+			const matchingDecision = decisionEvents.find(({ event, decision }) => {
+				if ((event.session_id ?? "") !== (spawn.session_id ?? "")) return false;
+				const decisionEventId = maeAgentId(event) || agentId(event);
+				if (decisionEventId && decisionEventId !== canonicalId) return false;
+				if (event.parent_id && spawn.parent_id && event.parent_id !== spawn.parent_id) return false;
+				const decisionName = normalizeWorkerName(decision.worker_name ?? "");
+				return decisionName === key || decisionName === idKey || normalizeWorkerName(decisionEventId) === idKey;
+			});
 			if (!matchingDecision) {
 				failures.push(`${id} missing SPAWN_DECISION`);
 			} else if (matchingDecision.index > spawnIndex) {

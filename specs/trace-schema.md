@@ -78,7 +78,7 @@ Heartbeat volume is intentionally bounded: MAE emits heartbeats on lifecycle/cos
 
 ### Structured Spawn Decisions
 
-Phase 4 requires worker creation in strict Standard Swarm v2 mode to be preceded by a machine-readable `SPAWN_DECISION`. The dashboard event type is `spawn_decision`; the JSONL trace type is `spawn.decision`. The validator treats LLM prose about delegation as non-authoritative; strict mode only trusts a valid decision event that appears before the matching worker spawn plus the derived worker prompt.
+Phase 4 requires worker creation in strict Standard Swarm v2 mode to be preceded by a machine-readable `SPAWN_DECISION`. The dashboard event type is `spawn_decision`; the JSONL trace type is `spawn.decision`. The validator treats LLM prose about delegation as non-authoritative; strict mode only trusts a valid decision event that appears before the matching worker spawn.
 
 ```jsonl
 {"ts":"...","type":"spawn.decision","id":"...","parent_id":"pi-security-lead","session_id":"...","agent_id":"security-reviewer","need_worker":true,"worker_name":"Security Reviewer","spawn_type":"worker","reason":"Focused auth boundary review is required","why_lead_cannot_do_it":"Independent security evidence is required","constraints":{"allowed_paths":["engine/security.ts"],"allowed_tools":["read","rg"],"forbidden_paths":[".env","node_modules"]},"bus_policy":"isolated","expected_output_schema":"REVIEW_REPORT: Security","timeout_seconds":600,"validation":{"valid":true,"errors":[]}}
@@ -101,6 +101,10 @@ Spawn decision fields:
 | `timeout_seconds` | number | yes | Positive per-worker timeout budget |
 
 Compatibility aliases accepted at parse/validation boundaries: `allowed_read_paths` and `allowed_write_paths` are folded into `constraints.allowed_paths`, `expected_output` is folded into `expected_output_schema`, and legacy nested dashboard payloads under `data.decision` are accepted. Runtime emission remains the canonical flat event shape above.
+
+Runtime strict mode uses valid decisions as the authorized worker roster. It rejects unknown workers, duplicate decisions, unsafe path constraints, unavailable tools, and `main_bus` before worker resources are created. The worker delegate receives the decision-derived prompt, `allowed_tools` is applied to the effective tool list, and `allowed_paths` becomes the effective worker domain scope. Retry workers and Sr. recovery agents emit derived decisions before their spawn events.
+
+Adapter-level traces may use adapter-local ids such as `pi-backend-engineer` or `echo-backend-engineer`; when available, `agent.start` includes `mae_agent_id` and `mae_agent_name` so validators can bind the adapter event back to the canonical MAE `spawn.decision` event.
 
 ### Tool Calls — Behavioral Fingerprint
 

@@ -32,3 +32,6 @@ bun cli.ts validate-cert <trace-file> [--live-pi] [--strict-spawn] [--json]
 - reject missing or invalid decisions in strict mode
 - emit `spawn_decision` dashboard events and `spawn.decision` JSONL trace events before `agent_spawn`
 - derive worker prompts from the decision contract
+- use valid decisions as the strict-mode worker roster
+- apply decision tool/path constraints to worker delegate options
+- emit derived decisions for strict retry and Sr. recovery spawns

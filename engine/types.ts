@@ -352,6 +352,8 @@ export interface DelegateOptions {
   domain: DomainConfig;
   workingDir: string;
   sessionDir: string;
+  maeAgentId?: string;
+  maeAgentName?: string;
   parentId?: string;
   teamName: string;
   teamColor: string;

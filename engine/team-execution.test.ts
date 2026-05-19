@@ -788,6 +788,8 @@ describe("runTeamStep participant lifecycle", () => {
     const previous = process.env.MAE_SPAWN_DECISION_STRICT;
     process.env.MAE_SPAWN_DECISION_STRICT = "1";
     const workerPrompts: string[] = [];
+    const workerTools: string[][] = [];
+    const workerReadScopes: string[][] = [];
     const events: string[] = [];
     try {
       const decisionFor = (name: string) => `
@@ -799,7 +801,7 @@ reason: ${name} needs a scoped review.
 why_lead_cannot_do_it: Independent specialist evidence is required.
 constraints:
   allowed_paths: engine/team-execution.ts
-  allowed_tools: read, rg
+  allowed_tools: read
   forbidden_paths: .env, node_modules
 bus_policy: isolated
 expected_output_schema: REVIEW_REPORT: ${name}
@@ -834,6 +836,8 @@ END_SPAWN_DECISION`;
             });
           }
           workerPrompts.push(opts.userPrompt);
+          workerTools.push(opts.tools);
+          workerReadScopes.push(opts.domain.read);
           return makeResult(opts.persona.name, `mock-${opts.persona.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`);
         },
       });
@@ -862,8 +866,10 @@ END_SPAWN_DECISION`;
       expect(events.filter((event) => event === "spawn_decision")).toHaveLength(4);
       expect(events.indexOf("spawn_decision")).toBeLessThan(events.findIndex((event) => event === "agent_spawn:Engineering-backend-engineer"));
       expect(workerPrompts).toHaveLength(4);
+      expect(workerTools[0]).toEqual(["read"]);
+      expect(workerReadScopes[0]).toEqual(["engine/team-execution.ts"]);
       expect(workerPrompts[0]).toContain("Your assignment from SPAWN_DECISION");
-      expect(workerPrompts[0]).toContain("Allowed tools: read, rg");
+      expect(workerPrompts[0]).toContain("Allowed tools: read");
       expect(workerPrompts[0]).toContain("Forbidden paths: .env, node_modules");
       expect(workerPrompts[0]).toContain("Expected output schema:\nREVIEW_REPORT: Backend Engineer");
     } finally {

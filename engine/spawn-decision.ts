@@ -49,11 +49,11 @@ function parseBoolean(value: unknown): boolean | undefined {
   return undefined;
 }
 
-function coerceDecision(raw: Record<string, unknown>): SpawnDecision | null {
+export function coerceSpawnDecisionPayload(raw: Record<string, unknown>, opts: { defaultNeedWorker?: boolean } = {}): SpawnDecision | null {
   const constraints = raw.constraints && typeof raw.constraints === "object"
     ? raw.constraints as Record<string, unknown>
     : raw;
-  const needWorker = parseBoolean(raw.need_worker);
+  const needWorker = parseBoolean(raw.need_worker) ?? opts.defaultNeedWorker;
   const timeout = Number(raw.timeout_seconds ?? raw.timeout);
   const spawnType = String(raw.spawn_type ?? "worker").trim();
   const busPolicy = String(raw.bus_policy ?? "").trim();
@@ -129,7 +129,7 @@ export function parseSpawnDecisions(output: string): SpawnDecision[] {
     } catch {
       raw = parseYamlish(block);
     }
-    const decision = coerceDecision(raw);
+    const decision = coerceSpawnDecisionPayload(raw);
     if (decision) decisions.push(decision);
     searchFrom = end + END.length;
   }
@@ -153,6 +153,74 @@ export function validateSpawnDecision(decision: SpawnDecision): SpawnDecisionVal
   return { valid: errors.length === 0, errors };
 }
 
+function hasUnsafePath(value: string): boolean {
+  const path = value.trim();
+  if (!path) return true;
+  if (path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)) return true;
+  if (path.split(/[\\/]+/).includes("..")) return true;
+  return [".", "./", "*", "**", "**/*", "/*"].includes(path);
+}
+
+function pathCovers(allowedPath: string, forbiddenPath: string): boolean {
+  const allowed = allowedPath.replace(/\/+$/g, "");
+  const forbidden = forbiddenPath.replace(/\/+$/g, "");
+  if (allowed === forbidden) return true;
+  if (allowed.endsWith("/**")) {
+    const prefix = allowed.slice(0, -3).replace(/\/+$/g, "");
+    return forbidden === prefix || forbidden.startsWith(`${prefix}/`);
+  }
+  if (allowed.endsWith("/*")) {
+    const prefix = allowed.slice(0, -2).replace(/\/+$/g, "");
+    return forbidden.startsWith(`${prefix}/`) && !forbidden.slice(prefix.length + 1).includes("/");
+  }
+  return forbidden.startsWith(`${allowed}/`);
+}
+
+export function validateSpawnDecisionForExecution(decision: SpawnDecision, availableTools: string[]): SpawnDecisionValidation {
+  const base = validateSpawnDecision(decision);
+  const available = new Set(availableTools);
+  const errors = [...base.errors];
+
+  if (decision.need_worker) {
+    for (const path of [...decision.constraints.allowed_paths, ...decision.constraints.forbidden_paths]) {
+      if (hasUnsafePath(path)) errors.push(`unsafe path constraint: ${path}`);
+    }
+    for (const forbidden of decision.constraints.forbidden_paths) {
+      for (const allowed of decision.constraints.allowed_paths) {
+        if (pathCovers(allowed, forbidden)) {
+          errors.push(`forbidden path is covered by allowed path: ${forbidden}`);
+        }
+      }
+    }
+    for (const tool of decision.constraints.allowed_tools) {
+      if (tool === "*" || !available.has(tool)) errors.push(`tool not available to worker: ${tool}`);
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+export function applySpawnDecisionConstraints<T extends { read: string[]; write: string[]; update: string[]; delete?: string[] }>(
+  tools: string[],
+  domain: T,
+  decision: SpawnDecision,
+  reviewOnly: boolean,
+): { tools: string[]; domain: T } {
+  const allowedTools = new Set(decision.constraints.allowed_tools);
+  const constrainedTools = tools.filter((tool) => allowedTools.has(tool));
+  const allowedPaths = [...new Set(decision.constraints.allowed_paths)];
+  return {
+    tools: constrainedTools,
+    domain: {
+      ...domain,
+      read: allowedPaths,
+      write: reviewOnly ? [] : allowedPaths,
+      update: reviewOnly ? [] : allowedPaths,
+      delete: [],
+    },
+  };
+}
+
 export function findSpawnDecisionForWorker(decisions: SpawnDecision[], workerName: string): SpawnDecision | undefined {
   const wanted = workerName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   return decisions.find((decision) => {
@@ -172,7 +240,7 @@ export function buildSpawnDecisionInstructions(members: { name: string; consultW
   const roster = members.map((member) => `- ${member.name}: ${member.consultWhen ?? "general tasks"}`).join("\n");
   return [
     "Before any worker can run, emit one SPAWN_DECISION block per worker you need.",
-    "If no worker is needed, emit one block with need_worker: false.",
+    "If no worker is needed, use a lead-only step instead of strict worker spawn mode.",
     "Each worker decision must be scoped and machine-readable:",
     "SPAWN_DECISION:",
     "need_worker: true",

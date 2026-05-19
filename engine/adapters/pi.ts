@@ -159,6 +159,8 @@ export class PiAdapter implements PlatformAdapter {
       trace_type: "agent.start",
       session_id: sessionId,
       agent_id: agentId,
+      mae_agent_id: opts.maeAgentId,
+      mae_agent_name: opts.maeAgentName,
       model: piModel,
       persona: opts.persona.name,
       team: opts.teamName,

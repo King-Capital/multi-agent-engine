@@ -458,12 +458,13 @@ export class EventEmitter {
       timeout_seconds: decision.timeout_seconds,
       ...(validation ? { validation } : {}),
     };
+    const redactedData = redactRecord(data);
     log.info("Spawn decision", {
       trace_type: "spawn.decision",
       session_id: sessionId,
       agent_id: workerId,
       parent_id: parentId,
-      ...data,
+      ...redactedData,
     });
     return this.emit({
       session_id: sessionId,
@@ -471,7 +472,7 @@ export class EventEmitter {
       parent_id: parentId,
       event_type: "spawn_decision",
       timestamp: new Date().toISOString(),
-      data,
+      data: redactedData,
     });
   }
 
