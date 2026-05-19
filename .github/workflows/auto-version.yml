@@ -22,39 +22,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  tag-release-pr:
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.merged == true &&
-      startsWith(github.event.pull_request.title, 'chore(release):')
-    runs-on: [self-hosted, mae]
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          fetch-depth: 0
-          ref: main
-          token: ${{ secrets.GH_PAT || github.token }}
-
-      - name: Tag merged release PR
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
-        run: |
-          set -euo pipefail
-          VERSION="$(tr -d '[:space:]' < VERSION)"
-          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Refusing to tag non-stable VERSION: $VERSION" >&2
-            exit 1
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin --tags
-          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
-            echo "Tag v${VERSION} already exists"
-            exit 0
-          fi
-          git tag -a -m "v${VERSION}" "v${VERSION}"
-          git push origin "v${VERSION}"
-
   version-bump:
     if: >-
       github.event_name == 'workflow_dispatch' ||
@@ -133,7 +100,7 @@ jobs:
           echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "Bumped $CURRENT → $NEW ($BUMP)"
 
-      - name: Commit, tag, and push or open release PR
+      - name: Commit, tag, and push version bump
         if: steps.check.outputs.skip == 'false' && steps.version.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
@@ -144,33 +111,8 @@ jobs:
           git add VERSION scripts/mae README.md
           git commit -m "chore(release): v${VERSION}"
           git pull --rebase origin main
+          git push origin main
 
-          BRANCH="automation/release-v${VERSION}"
-          git checkout -B "$BRANCH"
-          git push -f origin "$BRANCH"
-          OWNER="${GITHUB_REPOSITORY%%/*}"
-          API_ROOT="${GITHUB_API_URL:-https://api.github.com}"
-          EXISTING_PR="$(curl -fsS \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "${API_ROOT}/repos/${GITHUB_REPOSITORY}/pulls?head=${OWNER}:${BRANCH}&base=main&state=open")"
-          if echo "$EXISTING_PR" | grep -q '"html_url"'; then
-            echo "Release PR already exists for ${BRANCH}"
-            exit 0
-          fi
-
-          BODY_FILE="$(mktemp)"
-          printf '{"base":"main","head":"%s","title":"chore(release): v%s","body":"Automated version bump for v%s. Merge this PR to trigger the normal deploy workflows."}\n' \
-            "$BRANCH" "$VERSION" "$VERSION" > "$BODY_FILE"
-          PR_RESPONSE="$(curl -fsS \
-            -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "${API_ROOT}/repos/${GITHUB_REPOSITORY}/pulls" \
-            -d @"$BODY_FILE")"
-          echo "$PR_RESPONSE"
-          PR_NUMBER="$(echo "$PR_RESPONSE" | grep -o '"number":[0-9]*' | head -1 | cut -d: -f2)"
-          if [ -n "$PR_NUMBER" ]; then
-            gh pr merge "$PR_NUMBER" --squash --auto
-          fi
+          git tag -a -m "v${VERSION}" "v${VERSION}"
+          git push origin "v${VERSION}"
+          echo "Released v${VERSION}"
