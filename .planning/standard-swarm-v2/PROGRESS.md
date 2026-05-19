@@ -4,11 +4,11 @@ Canonical PRD: `../standard-swarm-v2-prd-workflow.md`
 
 ## Current status
 
-**Phase 2 in progress on `pi-phase2-participant-presence`.** Branch was created from merged Phase 1 main (`1ce507f`). Participant types, event helpers, trace recorder support, bounded heartbeat/activity events, capability metadata, and stale-detection helper are implemented with targeted tests passing.
+**Phase 3 implementation complete on `pi-phase3`.** Branch was created from merged Phase 1+2 main (`6015e5a`). Deterministic certification validator implemented with 35 targeted tests, CLI command, and bash harness integration.
 
 ## Current phase
 
-Phase 2 participant presence/heartbeat implementation.
+Phase 3 deterministic validator — implementation complete, pending PR and review.
 
 ## Scope reminder
 
@@ -93,15 +93,15 @@ Known historical risks:
 
 ### Phase 3 — Validator/verifier (#335)
 
-- [ ] `VALIDATION_CONTRACT` schema defined
-- [ ] Deterministic evidence checks implemented
-- [ ] Team-level structured contract validation implemented
-- [ ] `REVIEW_REPORT` vs `CERTIFICATION_CONTRACT` boundary validated
-- [ ] Validator cites trace/artifact evidence
-- [ ] LLM commentary documented as non-authoritative if present
-- [ ] Validator wired into strict cert path
-- [ ] Contradiction tests added
-- [ ] Echo cert smoke passes
+- [x] `VALIDATION_CONTRACT` schema defined (`engine/certification-validator.ts`)
+- [x] Deterministic evidence checks implemented (12 checks: lifecycle, operational failures, empty outputs, scope drift, wrong fixture, repo source reads, worker spawns, leaked contracts, canonical artifact, team contracts, stale participants, contract-evidence match)
+- [x] Team-level structured contract validation implemented (REVIEW_REPORT vs CERTIFICATION_CONTRACT boundary)
+- [x] `REVIEW_REPORT` vs `CERTIFICATION_CONTRACT` boundary validated
+- [x] Validator cites trace/artifact evidence (each check includes evidence string and optional details)
+- [x] LLM commentary documented as non-authoritative if present (all checks are deterministic, no LLM calls)
+- [x] Validator wired into strict cert path (`mae validate-cert` CLI command with JSON/text output)
+- [x] Contradiction tests added (35 tests covering all check types including contradictions)
+- [x] Echo cert smoke passes (40 cert harness regression checks including 2 validator integration tests)
 
 ### Phase 4 — Structured spawn decisions (#340)
 
@@ -228,9 +228,21 @@ Certification hardening is evidenced by deterministic fixtures, not only green c
 - 36 local regression tests and echo smoke pass on final `pi-phase1-complete` branch.
 - Approved full live Pi cert (3 fixtures) passed with preserved artifacts at `/private/var/folders/pw/92qs6gh94z75p3ypb8y3v7lc0000gn/T/mae-cert.NWZooc`.
 
+## Phase 3 targeted validation snapshot
+
+Branch: `pi-phase3` from merged Phase 1+2 main (`6015e5a`).
+
+| Command | Result | Evidence |
+|---|---|---|
+| `bun test engine/certification-validator.test.ts` | pass | 35 pass, 0 fail; lifecycle, operational failures, empty outputs, scope drift, wrong fixture, worker spawns, leaked contracts, canonical artifact, contract-evidence match, stale participants, team contracts, repo source reads, format output |
+| `cd engine && bunx tsc --noEmit` | pass | Typecheck clean |
+| `scripts/certify-live-swarm-test` | pass | 40 cert harness regression checks including 2 TS validator integration tests |
+| `bun test` | pass | 603 pass, 1 skip, 0 fail |
+| `git diff --check` | pass | No whitespace errors |
+
 ## Open blockers
 
-None currently for Phase 2 implementation. Focused re-review of final consolidation still required before updating PR #356 as ready.
+None currently for Phase 3 implementation. Focused re-review of final consolidation still required before updating PR #356 as ready.
 
 ## Open risks
 
