@@ -63,16 +63,23 @@ interface TraceEvent {
 		spawn_type?: string;
 		reason?: string;
 		why_lead_cannot_do_it?: string;
-		constraints?: {
-			allowed_paths?: string[];
-			allowed_tools?: string[];
-			forbidden_paths?: string[];
-		};
+		constraints?: Record<string, unknown>;
+		decision?: Record<string, unknown>;
 		bus_policy?: string;
 		expected_output_schema?: string;
+		expected_output?: string;
 		timeout_seconds?: number;
 		[key: string]: unknown;
 	};
+	worker_name?: string;
+	spawn_type?: string;
+	reason?: string;
+	why_lead_cannot_do_it?: string;
+	constraints?: Record<string, unknown>;
+	bus_policy?: string;
+	expected_output_schema?: string;
+	expected_output?: string;
+	timeout_seconds?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -418,9 +425,36 @@ function normalizeWorkerName(value: string): string {
 	return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+function listValue(value: unknown): string[] {
+	if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
+	if (typeof value === "string") return value.split(",").map((item) => item.trim()).filter(Boolean);
+	return [];
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+	return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function firstValue(record: Record<string, unknown>, keys: string[]): unknown {
+	for (const key of keys) {
+		if (record[key] !== undefined) return record[key];
+	}
+	return undefined;
+}
+
 function eventSpawnDecision(evt: TraceEvent): SpawnDecision | null {
-	if (evt.event_type !== "spawn_decision" || !evt.data) return null;
-	const data = evt.data;
+	if (evt.event_type !== "spawn_decision" && evt.type !== "spawn.decision") return null;
+	const eventData = recordValue(evt.data);
+	const data = Object.keys(recordValue(eventData.decision)).length > 0
+		? recordValue(eventData.decision)
+		: Object.keys(eventData).length > 0
+		? eventData
+		: evt as unknown as Record<string, unknown>;
+	const constraints = recordValue(data.constraints);
+	const allowedPaths = [
+		...listValue(firstValue(constraints, ["allowed_paths", "allowed_read_paths"])),
+		...listValue(constraints.allowed_write_paths),
+	];
 	return {
 		need_worker: true,
 		worker_name: typeof data.worker_name === "string" ? data.worker_name : undefined,
@@ -428,29 +462,31 @@ function eventSpawnDecision(evt: TraceEvent): SpawnDecision | null {
 		reason: typeof data.reason === "string" ? data.reason : "",
 		why_lead_cannot_do_it: typeof data.why_lead_cannot_do_it === "string" ? data.why_lead_cannot_do_it : "",
 		constraints: {
-			allowed_paths: Array.isArray(data.constraints?.allowed_paths) ? data.constraints.allowed_paths : [],
-			allowed_tools: Array.isArray(data.constraints?.allowed_tools) ? data.constraints.allowed_tools : [],
-			forbidden_paths: Array.isArray(data.constraints?.forbidden_paths) ? data.constraints.forbidden_paths : [],
+			allowed_paths: allowedPaths,
+			allowed_tools: listValue(constraints.allowed_tools),
+			forbidden_paths: listValue(constraints.forbidden_paths),
 		},
 		bus_policy: data.bus_policy === "main_bus" ? "main_bus" : "isolated",
-		expected_output_schema: typeof data.expected_output_schema === "string" ? data.expected_output_schema : "",
-		timeout_seconds: typeof data.timeout_seconds === "number" ? data.timeout_seconds : 0,
+		expected_output_schema: typeof firstValue(data, ["expected_output_schema", "expected_output"]) === "string"
+			? firstValue(data, ["expected_output_schema", "expected_output"]) as string
+			: "",
+		timeout_seconds: typeof data.timeout_seconds === "number" ? data.timeout_seconds : Number(data.timeout_seconds ?? 0),
 	};
 }
 
 function checkSpawnDecisions(events: TraceEvent[], strict: boolean): ValidationCheck {
-	const spawns = events.filter(isWorkerSpawn);
+	const spawns = events.map((event, index) => ({ event, index })).filter(({ event }) => isWorkerSpawn(event));
 	const decisionEvents = events
-		.map(eventSpawnDecision)
-		.filter((decision): decision is SpawnDecision => decision !== null);
+		.map((event, index) => ({ decision: eventSpawnDecision(event), index }))
+		.filter((entry): entry is { decision: SpawnDecision; index: number } => entry.decision !== null);
 	const decisionsByWorker = new Map(
 		decisionEvents
-			.filter((decision) => decision.worker_name)
-			.map((decision) => [normalizeWorkerName(decision.worker_name!), decision]),
+			.filter(({ decision }) => decision.worker_name)
+			.map(({ decision, index }) => [normalizeWorkerName(decision.worker_name!), { decision, index }]),
 	);
 	const failures: string[] = [];
 
-	for (const decision of decisionEvents) {
+	for (const { decision } of decisionEvents) {
 		const validation = validateSpawnDecision(decision);
 		if (!validation.valid) {
 			failures.push(`${decision.worker_name ?? "(unknown)"} invalid: ${validation.errors.join(", ")}`);
@@ -458,13 +494,16 @@ function checkSpawnDecisions(events: TraceEvent[], strict: boolean): ValidationC
 	}
 
 	if (strict) {
-		for (const spawn of spawns) {
+		for (const { event: spawn, index: spawnIndex } of spawns) {
 			const id = agentId(spawn);
 			const name = String(spawn.data?.agent_name ?? id);
 			const key = normalizeWorkerName(name);
 			const idKey = normalizeWorkerName(id);
-			if (!decisionsByWorker.has(key) && !decisionsByWorker.has(idKey)) {
+			const matchingDecision = decisionsByWorker.get(key) ?? decisionsByWorker.get(idKey);
+			if (!matchingDecision) {
 				failures.push(`${id} missing SPAWN_DECISION`);
+			} else if (matchingDecision.index > spawnIndex) {
+				failures.push(`${id} SPAWN_DECISION appears after worker spawn`);
 			}
 		}
 	}
@@ -474,7 +513,7 @@ function checkSpawnDecisions(events: TraceEvent[], strict: boolean): ValidationC
 		passed: failures.length === 0,
 		evidence: failures.length === 0
 			? strict
-				? `${spawns.length} worker spawn(s) have valid SPAWN_DECISION evidence`
+				? `${spawns.length} worker spawn(s) have valid prior SPAWN_DECISION evidence`
 				: `${decisionEvents.length} SPAWN_DECISION event(s) valid`
 			: `${failures.length} spawn decision failure(s)`,
 		details: failures.length > 0 ? failures.join("; ") : undefined,

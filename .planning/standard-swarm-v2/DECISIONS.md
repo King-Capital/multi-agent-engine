@@ -210,7 +210,7 @@ Issue(s): #340
 
 Decision:
 
-Use explicit lead-authored `SPAWN_DECISION` blocks as the only strict-mode authorization for worker creation. Strict mode is enabled by `strict_spawn: true`, `MAE_SPAWN_DECISION_STRICT=1`, `MAE_STANDARD_SWARM_V2_STRICT=1`, or `MAE_CERTIFICATION_MODE=1`. A valid matching decision is emitted as a `spawn_decision` dashboard event and `spawn.decision` trace event before `agent_spawn`; `main_bus` remains rejected until the v2.1 sub-bus design exists.
+Use explicit lead-authored `SPAWN_DECISION` blocks as the only strict-mode authorization for worker creation. Strict mode is enabled by `strict_spawn: true`, `MAE_SPAWN_DECISION_STRICT=1`, `MAE_STANDARD_SWARM_V2_STRICT=1`, or `MAE_CERTIFICATION_MODE=1`. A valid matching decision is emitted as a `spawn_decision` dashboard event and `spawn.decision` trace event before `agent_spawn`; `main_bus` remains rejected until the v2.1 sub-bus design exists. Compatibility aliases from earlier branch work are accepted at parser/validator boundaries and canonicalized into the flat Phase 4 schema.
 
 Reason:
 

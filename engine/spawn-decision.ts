@@ -34,6 +34,13 @@ function normalizeList(value: unknown): string[] {
   return [];
 }
 
+function firstPresent(record: Record<string, unknown>, keys: string[]): unknown {
+  for (const key of keys) {
+    if (record[key] !== undefined) return record[key];
+  }
+  return undefined;
+}
+
 function parseBoolean(value: unknown): boolean | undefined {
   if (typeof value === "boolean") return value;
   if (typeof value !== "string") return undefined;
@@ -50,6 +57,10 @@ function coerceDecision(raw: Record<string, unknown>): SpawnDecision | null {
   const timeout = Number(raw.timeout_seconds ?? raw.timeout);
   const spawnType = String(raw.spawn_type ?? "worker").trim();
   const busPolicy = String(raw.bus_policy ?? "").trim();
+  const allowedPaths = [
+    ...normalizeList(firstPresent(constraints, ["allowed_paths", "allowed_read_paths"])),
+    ...normalizeList(constraints.allowed_write_paths),
+  ];
 
   if (needWorker === undefined) return null;
 
@@ -60,12 +71,12 @@ function coerceDecision(raw: Record<string, unknown>): SpawnDecision | null {
     reason: String(raw.reason ?? "").trim(),
     why_lead_cannot_do_it: String(raw.why_lead_cannot_do_it ?? "").trim(),
     constraints: {
-      allowed_paths: normalizeList(constraints.allowed_paths),
+      allowed_paths: allowedPaths,
       allowed_tools: normalizeList(constraints.allowed_tools),
       forbidden_paths: normalizeList(constraints.forbidden_paths),
     },
     bus_policy: busPolicy === "main_bus" ? "main_bus" : "isolated",
-    expected_output_schema: String(raw.expected_output_schema ?? "").trim(),
+    expected_output_schema: String(raw.expected_output_schema ?? raw.expected_output ?? "").trim(),
     timeout_seconds: Number.isFinite(timeout) ? timeout : 0,
   };
 }
@@ -86,11 +97,15 @@ function parseYamlish(block: string): Record<string, unknown> {
     if (colon === -1) continue;
     const key = trimmed.slice(0, colon).trim();
     const value = trimmed.slice(colon + 1).trim();
-    if (inConstraints && ["allowed_paths", "allowed_tools", "forbidden_paths"].includes(key)) {
+    if (inConstraints && ["allowed_paths", "allowed_read_paths", "allowed_write_paths", "allowed_tools", "forbidden_paths"].includes(key)) {
       constraints[key] = value;
       continue;
     }
     inConstraints = false;
+    if (["allowed_paths", "allowed_read_paths", "allowed_write_paths", "allowed_tools", "forbidden_paths"].includes(key)) {
+      constraints[key] = value;
+      continue;
+    }
     result[key] = value;
   }
 

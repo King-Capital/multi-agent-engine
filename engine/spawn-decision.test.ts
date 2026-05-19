@@ -92,4 +92,59 @@ END_SPAWN_DECISION
       else process.env.MAE_CERTIFICATION_MODE = previous;
     }
   });
+
+  test("parses JSON decision blocks and canonicalizes legacy aliases", () => {
+    const [decision] = parseSpawnDecisions(`SPAWN_DECISION:
+{
+  "need_worker": "true",
+  "worker_name": "Security Auditor",
+  "spawn_type": "specialist",
+  "reason": "Deep auth analysis",
+  "why_lead_cannot_do_it": "Needs independent security tools",
+  "constraints": {
+    "allowed_read_paths": ["src/auth/**"],
+    "allowed_write_paths": "reports/security.md",
+    "allowed_tools": "read, rg",
+    "forbidden_paths": ".env, node_modules"
+  },
+  "bus_policy": "none",
+  "expected_output": "REVIEW_REPORT: Security",
+  "timeout_seconds": 120
+}
+END_SPAWN_DECISION`);
+
+    expect(decision).toBeDefined();
+    expect(decision!.spawn_type).toBe("worker");
+    expect(decision!.bus_policy).toBe("isolated");
+    expect(decision!.constraints.allowed_paths).toEqual(["src/auth/**", "reports/security.md"]);
+    expect(decision!.constraints.allowed_tools).toEqual(["read", "rg"]);
+    expect(decision!.constraints.forbidden_paths).toEqual([".env", "node_modules"]);
+    expect(decision!.expected_output_schema).toBe("REVIEW_REPORT: Security");
+    expect(validateSpawnDecision(decision!).valid).toBe(true);
+  });
+
+  test("parses top-level legacy constraint aliases in yamlish blocks", () => {
+    const [decision] = parseSpawnDecisions(`
+SPAWN_DECISION:
+need_worker: true
+worker_name: Backend Engineer
+spawn_type: specialist
+reason: Review API boundary.
+why_lead_cannot_do_it: Needs independent backend evidence.
+allowed_read_paths: engine/api.ts, engine/auth.ts
+allowed_write_paths: reports/backend.md
+allowed_tools: read, rg
+forbidden_paths: .env
+expected_output: REVIEW_REPORT: Backend
+timeout_seconds: 300
+END_SPAWN_DECISION
+`);
+
+    expect(decision).toBeDefined();
+    expect(decision!.worker_name).toBe("Backend Engineer");
+    expect(decision!.spawn_type).toBe("worker");
+    expect(decision!.constraints.allowed_paths).toEqual(["engine/api.ts", "engine/auth.ts", "reports/backend.md"]);
+    expect(decision!.expected_output_schema).toBe("REVIEW_REPORT: Backend");
+    expect(validateSpawnDecision(decision!).valid).toBe(true);
+  });
 });

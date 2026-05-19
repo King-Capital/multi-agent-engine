@@ -107,7 +107,7 @@ Some review chains can set `lead_only: true` on a team step. In lead-only mode, 
 
 ### Structured Spawn Decisions
 
-A `SPAWN_DECISION` makes worker creation explicit and auditable. In strict mode, MAE rejects worker creation unless the lead provided a valid decision for that exact worker. Strict mode can be enabled per chain step with `strict_spawn: true` or globally with the Phase 4 strict/certification environment flags. The decision is emitted before `agent_spawn` as a `spawn_decision` dashboard event and a `spawn.decision` JSONL trace event so validators and dashboard tooling can reason about why the worker exists.
+A `SPAWN_DECISION` makes worker creation explicit and auditable. In strict mode, MAE rejects worker creation unless the lead provided a valid decision for that exact worker. Strict mode can be enabled per chain step with `strict_spawn: true` or globally with the Phase 4 strict/certification environment flags. The decision is emitted before `agent_spawn` as a `spawn_decision` dashboard event and a `spawn.decision` JSONL trace event so validators and dashboard tooling can reason about why the worker exists. Legacy parser aliases are accepted at boundaries, but the canonical runtime contract is the flat Phase 4 schema.
 
 Required decision data:
 

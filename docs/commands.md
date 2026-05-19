@@ -398,7 +398,7 @@ mae validate-cert ./trace.jsonl --expected clean --live-pi
 mae validate-cert ./trace.jsonl --strict-spawn --json
 ```
 
-Strict spawn validation is part of Standard Swarm v2 Phase 4. A valid worker spawn must have a prior `spawn_decision` dashboard event, backed by a `spawn.decision` JSONL trace entry, with scoped paths, allowed tools, forbidden paths, isolated bus policy, expected output schema, and timeout. Runtime strict mode can also be enabled from chain config with `strict_spawn: true`.
+Strict spawn validation is part of Standard Swarm v2 Phase 4. A valid worker spawn must have a prior `spawn_decision` dashboard event, backed by a `spawn.decision` JSONL trace entry, with scoped paths, allowed tools, forbidden paths, isolated bus policy, expected output schema, and timeout. Runtime strict mode can also be enabled from chain config with `strict_spawn: true`. The parser accepts legacy aliases such as `allowed_read_paths`, `allowed_write_paths`, and `expected_output`, but canonical runtime output uses `allowed_paths` and `expected_output_schema`.
 
 ---
 

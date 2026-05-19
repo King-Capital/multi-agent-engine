@@ -379,6 +379,88 @@ describe("certification-validator", () => {
 			expect(findCheck(result, "spawn_decisions_valid")?.passed).toBe(true);
 			expect(result.spawn_policy_valid).toBe(true);
 		});
+
+		test("strict spawn policy rejects SPAWN_DECISION after worker spawn", () => {
+			const sid = makeSessionId(143);
+			const synthRef = writeArtifact(sid, "synth-output.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				...allLeadEndEvents(sid),
+				{ event_type: "agent_spawn", session_id: sid, agent_id: "Security Review-security-reviewer", data: { agent_name: "Security Reviewer", agent_role: "worker" } },
+				{
+					event_type: "spawn_decision",
+					session_id: sid,
+					agent_id: "Security Review-security-reviewer",
+					data: {
+						worker_name: "Security Reviewer",
+						spawn_type: "worker",
+						reason: "Focused security review needed",
+						why_lead_cannot_do_it: "Independent specialist evidence required",
+						constraints: {
+							allowed_paths: ["engine/security.ts"],
+							allowed_tools: ["read", "rg"],
+							forbidden_paths: [".env"],
+						},
+						bus_policy: "isolated",
+						expected_output_schema: "REVIEW_REPORT: Security",
+						timeout_seconds: 600,
+					},
+				},
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, {
+				isLivePi: false,
+				strictSpawnDecisions: true,
+				expectedFixture: "clean",
+			}));
+			const check = findCheck(result, "spawn_decisions_valid");
+			expect(check?.passed).toBe(false);
+			expect(check?.details).toContain("appears after worker spawn");
+			expect(result.spawn_policy_valid).toBe(false);
+		});
+
+		test("strict spawn policy accepts nested legacy decision shapes before spawn", () => {
+			const sid = makeSessionId(144);
+			const synthRef = writeArtifact(sid, "synth-output.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				...allLeadEndEvents(sid),
+				{
+					event_type: "spawn_decision",
+					session_id: sid,
+					agent_id: "Security Review-security-reviewer",
+					data: {
+						decision: {
+							worker_name: "Security Reviewer",
+							spawn_type: "specialist",
+							reason: "Focused security review needed",
+							why_lead_cannot_do_it: "Independent specialist evidence required",
+							constraints: {
+								allowed_read_paths: ["engine/security.ts"],
+								allowed_tools: "read, rg",
+								forbidden_paths: [".env"],
+							},
+							bus_policy: "none",
+							expected_output: "REVIEW_REPORT: Security",
+							timeout_seconds: 600,
+						},
+					},
+				},
+				{ event_type: "agent_spawn", session_id: sid, agent_id: "Security Review-security-reviewer", data: { agent_name: "Security Reviewer", agent_role: "worker" } },
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, {
+				isLivePi: false,
+				strictSpawnDecisions: true,
+				expectedFixture: "clean",
+			}));
+			expect(findCheck(result, "spawn_decisions_valid")?.passed).toBe(true);
+			expect(result.spawn_policy_valid).toBe(true);
+		});
 	});
 
 	describe("leaked contracts", () => {
