@@ -1,5 +1,6 @@
 import type { ParticipantCapabilities, ParticipantKind, ParticipantStatus, SessionEvent, SessionStateEvent } from "./types";
 import type { BudgetProjection } from "./budget";
+import type { SpawnDecision, SpawnDecisionValidation } from "./spawn-decision";
 import { createLogger } from "./logger";
 import { redactSecrets } from "./security";
 
@@ -435,6 +436,42 @@ export class EventEmitter {
         blocked_action: action,
         block_reason: reason,
       },
+    });
+  }
+
+  spawnDecision(
+    sessionId: string,
+    workerId: string,
+    parentId: string,
+    decision: SpawnDecision,
+    validation?: SpawnDecisionValidation,
+  ) {
+    const data: Record<string, unknown> = {
+      need_worker: decision.need_worker,
+      worker_name: decision.worker_name,
+      spawn_type: decision.spawn_type,
+      reason: decision.reason,
+      why_lead_cannot_do_it: decision.why_lead_cannot_do_it,
+      constraints: decision.constraints,
+      bus_policy: decision.bus_policy,
+      expected_output_schema: decision.expected_output_schema,
+      timeout_seconds: decision.timeout_seconds,
+      ...(validation ? { validation } : {}),
+    };
+    log.info("Spawn decision", {
+      trace_type: "spawn.decision",
+      session_id: sessionId,
+      agent_id: workerId,
+      parent_id: parentId,
+      ...data,
+    });
+    return this.emit({
+      session_id: sessionId,
+      agent_id: workerId,
+      parent_id: parentId,
+      event_type: "spawn_decision",
+      timestamp: new Date().toISOString(),
+      data,
     });
   }
 

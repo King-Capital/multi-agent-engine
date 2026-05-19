@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildWorkerPromptFromDecision,
   findSpawnDecisionForWorker,
+  isSpawnDecisionStrictMode,
   parseSpawnDecisions,
   validateSpawnDecision,
 } from "./spawn-decision";
@@ -76,5 +77,19 @@ END_SPAWN_DECISION
     expect(prompt).toContain("Forbidden paths: node_modules");
     expect(prompt).toContain("Expected output schema:\nREVIEW_REPORT: Quality");
     expect(prompt).toContain("Original task: Review the patch");
+  });
+
+  test("supports step and certification strict mode", () => {
+    const previous = process.env.MAE_CERTIFICATION_MODE;
+    try {
+      delete process.env.MAE_CERTIFICATION_MODE;
+      expect(isSpawnDecisionStrictMode()).toBe(false);
+      expect(isSpawnDecisionStrictMode({ strict_spawn: true })).toBe(true);
+      process.env.MAE_CERTIFICATION_MODE = "1";
+      expect(isSpawnDecisionStrictMode()).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.MAE_CERTIFICATION_MODE;
+      else process.env.MAE_CERTIFICATION_MODE = previous;
+    }
   });
 });

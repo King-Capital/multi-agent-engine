@@ -377,7 +377,7 @@ export async function executeWorkers(
   const workerWtIds: string[] = [];
   const workerAssignments = new Map<string, string>();
   const spawnDecisions = parseSpawnDecisions(leadResult.output).filter((decision) => decision.need_worker);
-  const strictSpawnDecisions = isSpawnDecisionStrictMode();
+  const strictSpawnDecisions = isSpawnDecisionStrictMode(step);
 
   if (strictSpawnDecisions) {
     const invalid = spawnDecisions
@@ -413,6 +413,7 @@ export async function executeWorkers(
       assertSessionActive(session, "worker start");
       const workerPersona = loadPersona(member.path);
       const workerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+      const spawnDecision = findSpawnDecisionForWorker(spawnDecisions, member.name);
 
       trackActivity(workerId, member.name, "worker");
 
@@ -428,32 +429,15 @@ export async function executeWorkers(
       const workerDomain = reviewOnly ? { ...workerPersona.domain, write: [], update: [] } : workerPersona.domain;
       const workerTools = reviewOnly ? readOnlyTools(workerPersona.tools) : workerPersona.tools;
 
+      if (spawnDecision) {
+        await emitter.spawnDecision(session.id, workerId, leadId, spawnDecision, validateSpawnDecision(spawnDecision));
+      }
+
       await emitter.agentSpawn(session.id, workerId, leadId, member.name, "worker",
         workerResolved.model, teamConfig["team-name"], member.color ?? teamConfig["team-color"], undefined,
         buildParticipantCapabilities({
           tools: workerTools, domain: workerDomain, model: workerResolved.model,
         }));
-
-      const spawnDecision = findSpawnDecisionForWorker(spawnDecisions, member.name);
-      if (spawnDecision) {
-        await emitter.emit({
-          session_id: session.id,
-          agent_id: workerId,
-          parent_id: leadId,
-          event_type: "spawn_decision",
-          timestamp: new Date().toISOString(),
-          data: {
-            worker_name: member.name,
-            spawn_type: spawnDecision.spawn_type,
-            reason: spawnDecision.reason,
-            why_lead_cannot_do_it: spawnDecision.why_lead_cannot_do_it,
-            constraints: spawnDecision.constraints,
-            bus_policy: spawnDecision.bus_policy,
-            expected_output_schema: spawnDecision.expected_output_schema,
-            timeout_seconds: spawnDecision.timeout_seconds,
-          },
-        });
-      }
 
       // Extract this worker's assignment from the lead brief, or give full brief
       const assignment = parseAssignment(leadResult.output, member.name);
@@ -911,6 +895,7 @@ export function buildParallelTeamStep(step: ChainStep, teamStep: ParallelTeamSte
     team: teamStep.team,
     read_only: teamStep.read_only ?? step.read_only,
     lead_only: teamStep.lead_only ?? step.lead_only,
+    strict_spawn: teamStep.strict_spawn ?? step.strict_spawn,
     tools_override: teamStep.tools_override ?? step.tools_override,
     system_prompt_append: systemPromptAppend,
     till_done: teamStep.till_done ?? step.till_done,

@@ -202,6 +202,37 @@ Validation required:
 - `git diff --check -- . ':(exclude).pi/skills/*' ':(exclude).idea/*'`
 - Focused re-review of Codex cherry-picks
 
+### D-2026-05-19-P4 — Strict spawn decisions precede worker creation
+
+Date: 2026-05-19
+Phase: 4 — Structured spawn decisions
+Issue(s): #340
+
+Decision:
+
+Use explicit lead-authored `SPAWN_DECISION` blocks as the only strict-mode authorization for worker creation. Strict mode is enabled by `strict_spawn: true`, `MAE_SPAWN_DECISION_STRICT=1`, `MAE_STANDARD_SWARM_V2_STRICT=1`, or `MAE_CERTIFICATION_MODE=1`. A valid matching decision is emitted as a `spawn_decision` dashboard event and `spawn.decision` trace event before `agent_spawn`; `main_bus` remains rejected until the v2.1 sub-bus design exists.
+
+Reason:
+
+Worker creation must be auditable before it happens. Synthetic decisions or post-spawn validation would prove that a worker existed, but not that the lead explicitly justified it before execution.
+
+Alternatives considered:
+
+- Synthesizing default decisions in legacy mode: rejected for strict evidence because it weakens the lead-authored contract.
+- Emitting decisions after `agent_spawn`: rejected because the trace should show authorization before creation.
+- Enabling `main_bus` now: rejected because scoped sub-buses are v2.1/RFC scope.
+
+Impact:
+
+Legacy non-strict runs keep existing worker behavior and emit decision events only when the lead provided explicit `SPAWN_DECISION` blocks. Strict runs reject missing or invalid decisions before any worker spawn. Worker prompts are derived from the structured decision when present.
+
+Validation required:
+
+- `bun test engine/spawn-decision.test.ts engine/team-execution.test.ts engine/event-emitter.test.ts engine/trace-recorder.test.ts engine/certification-validator.test.ts`
+- `scripts/certify-live-swarm-test`
+- `just check`
+- `git diff --check`
+
 ### D-XXX — Title
 
 Date:

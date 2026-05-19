@@ -78,10 +78,10 @@ Heartbeat volume is intentionally bounded: MAE emits heartbeats on lifecycle/cos
 
 ### Structured Spawn Decisions
 
-Phase 4 requires worker creation in strict Standard Swarm v2 mode to be preceded by a machine-readable `SPAWN_DECISION` and traced as a `spawn_decision` event. The validator treats LLM prose about delegation as non-authoritative; strict mode only trusts this event plus the derived worker prompt.
+Phase 4 requires worker creation in strict Standard Swarm v2 mode to be preceded by a machine-readable `SPAWN_DECISION`. The dashboard event type is `spawn_decision`; the JSONL trace type is `spawn.decision`. The validator treats LLM prose about delegation as non-authoritative; strict mode only trusts this event plus the derived worker prompt.
 
 ```jsonl
-{"ts":"...","type":"spawn_decision","id":"...","parent_id":"pi-security-lead","session_id":"...","agent_id":"security-reviewer","worker_name":"Security Reviewer","spawn_type":"worker","reason":"Focused auth boundary review is required","why_lead_cannot_do_it":"Independent security evidence is required","constraints":{"allowed_paths":["engine/security.ts"],"allowed_tools":["read","rg"],"forbidden_paths":[".env","node_modules"]},"bus_policy":"isolated","expected_output_schema":"REVIEW_REPORT: Security","timeout_seconds":600}
+{"ts":"...","type":"spawn.decision","id":"...","parent_id":"pi-security-lead","session_id":"...","agent_id":"security-reviewer","need_worker":true,"worker_name":"Security Reviewer","spawn_type":"worker","reason":"Focused auth boundary review is required","why_lead_cannot_do_it":"Independent security evidence is required","constraints":{"allowed_paths":["engine/security.ts"],"allowed_tools":["read","rg"],"forbidden_paths":[".env","node_modules"]},"bus_policy":"isolated","expected_output_schema":"REVIEW_REPORT: Security","timeout_seconds":600,"validation":{"valid":true,"errors":[]}}
 ```
 
 Spawn decision fields:

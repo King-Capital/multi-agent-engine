@@ -146,8 +146,11 @@ export function findSpawnDecisionForWorker(decisions: SpawnDecision[], workerNam
   });
 }
 
-export function isSpawnDecisionStrictMode(): boolean {
-  return process.env.MAE_SPAWN_DECISION_STRICT === "1" || process.env.MAE_STANDARD_SWARM_V2_STRICT === "1";
+export function isSpawnDecisionStrictMode(step?: { strict_spawn?: boolean }): boolean {
+  return step?.strict_spawn === true
+    || process.env.MAE_SPAWN_DECISION_STRICT === "1"
+    || process.env.MAE_STANDARD_SWARM_V2_STRICT === "1"
+    || process.env.MAE_CERTIFICATION_MODE === "1";
 }
 
 export function buildSpawnDecisionInstructions(members: { name: string; consultWhen?: string }[]): string {
