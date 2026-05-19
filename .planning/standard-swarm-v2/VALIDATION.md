@@ -195,6 +195,89 @@ Local/echo gates run from the final branch on 2026-05-18:
 
 Full live Pi all-fixture certification was explicitly approved and passed before final regression-only harness tightening. The final branch then passed the 36-check harness, echo smoke, full test suite, and typecheck.
 
+## Phase 2 targeted validation snapshot
+
+Branch: `pi-phase2-participant-presence` from merged Phase 1 `main` (`1ce507f`).
+
+Targeted checks run on 2026-05-18:
+
+| Command | Result | Evidence |
+|---|---|---|
+| `bun test engine/event-emitter.test.ts engine/trace-recorder.test.ts engine/participant-presence.test.ts engine/team-execution.test.ts` | pass | 62 pass; participant lifecycle, heartbeat, stale detection, trace mapping, and team execution |
+| `just check` | pass | `cd engine && bunx tsc --noEmit` |
+| `scripts/certify-live-swarm-test` | pass | Phase 1 certification harness remains green |
+| `scripts/certify-live-swarm --only failing --dashboard-url "${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}"` | pass | Echo cert smoke with participant trace events |
+| `bun test` | pass | 562 pass, 1 skip, 0 fail |
+| `git diff --check -- . ':(exclude).pi/skills/*' ':(exclude).idea/*'` | pass | No whitespace errors in Phase 2 diff |
+
+Pre-PR review swarm initially failed with three P3 lifecycle gaps. Fixes applied:
+
+- F1: `sessionStart()` no longer emits a duplicate `orch-1` participant; `agentSpawn("orch-1")` is the canonical orchestrator participant start.
+- F2: normal multi-worker team leads now emit `agentDone`/`participant_end` and are untracked after lead review/final result.
+- F3: synthesis spawn passes an explicit `synthesis` participant kind override, producing `kind: "synthesis"` and `current_task: "agent:synthesis"`.
+
+Post-fix targeted checks:
+
+| Command | Result | Evidence |
+|---|---|---|
+| `bun test engine/event-emitter.test.ts engine/team-execution.test.ts engine/trace-recorder.test.ts engine/participant-presence.test.ts` | pass | 66 pass, 0 fail; regression coverage for all review findings |
+| `just check` | pass | `cd engine && bunx tsc --noEmit` |
+| `git diff --check -- . ':(exclude).pi/skills/*' ':(exclude).idea/*'` | pass | No whitespace errors |
+| `scripts/certify-live-swarm-test` | pass | Certification harness remains green after review fixes |
+| `scripts/certify-live-swarm --only failing --dashboard-url "${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}"` | pass | Echo smoke after review fixes |
+| `bun test` | pass | 566 pass, 1 skip, 0 fail |
+| `just check` | pass | `cd engine && bunx tsc --noEmit` after full test bundle |
+
+Re-review swarm closed F1-F3 and found one new P3:
+
+- R1: normal shutdown emitted duplicate `participant_end` for `orch-1` via both `agentDone("orch-1")` and `sessionEnd()`.
+
+R1 fix applied: `agentDone("orch-1")` is the canonical orchestrator participant terminal event; `sessionEnd()` updates/emits session status only and no longer emits a participant terminal event.
+
+Post-R1 targeted checks:
+
+| Command | Result | Evidence |
+|---|---|---|
+| `bun test engine/event-emitter.test.ts engine/team-execution.test.ts engine/trace-recorder.test.ts engine/participant-presence.test.ts` | pass | 67 pass, 0 fail; regression asserts one `orch-1` participant_end across agentDone + sessionEnd |
+| `just check` | pass | `cd engine && bunx tsc --noEmit` |
+| `git diff --check -- . ':(exclude).pi/skills/*' ':(exclude).idea/*'` | pass | No whitespace errors |
+
+Second re-review swarm closed F1-F3/R1 and found one new P3:
+
+- R2: React dashboard SSE client did not subscribe to named `participant_*` SSE event types.
+
+R2 fix applied: participant event names are included in `SSE_EVENT_TYPES`, with a frontend API test proving a named `participant_heartbeat` frame reaches `subscribeToSession()` consumers.
+
+Post-R2 targeted checks:
+
+| Command | Result | Evidence |
+|---|---|---|
+| `bun test dashboard-next/test/api-sse.test.ts engine/event-emitter.test.ts engine/team-execution.test.ts engine/trace-recorder.test.ts engine/participant-presence.test.ts` | pass | 68 pass, 0 fail; includes named participant heartbeat SSE delivery |
+| `just check` | pass | `cd engine && bunx tsc --noEmit` |
+| `git diff --check -- . ':(exclude).pi/skills/*' ':(exclude).idea/*'` | pass | No whitespace errors |
+| `scripts/certify-live-swarm-test` | pass | 36 cert harness regression checks |
+| `scripts/certify-live-swarm --only failing --dashboard-url "${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}"` | pass | Echo smoke; trace `/private/var/folders/pw/92qs6gh94z75p3ypb8y3v7lc0000gn/T/mae-cert.pQGv0h/traces/8ddbd401-32cb-4080-b6cb-8c650298aeea.jsonl` |
+| `bun test` | pass | 568 pass, 1 skip, 0 fail |
+| `just check` | pass | `cd engine && bunx tsc --noEmit` after full test bundle |
+
+Third re-review swarm passed: F1-F3/R1/R2 closed with no material in-scope Critical/High/Medium/P3 blockers.
+
+Final consolidation selected Pi PR #356 as the base, cherry-picked Codex runtime metadata/stale behavior, and deferred Claude ParticipantTracker. Status vocabulary was normalized to `starting|active|idle|stale|completed|failed|blocked`.
+
+Post-consolidation targeted checks:
+
+| Command | Result | Evidence |
+|---|---|---|
+| `bun test engine/event-emitter.test.ts engine/team-execution.test.ts engine/worker-lifecycle.test.ts engine/active-monitor.test.ts engine/participant-presence.test.ts engine/trace-recorder.test.ts` | pass | 82 pass, 0 fail; covers capabilities, stale-on-stall, status normalization, lifecycle regressions |
+| `cd engine && bunx tsc --noEmit` | pass | Typecheck clean |
+| `scripts/certify-live-swarm-test` | pass | Cert harness regression checks pass |
+| `scripts/certify-live-swarm --only failing --dashboard-url "${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}"` | pass | Echo smoke passes |
+| `bun test` | pass | 568 pass, 1 skip, 0 fail |
+| `cd engine && bunx tsc --noEmit` | pass | Typecheck clean after full bundle |
+| `git diff --check -- . ':(exclude).pi/skills/*' ':(exclude).idea/*'` | pass | No whitespace errors |
+
+Focused final consolidation re-review passed: no material in-scope Critical/High/Medium/P3 blockers. Live Pi remains milestone-only and requires explicit approval.
+
 ## Evidence requirements for phase completion
 
 For each phase, `PROGRESS.md` must record:

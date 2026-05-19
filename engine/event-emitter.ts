@@ -1,4 +1,4 @@
-import type { SessionEvent, SessionStateEvent } from "./types";
+import type { ParticipantCapabilities, ParticipantKind, ParticipantStatus, SessionEvent, SessionStateEvent } from "./types";
 import type { BudgetProjection } from "./budget";
 import { createLogger } from "./logger";
 import { redactSecrets } from "./security";
@@ -23,6 +23,11 @@ function redactValue(value: unknown, key = ""): unknown {
 
 function redactRecord<T extends Record<string, unknown>>(record: T): T {
   return redactValue(record) as T;
+}
+
+function participantKindForRole(role: string): ParticipantKind {
+  if (role === "orchestrator" || role === "lead" || role === "worker" || role === "sr" || role === "synthesis") return role;
+  return "system";
 }
 
 export class EventEmitter {
@@ -52,6 +57,121 @@ export class EventEmitter {
       headers["Authorization"] = `Bearer ${this.apiToken}`;
     }
     return headers;
+  }
+
+  private participantEvent(
+    sessionId: string,
+    agentId: string,
+    eventType: "participant_start" | "participant_activity" | "participant_heartbeat" | "participant_stale" | "participant_end",
+    data: {
+      name?: string;
+      kind?: ParticipantKind;
+      status?: ParticipantStatus;
+      role?: string;
+      teamName?: string;
+      model?: string;
+      currentTask?: string;
+      currentTool?: string;
+      lastEvent?: string;
+      costUsd?: number;
+      tokensUsed?: number;
+      capabilities?: ParticipantCapabilities;
+      reason?: string;
+    } = {},
+    parentId?: string,
+  ) {
+    const timestamp = new Date().toISOString();
+    const payload: Record<string, unknown> = {
+      participant_id: agentId,
+      status: data.status ?? "active",
+      last_heartbeat_ts: timestamp,
+      ...(data.name ? { name: data.name } : {}),
+      ...(data.kind ? { kind: data.kind } : {}),
+      ...(data.role ? { role: data.role } : {}),
+      ...(data.teamName ? { team: data.teamName } : {}),
+      ...(data.model ? { model: data.model } : {}),
+      ...(data.currentTask ? { current_task: redactSecrets(data.currentTask) } : {}),
+      ...(data.currentTool ? { current_tool: data.currentTool } : {}),
+      ...(data.lastEvent ? { last_event: data.lastEvent } : {}),
+      ...(data.costUsd !== undefined ? { cost_usd: data.costUsd } : {}),
+      ...(data.tokensUsed !== undefined ? { tokens_used: data.tokensUsed } : {}),
+      ...(data.capabilities ? { capabilities: redactRecord(data.capabilities as Record<string, unknown>) } : {}),
+      ...(data.reason ? { reason: redactSecrets(data.reason) } : {}),
+    };
+    log.info("Participant event", {
+      trace_type: eventType.replace(/_/g, "."),
+      session_id: sessionId,
+      agent_id: agentId,
+      parent_id: parentId,
+      ...payload,
+    });
+    return this.emit({
+      session_id: sessionId,
+      agent_id: agentId,
+      parent_id: parentId,
+      event_type: eventType,
+      timestamp,
+      data: payload,
+    });
+  }
+
+  participantStart(sessionId: string, agentId: string, opts: {
+    parentId?: string;
+    name: string;
+    kind: ParticipantKind;
+    role?: string;
+    teamName?: string;
+    model?: string;
+    currentTask?: string;
+    capabilities?: ParticipantCapabilities;
+  }) {
+    return this.participantEvent(sessionId, agentId, "participant_start", {
+      name: opts.name,
+      kind: opts.kind,
+      role: opts.role,
+      teamName: opts.teamName,
+      model: opts.model,
+      currentTask: opts.currentTask,
+      capabilities: opts.capabilities,
+      status: "active",
+      lastEvent: "participant_start",
+    }, opts.parentId);
+  }
+
+  participantActivity(sessionId: string, agentId: string, opts: { currentTask?: string; currentTool?: string; lastEvent?: string } = {}) {
+    return this.participantEvent(sessionId, agentId, "participant_activity", {
+      status: "active",
+      currentTask: opts.currentTask,
+      currentTool: opts.currentTool,
+      lastEvent: opts.lastEvent ?? "activity",
+    });
+  }
+
+  participantHeartbeat(sessionId: string, agentId: string, opts: { costUsd?: number; tokensUsed?: number; lastEvent?: string } = {}) {
+    return this.participantEvent(sessionId, agentId, "participant_heartbeat", {
+      status: "active",
+      costUsd: opts.costUsd,
+      tokensUsed: opts.tokensUsed,
+      lastEvent: opts.lastEvent ?? "heartbeat",
+    });
+  }
+
+  participantStale(sessionId: string, agentId: string, reason: string) {
+    return this.participantEvent(sessionId, agentId, "participant_stale", {
+      status: "stale",
+      reason,
+      lastEvent: "stale",
+    });
+  }
+
+  participantEnd(sessionId: string, agentId: string, status: "completed" | "failed" | "blocked" = "completed", opts: { lastEvent?: string; costUsd?: number; tokensUsed?: number; reason?: string } = {}) {
+    return this.participantEvent(sessionId, agentId, "participant_end", {
+      status,
+      costUsd: opts.costUsd,
+      tokensUsed: opts.tokensUsed,
+      reason: opts.reason,
+      lastEvent: opts.lastEvent ?? "participant_end",
+    });
   }
 
   private async fetchWithRetry(url: string, init: RequestInit): Promise<Response | null> {
@@ -124,7 +244,7 @@ export class EventEmitter {
     this.flushing = false;
   }
 
-  sessionStart(sessionId: string, name: string, chain: string, task: string) {
+  async sessionStart(sessionId: string, name: string, chain: string, task: string) {
     return this.emit({
       session_id: sessionId,
       agent_id: "orchestrator",
@@ -146,7 +266,9 @@ export class EventEmitter {
     role: string,
     model: string,
     teamName: string,
-    teamColor: string
+    teamColor: string,
+    participantKind?: ParticipantKind,
+    capabilities?: ParticipantCapabilities,
   ) {
     await this.pgCreateAgent({
       sessionId,
@@ -154,6 +276,17 @@ export class EventEmitter {
       role,
       persona: name,
       config: { model, team_name: teamName, team_color: teamColor, parent_id: parentId },
+    });
+    const kind = participantKind ?? participantKindForRole(role);
+    await this.participantStart(sessionId, agentId, {
+      parentId,
+      name,
+      kind,
+      role,
+      teamName,
+      model,
+      currentTask: `agent:${kind}`,
+      capabilities: capabilities ?? { model, canReceiveSteer: true },
     });
     return this.emit({
       session_id: sessionId,
@@ -172,9 +305,17 @@ export class EventEmitter {
   }
 
   async agentDone(sessionId: string, agentId: string, grade?: string, costUsd?: number, artifacts: { outputArtifact?: string; taskReport?: string } = {}) {
+    const participantStatus = grade === "FAILED" ? "failed" as const
+      : grade === "FEEDBACK" ? "blocked" as const
+      : "completed" as const;
     await this.pgUpdateAgent(agentId, {
-      status: grade === "FAILED" ? "failed" : "completed",
+      status: participantStatus === "blocked" ? "failed" : participantStatus,
       cost_usd: costUsd ?? 0,
+    });
+    await this.participantEnd(sessionId, agentId, participantStatus, {
+      lastEvent: "agent_done",
+      costUsd: costUsd ?? 0,
+      reason: grade ?? "unknown",
     });
     return this.emit({
       session_id: sessionId,
@@ -207,7 +348,7 @@ export class EventEmitter {
     });
   }
 
-  toolCall(
+  async toolCall(
     sessionId: string,
     agentId: string,
     tool: string,
@@ -216,6 +357,11 @@ export class EventEmitter {
     toolArgs?: string,
     toolResult?: string
   ) {
+    await this.participantActivity(sessionId, agentId, {
+      currentTool: tool,
+      currentTask: filePath || status,
+      lastEvent: "tool_call",
+    });
     return this.emit({
       session_id: sessionId,
       agent_id: agentId,
@@ -231,13 +377,18 @@ export class EventEmitter {
     });
   }
 
-  costUpdate(
+  async costUpdate(
     sessionId: string,
     agentId: string,
     costUsd: number,
     tokensUsed: number,
     contextTokens: number
   ) {
+    await this.participantHeartbeat(sessionId, agentId, {
+      costUsd,
+      tokensUsed,
+      lastEvent: "cost_update",
+    });
     return this.emit({
       session_id: sessionId,
       agent_id: agentId,

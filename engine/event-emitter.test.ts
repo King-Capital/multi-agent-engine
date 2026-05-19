@@ -66,10 +66,13 @@ describe("EventEmitter", () => {
       const eventCall = fetchMock.calls.find((c) => c.url.includes("/api/events"));
       expect(eventCall).toBeDefined();
 
-      const body = JSON.parse(eventCall!.init.body as string);
-      expect(body.event_type).toBe("session_start");
-      expect(body.session_id).toBe("s1");
-      expect(body.data.session_name).toBe("Test Session");
+      const sessionStartCall = fetchMock.calls
+        .filter((c) => c.url.includes("/api/events"))
+        .map((c) => JSON.parse(c.init.body as string))
+        .find((body: { event_type?: string }) => body.event_type === "session_start");
+      expect(sessionStartCall).toBeDefined();
+      expect(sessionStartCall.session_id).toBe("s1");
+      expect(sessionStartCall.data.session_name).toBe("Test Session");
     });
 
     test("redacts secrets from emitted dashboard messages and tool calls", async () => {
@@ -164,6 +167,88 @@ describe("EventEmitter", () => {
 
       // No crash = success. The emitter handles overflow gracefully.
       expect(true).toBe(true);
+    });
+  });
+
+  describe("participant presence", () => {
+    test("emits participant lifecycle events with capability metadata", async () => {
+      const emitter = new EventEmitter("http://test:8400");
+      await emitter.participantStart("s1", "lead-1", {
+        name: "Correctness Lead",
+        kind: "lead",
+        role: "lead",
+        teamName: "Correctness Review",
+        model: "gpt-5.5",
+        capabilities: { canReceiveSteer: true, toolCount: 2, model: "gpt-5.5" },
+      });
+      await emitter.participantActivity("s1", "lead-1", { currentTool: "read", currentTask: "README.md" });
+      await emitter.participantHeartbeat("s1", "lead-1", { costUsd: 0.12, tokensUsed: 42 });
+      await emitter.participantStale("s1", "lead-1", "no activity for 60s");
+      await emitter.participantEnd("s1", "lead-1", "completed", { costUsd: 0.12, tokensUsed: 42 });
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      const bodies = fetchMock.calls
+        .filter((c) => c.url.includes("/api/events"))
+        .map((c) => JSON.parse(c.init.body as string));
+      expect(bodies.map((body: { event_type: string }) => body.event_type)).toEqual([
+        "participant_start",
+        "participant_activity",
+        "participant_heartbeat",
+        "participant_stale",
+        "participant_end",
+      ]);
+      expect(bodies[0]!.data.capabilities.toolCount).toBe(2);
+      expect(bodies[1]!.data.current_tool).toBe("read");
+      expect(bodies[2]!.data.cost_usd).toBe(0.12);
+      expect(bodies[3]!.data.status).toBe("stale");
+      expect(bodies[4]!.data.status).toBe("completed");
+    });
+
+    test("agentSpawn and agentDone bracket agents with participant events", async () => {
+      const emitter = new EventEmitter("http://test:8400");
+      await emitter.agentSpawn("s1", "worker-1", "lead-1", "Worker", "worker", "sonnet", "Team", "#fff");
+      await emitter.agentDone("s1", "worker-1", "VERIFIED", 0.03);
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      const bodies = fetchMock.calls
+        .filter((c) => c.url.includes("/api/events"))
+        .map((c) => JSON.parse(c.init.body as string));
+      expect(bodies.some((body: { event_type: string }) => body.event_type === "participant_start")).toBe(true);
+      expect(bodies.some((body: { event_type: string }) => body.event_type === "agent_spawn")).toBe(true);
+      expect(bodies.some((body: { event_type: string }) => body.event_type === "participant_end")).toBe(true);
+      expect(bodies.some((body: { event_type: string }) => body.event_type === "agent_done")).toBe(true);
+    });
+
+    test("sessionStart does not duplicate the orchestrator participant started by agentSpawn", async () => {
+      const emitter = new EventEmitter("http://test:8400");
+      await emitter.sessionStart("s1", "Session", "standard-swarm", "task");
+      await emitter.agentSpawn("s1", "orch-1", "", "Orchestrator", "orchestrator", "opus", "Orchestration", "#fff");
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      const bodies = fetchMock.calls
+        .filter((c) => c.url.includes("/api/events"))
+        .map((c) => JSON.parse(c.init.body as string));
+      const orchestratorStarts = bodies.filter((body: { event_type: string; data: { participant_id?: string } }) =>
+        body.event_type === "participant_start" && body.data.participant_id === "orch-1"
+      );
+      expect(orchestratorStarts).toHaveLength(1);
+    });
+
+    test("agentSpawn can mark synthesis as a distinct participant kind", async () => {
+      const emitter = new EventEmitter("http://test:8400");
+      await emitter.agentSpawn("s1", "synth-1", "orch-1", "Synthesis", "orchestrator", "opus", "Synthesis", "#fff", "synthesis");
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      const bodies = fetchMock.calls
+        .filter((c) => c.url.includes("/api/events"))
+        .map((c) => JSON.parse(c.init.body as string));
+      const start = bodies.find((body: { event_type: string }) => body.event_type === "participant_start");
+      expect(start.data.kind).toBe("synthesis");
+      expect(start.data.current_task).toBe("agent:synthesis");
     });
   });
 
@@ -291,6 +376,24 @@ describe("EventEmitter", () => {
       const body = JSON.parse(eventCall!.init.body as string);
       expect(body.data.status).toBe("error");
     });
+
+    test("does not duplicate orchestrator participant end after agentDone", async () => {
+      const emitter = new EventEmitter("http://test:8400");
+      await emitter.agentSpawn("s1", "orch-1", "", "Orchestrator", "orchestrator", "opus", "Orchestration", "#fff");
+      await emitter.agentDone("s1", "orch-1", "VERIFIED", 0.01);
+      await emitter.sessionEnd("s1", "completed");
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      const bodies = fetchMock.calls
+        .filter((c) => c.url.includes("/api/events"))
+        .map((c) => JSON.parse(c.init.body as string));
+      const orchestratorEnds = bodies.filter((body: { event_type: string; data: { participant_id?: string } }) =>
+        body.event_type === "participant_end" && body.data.participant_id === "orch-1"
+      );
+      expect(orchestratorEnds).toHaveLength(1);
+      expect(bodies.some((body: { event_type: string }) => body.event_type === "session_end")).toBe(true);
+    });
   });
 
   describe("auth headers", () => {
@@ -333,13 +436,22 @@ describe("EventEmitter", () => {
 
       await new Promise((r) => setTimeout(r, 100));
 
-      const call = fetchMock.calls.find((c) => c.url.includes("/api/events"));
-      const body = JSON.parse(call!.init.body as string);
-      expect(body.event_type).toBe("agent_spawn");
+      const body = fetchMock.calls
+        .filter((c) => c.url.includes("/api/events"))
+        .map((c) => JSON.parse(c.init.body as string))
+        .find((event: { event_type?: string }) => event.event_type === "agent_spawn");
+      expect(body).toBeDefined();
       expect(body.data.agent_name).toBe("TestAgent");
       expect(body.data.agent_role).toBe("worker");
       expect(body.data.model).toBe("opus");
       expect(body.data.team_name).toBe("TeamA");
+
+      const participantStart = fetchMock.calls
+        .filter((c) => c.url.includes("/api/events"))
+        .map((c) => JSON.parse(c.init.body as string))
+        .find((event: { event_type?: string }) => event.event_type === "participant_start");
+      expect(participantStart.data.capabilities.model).toBe("opus");
+      expect(participantStart.data.capabilities.canReceiveSteer).toBe(true);
     });
 
     test("costUpdate includes token and cost data", async () => {
@@ -348,9 +460,11 @@ describe("EventEmitter", () => {
 
       await new Promise((r) => setTimeout(r, 100));
 
-      const call = fetchMock.calls.find((c) => c.url.includes("/api/events"));
-      const body = JSON.parse(call!.init.body as string);
-      expect(body.event_type).toBe("cost_update");
+      const body = fetchMock.calls
+        .filter((c) => c.url.includes("/api/events"))
+        .map((c) => JSON.parse(c.init.body as string))
+        .find((event: { event_type?: string }) => event.event_type === "cost_update");
+      expect(body).toBeDefined();
       expect(body.cost_usd).toBe(0.05);
       expect(body.tokens_used).toBe(1000);
       expect(body.context_tokens).toBe(500);
@@ -365,9 +479,11 @@ describe("EventEmitter", () => {
 
       await new Promise((r) => setTimeout(r, 100));
 
-      const call = fetchMock.calls.find((c) => c.url.includes("/api/events"));
-      const body = JSON.parse(call!.init.body as string);
-      expect(body.event_type).toBe("agent_done");
+      const body = fetchMock.calls
+        .filter((c) => c.url.includes("/api/events"))
+        .map((c) => JSON.parse(c.init.body as string))
+        .find((event: { event_type?: string }) => event.event_type === "agent_done");
+      expect(body).toBeDefined();
       expect(body.data.grade).toBe("VERIFIED");
       expect(body.data.output_artifact).toBe("s1/artifacts/agent.txt");
       expect(body.data.task_report).toBe("s1/RALPH/agent.md");

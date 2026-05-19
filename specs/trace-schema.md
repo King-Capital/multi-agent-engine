@@ -32,6 +32,42 @@
 {"ts":"...","type":"chain.step.end","id":"...","parent_id":"step-2","session_id":"...","step":2,"name":"build","status":"completed|failed|skipped","duration_ms":45000}
 ```
 
+### Participant Presence and Heartbeat
+
+Phase 2 adds participant events as the canonical visibility layer for orchestrator, leads, workers, synthesis, validators, web/CLI steer actors, and system actors. Agent lifecycle events remain for backward compatibility; participant events are the stable source for presence, activity, stale/offline policy, and later dashboard agent-pool views.
+
+```jsonl
+{"ts":"...","type":"participant.start","id":"...","parent_id":"orch-1","session_id":"...","agent_id":"pi-correctness-lead","participant_id":"pi-correctness-lead","kind":"lead","status":"active","name":"Correctness Lead","role":"lead","team":"Correctness Review","model":"gpt-5.5","current_task":"agent:lead","last_heartbeat_ts":"...","capabilities":{"canReceiveSteer":true,"canSteer":true,"canUseTools":true,"canSpawnWorkers":true,"canReviewWorkers":true,"can_delegate":true,"authority":70,"tools":["read","bash"],"domain_read":["engine/**"],"domain_write":[],"domain_update":[]}}
+
+{"ts":"...","type":"participant.activity","id":"...","session_id":"...","agent_id":"pi-correctness-lead","participant_id":"pi-correctness-lead","status":"active","current_tool":"read","current_task":"README.md","last_event":"tool_call","last_heartbeat_ts":"..."}
+
+{"ts":"...","type":"participant.heartbeat","id":"...","session_id":"...","agent_id":"pi-correctness-lead","participant_id":"pi-correctness-lead","status":"active","last_event":"cost_update","last_heartbeat_ts":"...","cost_usd":0.12,"tokens_used":4200}
+
+{"ts":"...","type":"participant.stale","id":"...","session_id":"...","agent_id":"pi-correctness-lead","participant_id":"pi-correctness-lead","status":"stale","reason":"no activity for 60s","last_heartbeat_ts":"..."}
+
+{"ts":"...","type":"participant.end","id":"...","session_id":"...","agent_id":"pi-correctness-lead","participant_id":"pi-correctness-lead","status":"completed|failed|blocked","last_event":"agent_done","last_heartbeat_ts":"...","cost_usd":0.12,"tokens_used":4200}
+```
+
+Participant fields:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `participant_id` | string | yes | Stable participant ID, usually matching `agent_id` |
+| `kind` | string | start | `orchestrator|lead|worker|sr|synthesis|validator|web-steer|cli-steer|system` |
+| `status` | string | yes | `starting|active|idle|stale|completed|failed|blocked` |
+| `name` | string | start | Human-readable participant name |
+| `role` | string | no | Agent role or future steer/system role |
+| `team` | string | no | Owning team/squad when applicable |
+| `model` | string | no | Model/provider hint when applicable |
+| `current_task` | string | no | Bounded current task/activity description |
+| `current_tool` | string | no | Tool currently being invoked, when available |
+| `last_event` | string | no | Event that caused this participant update |
+| `last_heartbeat_ts` | ISO 8601 string | yes | Latest liveness timestamp emitted by MAE |
+| `cost_usd` / `tokens_used` | number | no | Latest participant economics snapshot |
+| `capabilities` | object | no | Bounded policy metadata for later validator/dashboard checks |
+
+Heartbeat volume is intentionally bounded: MAE emits heartbeats on lifecycle/cost/activity transitions rather than a high-frequency timer in Phase 2.
+
 ### Agent Lifecycle
 
 ```jsonl

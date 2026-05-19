@@ -94,11 +94,17 @@ export class ActiveMonitor {
           idle_s: Math.round(idle / 1000),
           session_id: this.opts.session.id,
         });
+        const idleSeconds = Math.round(idle / 1000);
         this.opts.emitter.stallDetected(
           this.opts.session.id,
           id,
           activity.name,
-          Math.round(idle / 1000),
+          idleSeconds,
+        );
+        void this.opts.emitter.participantStale(
+          this.opts.session.id,
+          id,
+          `idle threshold exceeded after ${idleSeconds}s`,
         );
       }
 

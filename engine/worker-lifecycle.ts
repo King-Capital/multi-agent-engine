@@ -15,6 +15,7 @@ import { summarizeOutput } from "./output-parsing";
 import { parseReviews } from "./output-parsing";
 import { buildStreamHandler, buildSendMessage } from "./stream-handler";
 import { buildWorkerSystemPromptAppend, isReviewOnlyStep, readOnlyTools } from "./review-mode";
+import { buildParticipantCapabilities } from "./participant-capabilities";
 import type { EventEmitter } from "./event-emitter";
 import type { OrchestratorLoop } from "./orchestrator-loop";
 import type {
@@ -68,9 +69,15 @@ export async function retryWorker(
   log.info("Retrying worker with reworked prompt", { worker: member.name, attempt, session_id: session.id });
 
   const retryResolved = resolveModelForRole("worker", member.model);
+  const reviewOnly = isReviewOnlyStep(step);
+  const workerDomain = reviewOnly ? { ...workerPersona.domain, write: [], update: [] } : workerPersona.domain;
+  const workerTools = reviewOnly ? readOnlyTools(workerPersona.tools) : workerPersona.tools;
 
   await emitter.agentSpawn(session.id, workerId, leadId, `${member.name} (retry ${attempt})`, "worker",
-    retryResolved.model, teamConfig["team-name"], member.color ?? teamConfig["team-color"]);
+    retryResolved.model, teamConfig["team-name"], member.color ?? teamConfig["team-color"], undefined,
+    buildParticipantCapabilities({
+      tools: workerTools, domain: workerDomain, model: retryResolved.model,
+    }));
 
   const retryUserPrompt = [
     `RETRY (attempt ${attempt}): Your previous output was reviewed and needs rework.`,
@@ -84,7 +91,6 @@ export async function retryWorker(
   await emitter.message(session.id, workerId, teamConfig.lead.name, "user",
     `📋 **Retry assignment to ${member.name} (attempt ${attempt}):**\n\n${retryUserPrompt.slice(0, 3000)}`);
 
-  const reviewOnly = isReviewOnlyStep(step);
   const workerSystemPromptAppend = buildWorkerSystemPromptAppend(step.system_prompt_append);
   const workerOpts: DelegateOptions = {
     persona: workerPersona,
@@ -94,8 +100,8 @@ export async function retryWorker(
     userPrompt: retryUserPrompt,
     model: retryResolved.model,
     thinking: retryResolved.thinking,
-    tools: reviewOnly ? readOnlyTools(workerPersona.tools) : workerPersona.tools,
-    domain: reviewOnly ? { ...workerPersona.domain, write: [], update: [] } : workerPersona.domain,
+    tools: workerTools,
+    domain: workerDomain,
     workingDir: session.workingDir,
     sessionDir: `data/sessions/${session.id}`,
     parentId: leadId,
@@ -200,6 +206,8 @@ export async function spawnSenior(
 
   const srPreamble = loadPreamble("sr");
   const reviewOnly = isReviewOnlyStep(step);
+  const srTools = reviewOnly ? readOnlyTools(mergedTools) : mergedTools;
+  const srDomain = reviewOnly ? { read: mergedRead, write: [], update: [] } : { read: mergedRead, write: mergedWrite, update: mergedUpdate };
   const srSystemPrompt = [
     srPreamble,
     "",
@@ -233,7 +241,10 @@ export async function spawnSenior(
 
   await emitter.agentSpawn(session.id, srId, leadId,
     `Sr. (${domainNames.join("+")})`, "sr",
-    srResolved.model, teamConfig["team-name"], "#ffaa00");
+    srResolved.model, teamConfig["team-name"], "#ffaa00", undefined,
+    buildParticipantCapabilities({
+      tools: srTools, domain: srDomain, model: srResolved.model, authority: 55,
+    }));
 
   await emitter.message(session.id, srId, teamConfig.lead.name, "user",
     `📋 **Sr. assignment (${domainNames.join("+")})**:\n\n${srPrompt.slice(0, 3000)}`);
@@ -244,8 +255,8 @@ export async function spawnSenior(
     userPrompt: srPrompt,
     model: srResolved.model,
     thinking: srResolved.thinking,
-    tools: reviewOnly ? readOnlyTools(mergedTools) : mergedTools,
-    domain: reviewOnly ? { read: mergedRead, write: [], update: [] } : { read: mergedRead, write: mergedWrite, update: mergedUpdate },
+    tools: srTools,
+    domain: srDomain,
     workingDir: session.workingDir,
     sessionDir: `data/sessions/${session.id}`,
     parentId: leadId,

@@ -4,11 +4,11 @@ Canonical PRD: `../standard-swarm-v2-prd-workflow.md`
 
 ## Current status
 
-**Phase 1 COMPLETE on `pi-phase1-complete`.** Pi base, Codex hardening gates, Claude runtime fixes, and pre-PR swarm follow-up gates have been merged into a fresh branch from `main`. Local/echo validation passed; approved full live Pi all-fixture certification passed from this branch before final harness tightening, and final regression/echo/full test gates pass after the tightening.
+**Phase 2 in progress on `pi-phase2-participant-presence`.** Branch was created from merged Phase 1 main (`1ce507f`). Participant types, event helpers, trace recorder support, bounded heartbeat/activity events, capability metadata, and stale-detection helper are implemented with targeted tests passing.
 
 ## Current phase
 
-Phase 1 complete — PR preparation.
+Phase 2 participant presence/heartbeat implementation.
 
 ## Scope reminder
 
@@ -31,9 +31,9 @@ Out of scope unless explicitly approved by post-v2 decision gate:
 
 ## Baseline notes
 
-Preflight recorded on branch `fix/live-certification-hardening`.
+Phase 2 preflight recorded on branch `pi-phase2-participant-presence`, created from merged Phase 1 `main` commit `1ce507f`.
 
-Current dirty state includes unrelated `.pi/skills/*.md` files that must not be committed for this work. No live certification processes were found during preflight.
+Current dirty state includes unrelated `.pi/skills/*.md` files and `.idea/` that must not be committed for this work. They pre-existed Phase 2 and are excluded.
 
 Certification-foundation issue state checked with `gh issue view`: #288, #318, #319, #320, #321, #322, #323, #326, and #330 are all OPEN. Phase 1 must absorb/triage these rather than treating #330 alone.
 
@@ -78,16 +78,18 @@ Known historical risks:
 
 ### Phase 2 — Participant presence/heartbeat (#331)
 
-- [ ] Participant types added
-- [ ] Emitter helpers added
-- [ ] Orchestrator instrumented
-- [ ] Leads instrumented
-- [ ] Workers instrumented
-- [ ] Adapter activity/current-tool events added where available
-- [ ] Participant capability metadata added
-- [ ] Stale/offline policy implemented
-- [ ] Trace schema docs updated
-- [ ] Tests pass
+- [x] Participant types added
+- [x] Emitter helpers added
+- [x] Orchestrator instrumented
+- [x] Leads instrumented
+- [x] Workers instrumented
+- [x] Adapter activity/current-tool events added where available
+- [x] Participant capability metadata added
+- [x] Stale/offline policy implemented
+- [x] Trace schema docs updated
+- [x] Targeted tests pass
+- [x] Consolidated Codex runtime capability metadata and stale-on-existing-stall behavior
+- [x] Deferred Claude ParticipantTracker as future source-of-truth work
 
 ### Phase 3 — Validator/verifier (#335)
 
@@ -174,6 +176,44 @@ Use targeted checks during tasks and the local phase/PR bundle at phase boundari
 | 2026-05-18 | 1 | `bun test` on `pi-phase1-complete` | pass | 556 pass, 1 skip, 0 fail |
 | 2026-05-18 | 1 | `scripts/certify-live-swarm --only failing --dashboard-url ${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}` on `pi-phase1-complete` | pass | Echo smoke; trace `/private/var/folders/pw/92qs6gh94z75p3ypb8y3v7lc0000gn/T/mae-cert.upD7A5/traces/5dcfb87d-eb71-4469-a948-2c4bf00d3f68.jsonl` |
 | 2026-05-18 | 1 | `git diff --check` on `pi-phase1-complete` | pass | No whitespace errors |
+| 2026-05-18 | 2 | `git switch -c pi-phase2-participant-presence` from merged main | pass | Base `1ce507f`; unrelated `.pi/skills/*.md` and `.idea/` excluded |
+| 2026-05-18 | 2 | `bun test engine/event-emitter.test.ts engine/trace-recorder.test.ts engine/participant-presence.test.ts engine/team-execution.test.ts` | pass | 62 pass; participant lifecycle, heartbeat, stale detection, trace mapping, and team execution covered |
+| 2026-05-18 | 2 | `just check` | pass | `cd engine && bunx tsc --noEmit` |
+| 2026-05-18 | 2 | `scripts/certify-live-swarm-test` | pass | Phase 1 certification harness still passes after participant trace changes |
+| 2026-05-18 | 2 | `scripts/certify-live-swarm --only failing --dashboard-url ${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}` | pass | Echo smoke; participant events emitted into trace during run |
+| 2026-05-18 | 2 | `bun test` | pass | 562 pass, 1 skip, 0 fail |
+| 2026-05-18 | 2 | `git diff --check -- . ':(exclude).pi/skills/*' ':(exclude).idea/*'` | pass | No whitespace errors in Phase 2 tracked diff |
+| 2026-05-18 | 2 | pre-PR review swarm on `pi-phase2-participant-presence` | fail → fixed | Found duplicate orchestrator start, missing normal lead end, and synthesis kind metadata; all fixed with targeted regressions |
+| 2026-05-18 | 2 | `bun test engine/event-emitter.test.ts engine/team-execution.test.ts engine/trace-recorder.test.ts engine/participant-presence.test.ts` after review fixes | pass | 66 pass, 0 fail |
+| 2026-05-18 | 2 | `just check` after review fixes | pass | `cd engine && bunx tsc --noEmit` |
+| 2026-05-18 | 2 | `git diff --check -- . ':(exclude).pi/skills/*' ':(exclude).idea/*'` after review fixes | pass | No whitespace errors |
+| 2026-05-18 | 2 | `scripts/certify-live-swarm-test` after review fixes | pass | Certification harness remains green |
+| 2026-05-18 | 2 | `scripts/certify-live-swarm --only failing --dashboard-url ${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}` after review fixes | pass | Echo smoke |
+| 2026-05-18 | 2 | `bun test` after review fixes | pass | 566 pass, 1 skip, 0 fail |
+| 2026-05-18 | 2 | `just check` after full test bundle | pass | `cd engine && bunx tsc --noEmit` |
+| 2026-05-18 | 2 | re-review swarm on `pi-phase2-participant-presence` | fail → fixed | Prior F1-F3 closed; found duplicate `orch-1` participant_end on shutdown; fixed by making `agentDone("orch-1")` the terminal source and keeping `sessionEnd()` session-only |
+| 2026-05-18 | 2 | `bun test engine/event-emitter.test.ts engine/team-execution.test.ts engine/trace-recorder.test.ts engine/participant-presence.test.ts` after R1 fix | pass | 67 pass, 0 fail |
+| 2026-05-18 | 2 | `just check` after R1 fix | pass | `cd engine && bunx tsc --noEmit` |
+| 2026-05-18 | 2 | `git diff --check -- . ':(exclude).pi/skills/*' ':(exclude).idea/*'` after R1 fix | pass | No whitespace errors |
+| 2026-05-18 | 2 | second re-review swarm on `pi-phase2-participant-presence` | fail → fixed | Prior F1-F3/R1 closed; found dashboard named-SSE subscription gap for participant events; fixed by adding participant event names and SSE test |
+| 2026-05-18 | 2 | `bun test dashboard-next/test/api-sse.test.ts engine/event-emitter.test.ts engine/team-execution.test.ts engine/trace-recorder.test.ts engine/participant-presence.test.ts` after R2 fix | pass | 68 pass, 0 fail |
+| 2026-05-18 | 2 | `just check` after R2 fix | pass | `cd engine && bunx tsc --noEmit` |
+| 2026-05-18 | 2 | `git diff --check -- . ':(exclude).pi/skills/*' ':(exclude).idea/*'` after R2 fix | pass | No whitespace errors |
+| 2026-05-18 | 2 | `scripts/certify-live-swarm-test` after R2 fix | pass | 36 cert harness regression checks |
+| 2026-05-18 | 2 | `scripts/certify-live-swarm --only failing --dashboard-url ${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}` after R2 fix | pass | Echo smoke; trace `/private/var/folders/pw/92qs6gh94z75p3ypb8y3v7lc0000gn/T/mae-cert.pQGv0h/traces/8ddbd401-32cb-4080-b6cb-8c650298aeea.jsonl` |
+| 2026-05-18 | 2 | `bun test` after R2 fix | pass | 568 pass, 1 skip, 0 fail |
+| 2026-05-18 | 2 | `just check` after R2 full bundle | pass | `cd engine && bunx tsc --noEmit` |
+| 2026-05-18 | 2 | `git diff --check -- . ':(exclude).pi/skills/*' ':(exclude).idea/*'` after R2 full bundle | pass | No whitespace errors |
+| 2026-05-18 | 2 | third re-review swarm on `pi-phase2-participant-presence` | pass | F1-F3/R1/R2 closed; no material in-scope Critical/High/Medium/P3 blockers |
+| 2026-05-18 | 2 | consolidation decision: Pi base + Codex runtime metadata/stale, defer Claude tracker | impl | Added `DECISIONS.md` entry; normalized participant statuses to `starting|active|idle|stale|completed|failed|blocked` |
+| 2026-05-18 | 2 | `bun test engine/event-emitter.test.ts engine/team-execution.test.ts engine/worker-lifecycle.test.ts engine/active-monitor.test.ts engine/participant-presence.test.ts engine/trace-recorder.test.ts` after consolidation | pass | 82 pass, 0 fail |
+| 2026-05-18 | 2 | `cd engine && bunx tsc --noEmit` after consolidation | pass | Typecheck clean |
+| 2026-05-18 | 2 | `scripts/certify-live-swarm-test` after final consolidation | pass | Cert harness regression checks pass |
+| 2026-05-18 | 2 | `scripts/certify-live-swarm --only failing --dashboard-url ${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}` after final consolidation | pass | Echo smoke passes |
+| 2026-05-18 | 2 | `bun test` after final consolidation | pass | 568 pass, 1 skip, 0 fail |
+| 2026-05-18 | 2 | `cd engine && bunx tsc --noEmit` after final consolidation | pass | Typecheck clean |
+| 2026-05-18 | 2 | `git diff --check -- . ':(exclude).pi/skills/*' ':(exclude).idea/*'` after final consolidation | pass | No whitespace errors |
+| 2026-05-18 | 2 | focused final consolidation re-review | pass | No material in-scope Critical/High/Medium/P3 blockers; accepted Pi base + Codex metadata/stale + status normalization; Claude tracker deferred |
 
 ## Phase 1 evidence
 
@@ -190,7 +230,7 @@ Certification hardening is evidenced by deterministic fixtures, not only green c
 
 ## Open blockers
 
-None. Phase 1 is complete.
+None currently for Phase 2 implementation. Focused re-review of final consolidation still required before updating PR #356 as ready.
 
 ## Open risks
 

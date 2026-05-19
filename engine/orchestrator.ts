@@ -6,6 +6,7 @@ import { createLogger, addSink, flushSinks } from "./logger";
 import { createLangfuseSink } from "./langfuse-sink";
 import { createTraceRecorder, TRACE_DIR } from "./trace-recorder";
 import { sanitizeAgentInput } from "./security";
+import { buildParticipantCapabilities } from "./participant-capabilities";
 
 if (process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY) {
   addSink(createLangfuseSink({
@@ -270,7 +271,11 @@ export class Orchestrator {
     const teams = loadTeams();
     const orchPersona = loadPersona(teams.orchestrator.path);
     const orchResolved = resolveModelForRole("orchestrator", teams.orchestrator.model);
-    await this.emitter.agentSpawn(sessionId, "orch-1", "", orchPersona.name, "orchestrator", orchResolved.model, "Orchestration", teams.orchestrator.color ?? "#36f9f6");
+    await this.emitter.agentSpawn(sessionId, "orch-1", "", orchPersona.name, "orchestrator", orchResolved.model, "Orchestration", teams.orchestrator.color ?? "#36f9f6", undefined,
+      buildParticipantCapabilities({
+        tools: orchPersona.tools, domain: orchPersona.domain, model: orchResolved.model,
+        canDelegate: true, canSteer: true, canSpawnWorkers: true, canReviewWorkers: true, authority: 100,
+      }));
     log.info("Session started", { session_id: sessionId, name: sessionName, chain: chainName, dashboard: `${this.dashboardUrl}/session/${sessionId}`, task: opts.task?.slice(0, 200) });
     log.info("Trace file", { session_id: sessionId, path: join(TRACE_DIR, `${sessionId}.jsonl`) });
 

@@ -1,5 +1,45 @@
 export type AgentRole = "orchestrator" | "lead" | "sr" | "worker" | "scout";
 
+export type ParticipantKind = "orchestrator" | "lead" | "worker" | "sr" | "synthesis" | "validator" | "web-steer" | "cli-steer" | "system";
+export type ParticipantStatus = "starting" | "active" | "idle" | "stale" | "completed" | "failed" | "blocked";
+
+export interface ParticipantCapabilities {
+  canReceiveSteer?: boolean;
+  canSteer?: boolean;
+  canSpawnWorkers?: boolean;
+  canReviewWorkers?: boolean;
+  canWriteFiles?: boolean;
+  canDelegate?: boolean;
+  authority?: number;
+  toolCount?: number;
+  readScopeCount?: number;
+  writeScopeCount?: number;
+  model?: string;
+}
+
+export interface ParticipantState {
+  participant_id: string;
+  kind: ParticipantKind;
+  status: ParticipantStatus;
+  name: string;
+  role?: AgentRole | string;
+  team?: string;
+  model?: string;
+  current_task?: string;
+  current_tool?: string;
+  last_event?: string;
+  last_heartbeat_ts?: string;
+  started_at?: string;
+  ended_at?: string;
+  cost_usd?: number;
+  tokens_used?: number;
+  capabilities?: ParticipantCapabilities;
+}
+
+export interface ParticipantEventData extends ParticipantState {
+  reason?: string;
+}
+
 // --- Team Template & Expertise Types (#184) ---
 
 export interface TeamTemplate {
