@@ -115,6 +115,20 @@ certification_ready: true
 END_CERTIFICATION_CONTRACT"
 expect_success "clean contract validates" validate_certification_contract "$tmpdir/contract_clean.txt" clean
 
+write_case contract_clean_blockers "CERTIFICATION_CONTRACT:
+schema_version: 1
+session_id: test
+artifact_ref: test
+verdict: pass
+p0_count: 0
+p1_count: 0
+perspectives_covered: correctness, adversarial, quality, security, domain
+blockers: P1 unsafe command injection
+failed_teams: none
+certification_ready: true
+END_CERTIFICATION_CONTRACT"
+expect_failure "clean contract with blockers rejected" validate_certification_contract "$tmpdir/contract_clean_blockers.txt" clean
+
 write_case contract_clean_legacy "VERDICT:       PASS
 P0_BLOCKERS:   0
 P1_BLOCKERS:   0
@@ -345,6 +359,114 @@ printf '%s\n' \
   '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000017","agent_id":"pi-domain-lead","team":"Domain Review","grade":"VERIFIED"}' \
   > "$trace_dir/$leaked_contract_session.jsonl"
 expect_failure "live pi non-synthesis certification contract rejected" require_trace_health "$leaked_contract_session"
+
+write_case validation_contract_clean "VALIDATION_CONTRACT:
+schema_version: 1
+session_id: test
+trace_ref: trace.jsonl
+artifact_ref: artifact.txt
+validated: true
+evidence_complete: true
+lifecycle_valid: true
+contract_matches_evidence: true
+scope_valid: true
+steering_valid: true
+spawn_policy_valid: true
+blocking_reasons: none
+END_VALIDATION_CONTRACT"
+expect_success "clean validation contract validates" validate_validation_contract "$tmpdir/validation_contract_clean.txt"
+
+write_case validation_contract_invalid "VALIDATION_CONTRACT:
+schema_version: 1
+validated: true
+evidence_complete: true
+lifecycle_valid: true
+contract_matches_evidence: false
+scope_valid: true
+steering_valid: true
+spawn_policy_valid: true
+blocking_reasons: none
+END_VALIDATION_CONTRACT"
+expect_failure "invalid validation contract rejects false with no blocker" validate_validation_contract "$tmpdir/validation_contract_invalid.txt"
+
+validator_ok_session="00000000-0000-0000-0000-000000000020"
+mkdir -p "$trace_dir/$validator_ok_session/artifacts"
+for team_slug in correctness adversarial quality security domain; do
+  printf 'REVIEW_REPORT: %s\nSCOPE: fixture\nCOMMANDS_RUN: none\nFINDINGS: none\nBLOCKERS: none\nVERDICT: pass\n' "$team_slug" > "$trace_dir/$validator_ok_session/artifacts/pi-$team_slug-lead-output.txt"
+done
+cat > "$trace_dir/$validator_ok_session/artifacts/pi-orchestrator-output-final.txt" <<EOF
+CERTIFICATION_CONTRACT:
+schema_version: 1
+session_id: $validator_ok_session
+artifact_ref: validator-ok
+verdict: pass
+p0_count: 0
+p1_count: 0
+perspectives_covered: correctness, adversarial, quality, security, domain
+blockers: none
+failed_teams: none
+certification_ready: true
+END_CERTIFICATION_CONTRACT
+EOF
+printf '%s\n' \
+  '{"type":"session.start","session_id":"00000000-0000-0000-0000-000000000020"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000020","agent_id":"pi-correctness-lead","team":"Correctness Review","grade":"VERIFIED","output_artifact":"00000000-0000-0000-0000-000000000020/artifacts/pi-correctness-lead-output.txt"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000020","agent_id":"pi-adversarial-lead","team":"Adversarial Review","grade":"VERIFIED","output_artifact":"00000000-0000-0000-0000-000000000020/artifacts/pi-adversarial-lead-output.txt"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000020","agent_id":"pi-quality-lead","team":"Quality Review","grade":"VERIFIED","output_artifact":"00000000-0000-0000-0000-000000000020/artifacts/pi-quality-lead-output.txt"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000020","agent_id":"pi-security-lead","team":"Security Review","grade":"VERIFIED","output_artifact":"00000000-0000-0000-0000-000000000020/artifacts/pi-security-lead-output.txt"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000020","agent_id":"pi-domain-lead","team":"Domain Review","grade":"VERIFIED","output_artifact":"00000000-0000-0000-0000-000000000020/artifacts/pi-domain-lead-output.txt"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000020","agent_id":"pi-orchestrator","team":"Synthesis","grade":"VERIFIED","output_artifact":"00000000-0000-0000-0000-000000000020/artifacts/pi-orchestrator-output-final.txt"}' \
+  '{"type":"session.end","session_id":"00000000-0000-0000-0000-000000000020","status":"completed"}' \
+  > "$trace_dir/$validator_ok_session.jsonl"
+expect_success "deterministic validator accepts clean evidence" run_deterministic_validator "$validator_ok_session" clean "$trace_dir/$validator_ok_session/artifacts/pi-orchestrator-output-final.txt"
+
+validator_stale_session="00000000-0000-0000-0000-000000000021"
+make_health_trace "$validator_stale_session" 5 '{"type":"participant.stale","session_id":"00000000-0000-0000-0000-000000000021","participant_id":"pi-security-lead"}'
+expect_failure "deterministic validator rejects stale participant evidence" run_deterministic_validator "$validator_stale_session" clean "$trace_dir/$validator_ok_session/artifacts/pi-orchestrator-output-final.txt"
+
+validator_contradiction_session="00000000-0000-0000-0000-000000000022"
+make_health_trace "$validator_contradiction_session" 4
+expect_failure "deterministic validator rejects pass contract with lifecycle failure" run_deterministic_validator "$validator_contradiction_session" clean "$trace_dir/$validator_ok_session/artifacts/pi-orchestrator-output-final.txt"
+
+validator_missing_review_session="00000000-0000-0000-0000-000000000023"
+mkdir -p "$trace_dir/$validator_missing_review_session/artifacts"
+printf 'No structured review report here\n' > "$trace_dir/$validator_missing_review_session/artifacts/pi-security-lead-output.txt"
+printf '%s\n' \
+  '{"type":"session.start","session_id":"00000000-0000-0000-0000-000000000023"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000023","agent_id":"pi-correctness-lead","team":"Correctness Review","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000023","agent_id":"pi-adversarial-lead","team":"Adversarial Review","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000023","agent_id":"pi-quality-lead","team":"Quality Review","grade":"VERIFIED"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000023","agent_id":"pi-security-lead","team":"Security Review","grade":"VERIFIED","output_artifact":"00000000-0000-0000-0000-000000000023/artifacts/pi-security-lead-output.txt"}' \
+  '{"type":"agent.end","session_id":"00000000-0000-0000-0000-000000000023","agent_id":"pi-domain-lead","team":"Domain Review","grade":"VERIFIED"}' \
+  '{"type":"session.end","session_id":"00000000-0000-0000-0000-000000000023","status":"completed"}' \
+  > "$trace_dir/$validator_missing_review_session.jsonl"
+expect_failure "deterministic validator rejects missing REVIEW_REPORT artifact schema" run_deterministic_validator "$validator_missing_review_session" clean "$trace_dir/$validator_ok_session/artifacts/pi-orchestrator-output-final.txt"
+
+validator_failed_grade_session="00000000-0000-0000-0000-000000000024"
+cp -R "$trace_dir/$validator_ok_session" "$trace_dir/$validator_failed_grade_session"
+cp "$trace_dir/$validator_ok_session.jsonl" "$trace_dir/$validator_failed_grade_session.jsonl"
+perl -pi -e "s/$validator_ok_session/$validator_failed_grade_session/g; s/\"agent_id\":\"pi-security-lead\",\"team\":\"Security Review\",\"grade\":\"VERIFIED\"/\"agent_id\":\"pi-security-lead\",\"team\":\"Security Review\",\"grade\":\"FAILED\"/" "$trace_dir/$validator_failed_grade_session.jsonl"
+expect_failure "deterministic validator rejects unsuperseded failed lead grade" run_deterministic_validator "$validator_failed_grade_session" clean "$trace_dir/$validator_failed_grade_session/artifacts/pi-orchestrator-output-final.txt"
+
+validator_marker_only_session="00000000-0000-0000-0000-000000000025"
+cp -R "$trace_dir/$validator_ok_session" "$trace_dir/$validator_marker_only_session"
+cp "$trace_dir/$validator_ok_session.jsonl" "$trace_dir/$validator_marker_only_session.jsonl"
+perl -pi -e "s/$validator_ok_session/$validator_marker_only_session/g" "$trace_dir/$validator_marker_only_session.jsonl"
+printf 'REVIEW_REPORT: Security\n' > "$trace_dir/$validator_marker_only_session/artifacts/pi-security-lead-output.txt"
+expect_failure "deterministic validator rejects marker-only REVIEW_REPORT" run_deterministic_validator "$validator_marker_only_session" clean "$trace_dir/$validator_marker_only_session/artifacts/pi-orchestrator-output-final.txt"
+
+validator_blocking_report_session="00000000-0000-0000-0000-000000000026"
+cp -R "$trace_dir/$validator_ok_session" "$trace_dir/$validator_blocking_report_session"
+cp "$trace_dir/$validator_ok_session.jsonl" "$trace_dir/$validator_blocking_report_session.jsonl"
+perl -pi -e "s/$validator_ok_session/$validator_blocking_report_session/g" "$trace_dir/$validator_blocking_report_session.jsonl"
+printf 'REVIEW_REPORT: Security\nSCOPE: fixture\nCOMMANDS_RUN: none\nFINDINGS: P1 finding: unsafe command injection\nBLOCKERS: P1 unsafe command injection\nVERDICT: fail\n' > "$trace_dir/$validator_blocking_report_session/artifacts/pi-security-lead-output.txt"
+expect_failure "deterministic validator rejects clean pass contradicted by blocking review report" run_deterministic_validator "$validator_blocking_report_session" clean "$trace_dir/$validator_blocking_report_session/artifacts/pi-orchestrator-output-final.txt"
+
+symlink_root_session="00000000-0000-0000-0000-000000000027"
+mkdir -p "$trace_dir/$symlink_root_session" "$tmpdir/outside-artifacts"
+printf 'outside\n' > "$tmpdir/outside-artifacts/a.txt"
+ln -s "$tmpdir/outside-artifacts" "$trace_dir/$symlink_root_session/artifacts"
+expect_failure "artifact refs reject symlinked artifact root" artifact_path_for_ref "$symlink_root_session" "$symlink_root_session/artifacts/a.txt"
 
 adapter=echo
 

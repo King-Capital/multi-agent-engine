@@ -88,6 +88,22 @@ trace_file_for_session() {
   echo "$trace_dir/$session_id.jsonl"
 }
 
+artifact_path_for_ref() {
+  local session_id="$1"
+  local artifact_ref="$2"
+  [[ -n "$artifact_ref" ]] || return 1
+  [[ "$artifact_ref" != /* && "$artifact_ref" != *..* ]] || return 1
+  [[ "$artifact_ref" == "$session_id/artifacts/"* ]] || return 1
+  local artifact_path="$trace_dir/$artifact_ref"
+  local artifact_root="$trace_dir/$session_id/artifacts"
+  [[ -f "$artifact_path" && -d "$artifact_root" && ! -L "$artifact_path" && ! -L "$artifact_root" ]] || return 1
+  local resolved_artifact resolved_root
+  resolved_artifact="$(cd "$(dirname "$artifact_path")" && pwd -P)/$(basename "$artifact_path")"
+  resolved_root="$(cd "$artifact_root" && pwd -P)"
+  [[ "$resolved_artifact" == "$resolved_root/"* ]] || return 1
+  printf '%s\n' "$artifact_path"
+}
+
 unsuperseded_agent_failures() {
   local trace_file="$1"
   [[ -f "$trace_file" ]] || return 0
@@ -155,8 +171,10 @@ unsuperseded_empty_output_artifacts() {
       )
     | $event.artifact
   ' "$trace_file" | while IFS= read -r artifact_ref; do
-    [[ -n "$artifact_ref" && -f "$trace_dir/$artifact_ref" ]] || continue
-    if grep -q 'ERROR: Empty output' "$trace_dir/$artifact_ref"; then
+    local artifact_path
+    artifact_path="$(artifact_path_for_ref "$(basename "$trace_file" .jsonl)" "$artifact_ref" || true)"
+    [[ -n "$artifact_path" ]] || continue
+    if grep -q 'ERROR: Empty output' "$artifact_path"; then
       printf '%s\n' "$artifact_ref"
     fi
   done
@@ -175,8 +193,10 @@ non_synthesis_contract_artifacts() {
       )
     | (.output_artifact // .data.output_artifact // empty)
   ' "$trace_file" | while IFS= read -r artifact_ref; do
-    [[ -n "$artifact_ref" && -f "$trace_dir/$artifact_ref" ]] || continue
-    grep -q 'CERTIFICATION_CONTRACT:' "$trace_dir/$artifact_ref" && printf '%s\n' "$artifact_ref"
+    local artifact_path
+    artifact_path="$(artifact_path_for_ref "$(basename "$trace_file" .jsonl)" "$artifact_ref" || true)"
+    [[ -n "$artifact_path" ]] || continue
+    grep -q 'CERTIFICATION_CONTRACT:' "$artifact_path" && printf '%s\n' "$artifact_ref"
   done
 }
 
@@ -217,10 +237,10 @@ canonical_artifact_from_trace() {
   candidates="$(jq -r '
     select(.type == "agent.end" or .event_type == "agent_done")
     | select(
-        ((.agent_id // "") | startswith("synth-")) or
+        ((.agent_id // .data.agent_id // "") | startswith("synth-")) or
         ((.team // .data.team_name // "") == "Synthesis") or
-        ((.agent_id // "") == "pi-orchestrator") or
-        ((.agent_id // "") == "echo-orchestrator")
+        ((.agent_id // .data.agent_id // "") == "pi-orchestrator") or
+        ((.agent_id // .data.agent_id // "") == "echo-orchestrator")
       )
     | (.output_artifact // .data.output_artifact // empty)
   ' "$trace_file")"
@@ -229,8 +249,10 @@ canonical_artifact_from_trace() {
 
   local ref
   while IFS= read -r ref; do
-    [[ -n "$ref" && -f "$trace_dir/$ref" ]] || continue
-    if grep -q 'CERTIFICATION_CONTRACT:' "$trace_dir/$ref" && grep -q 'END_CERTIFICATION_CONTRACT' "$trace_dir/$ref"; then
+    local artifact_path
+    artifact_path="$(artifact_path_for_ref "$session_id" "$ref" || true)"
+    [[ -n "$artifact_path" ]] || continue
+    if grep -q 'CERTIFICATION_CONTRACT:' "$artifact_path" && grep -q 'END_CERTIFICATION_CONTRACT' "$artifact_path"; then
       echo "$ref"
       return 0
     fi
@@ -246,8 +268,10 @@ review_report_path() {
   local report=""
 
   artifact_ref="$(canonical_artifact_from_trace "$session_id" || true)"
-  if [[ -n "$artifact_ref" && -f "$trace_dir/$artifact_ref" ]]; then
-    echo "$trace_dir/$artifact_ref"
+  local artifact_path
+  artifact_path="$(artifact_path_for_ref "$session_id" "$artifact_ref" || true)"
+  if [[ -n "$artifact_path" ]]; then
+    echo "$artifact_path"
     return 0
   fi
 
@@ -264,6 +288,38 @@ review_report_path() {
   echo "$fallback"
 }
 
+validate_validation_contract() {
+  local file="$1"
+  awk '
+    BEGIN { in_block = 0 }
+    /VALIDATION_CONTRACT:/ { in_block = 1; found = 1; next }
+    /END_VALIDATION_CONTRACT/ { in_block = 0; ended = 1; next }
+    in_block {
+      line = tolower($0)
+      if (line ~ /^schema_version:[[:space:]]*1[[:space:]]*$/) schema = 1
+      if (line ~ /^session_id:[[:space:]]*[^[:space:]]+[[:space:]]*$/) session_id = 1
+      if (line ~ /^trace_ref:[[:space:]]*[^[:space:]]+[[:space:]]*$/) trace_ref = 1
+      if (line ~ /^artifact_ref:[[:space:]]*[^[:space:]]+[[:space:]]*$/) artifact_ref = 1
+      if (line ~ /^validated:[[:space:]]*(true|false)[[:space:]]*$/) validated = line
+      if (line ~ /^evidence_complete:[[:space:]]*(true|false)[[:space:]]*$/) evidence_complete = line
+      if (line ~ /^lifecycle_valid:[[:space:]]*(true|false)[[:space:]]*$/) lifecycle_valid = line
+      if (line ~ /^contract_matches_evidence:[[:space:]]*(true|false)[[:space:]]*$/) contract_matches_evidence = line
+      if (line ~ /^scope_valid:[[:space:]]*(true|false)[[:space:]]*$/) scope_valid = line
+      if (line ~ /^steering_valid:[[:space:]]*(true|false)[[:space:]]*$/) steering_valid = line
+      if (line ~ /^spawn_policy_valid:[[:space:]]*(true|false)[[:space:]]*$/) spawn_policy_valid = line
+      if (line ~ /^blocking_reasons:/) blocking_reasons = line
+    }
+    END {
+      ok = found && ended && schema && session_id && trace_ref && artifact_ref && validated && evidence_complete && lifecycle_valid && contract_matches_evidence && scope_valid && steering_valid && spawn_policy_valid && blocking_reasons
+      no_blockers = blocking_reasons ~ /^blocking_reasons:[[:space:]]*none[[:space:]]*$/
+      components_true = evidence_complete ~ /true/ && lifecycle_valid ~ /true/ && contract_matches_evidence ~ /true/ && scope_valid ~ /true/ && steering_valid ~ /true/ && spawn_policy_valid ~ /true/
+      components_false = evidence_complete ~ /false/ || lifecycle_valid ~ /false/ || contract_matches_evidence ~ /false/ || scope_valid ~ /false/ || steering_valid ~ /false/ || spawn_policy_valid ~ /false/
+      ok = ok && ((validated ~ /true/ && components_true && no_blockers) || (validated ~ /false/ && components_false && !no_blockers))
+      exit ok ? 0 : 1
+    }
+  ' "$file"
+}
+
 validate_certification_contract() {
   local file="$1"
   local expected="$2"
@@ -278,7 +334,7 @@ validate_certification_contract() {
       if (line ~ /^p0_count:[[:space:]]*[0-9]+[[:space:]]*$/) p0 = line
       if (line ~ /^p1_count:[[:space:]]*[0-9]+[[:space:]]*$/) p1 = line
       if (line ~ /^perspectives_covered:/) perspectives = line
-      if (line ~ /^blockers:/) blockers = 1
+      if (line ~ /^blockers:/) blockers = line
       if (line ~ /^failed_teams:/) failed_teams = line
       if (line ~ /^certification_ready:[[:space:]]*(true|false)[[:space:]]*$/) ready = line
     }
@@ -286,12 +342,290 @@ validate_certification_contract() {
       ok = found && ended && schema && verdict && p0 && p1 && perspectives && blockers && failed_teams && ready
       ok = ok && perspectives ~ /correctness/ && perspectives ~ /adversarial/ && perspectives ~ /quality/ && perspectives ~ /security/ && perspectives ~ /domain/
       if (expected == "clean") ok = ok && failed_teams ~ /^failed_teams:[[:space:]]*none[[:space:]]*$/
+      if (expected == "clean") ok = ok && blockers ~ /^blockers:[[:space:]]*none[[:space:]]*$/
       if (expected == "clean") ok = ok && verdict ~ /pass/ && p0 ~ /:[[:space:]]*0[[:space:]]*$/ && p1 ~ /:[[:space:]]*0[[:space:]]*$/ && ready ~ /true/
-      if (expected == "seeded") ok = ok && (verdict ~ /fail/ || p0 !~ /:[[:space:]]*0[[:space:]]*$/ || p1 !~ /:[[:space:]]*0[[:space:]]*$/) && ready ~ /false/
+      if (expected == "seeded") ok = ok && verdict ~ /fail/ && (p0 !~ /:[[:space:]]*0[[:space:]]*$/ || p1 !~ /:[[:space:]]*0[[:space:]]*$/) && ready ~ /false/
       if (expected == "failing") ok = ok && verdict ~ /fail/ && ready ~ /false/
       exit ok ? 0 : 1
     }
   ' "$file"
+}
+
+validation_bool() {
+  local value="$1"
+  [[ "$value" == 1 ]] && printf 'false' || printf 'true'
+}
+
+join_validation_reasons() {
+  local reasons_file="$1"
+  if [[ ! -s "$reasons_file" ]]; then
+    printf 'none'
+    return 0
+  fi
+  paste -sd ';' "$reasons_file" | sed 's/[[:space:]]\+/ /g; s/; */; /g'
+}
+
+review_report_has_blocking_findings() {
+  local file="$1"
+  awk '
+    {
+      line = tolower($0)
+      if (line ~ /^verdict:[[:space:]]*fail[[:space:]]*$/) found = 1
+      if (line ~ /^blockers:[[:space:]]*/ && line !~ /^blockers:[[:space:]]*(none|no blockers)[[:space:]]*$/) found = 1
+      if (line ~ /(^|[^a-z])(p0|p1|critical|high)([^a-z]|$)/ && line ~ /(finding|blocker|fail|vulnerab|issue|risk|bug|exploit|command|injection|unsafe)/) found = 1
+    }
+    END { exit found ? 0 : 1 }
+  ' "$file"
+}
+
+validate_review_report_contract() {
+  local file="$1"
+  awk '
+    {
+      line = tolower($0)
+      if (line ~ /^review_report:/) found = 1
+      if (line ~ /^scope:[[:space:]]*[^[:space:]]/) scope = 1
+      if (line ~ /^commands_run:[[:space:]]*[^[:space:]]/) commands = 1
+      if (line ~ /^findings:[[:space:]]*[^[:space:]]/) findings = 1
+      if (line ~ /^blockers:[[:space:]]*[^[:space:]]/) blockers = 1
+      if (line ~ /^verdict:[[:space:]]*(pass|fail)[[:space:]]*$/) verdict = 1
+    }
+    END { exit (found && scope && commands && findings && blockers && verdict) ? 0 : 1 }
+  ' "$file"
+}
+
+required_lead_review_report_failures() {
+  local trace_file="$1"
+  [[ -f "$trace_file" ]] || return 0
+  local session_id
+  session_id="$(basename "$trace_file" .jsonl)"
+
+  jq -r '
+    def aid: (.agent_id // .data.agent_id // "");
+    def team_name: (.team // .data.team_name // "");
+    select(.type == "agent.end" or .event_type == "agent_done")
+    | select((aid | test("-lead$")) or (team_name | test(" Review$")))
+    | select((team_name | test("^(Correctness|Adversarial|Quality|Security|Domain) Review$")) or (aid | test("^pi-(correctness|adversarial|quality|security|domain)-lead$")))
+    | [team_name, aid, (.output_artifact // .data.output_artifact // "")]
+    | @tsv
+  ' "$trace_file" | while IFS=$'\t' read -r team_name agent_id artifact_ref; do
+    if [[ -z "$artifact_ref" ]]; then
+      printf '%s missing REVIEW_REPORT artifact reference\n' "${team_name:-$agent_id}"
+      continue
+    fi
+    local artifact_path
+    artifact_path="$(artifact_path_for_ref "$session_id" "$artifact_ref" || true)"
+    if [[ -z "$artifact_path" ]]; then
+      printf '%s invalid or missing artifact %s\n' "${team_name:-$agent_id}" "$artifact_ref"
+      continue
+    fi
+    validate_review_report_contract "$artifact_path" || printf '%s artifact lacks valid REVIEW_REPORT contract: %s\n' "${team_name:-$agent_id}" "$artifact_ref"
+  done
+}
+
+blocking_review_report_artifacts() {
+  local trace_file="$1"
+  [[ -f "$trace_file" ]] || return 0
+  local session_id
+  session_id="$(basename "$trace_file" .jsonl)"
+  jq -r '
+    def aid: (.agent_id // .data.agent_id // "");
+    def team_name: (.team // .data.team_name // "");
+    select(.type == "agent.end" or .event_type == "agent_done")
+    | select((team_name | test("^(Correctness|Adversarial|Quality|Security|Domain) Review$")) or (aid | test("^pi-(correctness|adversarial|quality|security|domain)-lead$")))
+    | (.output_artifact // .data.output_artifact // empty)
+  ' "$trace_file" | while IFS= read -r artifact_ref; do
+    local artifact_path
+    artifact_path="$(artifact_path_for_ref "$session_id" "$artifact_ref" || true)"
+    [[ -n "$artifact_path" ]] || continue
+    if validate_review_report_contract "$artifact_path" && review_report_has_blocking_findings "$artifact_path"; then
+      printf '%s\n' "$artifact_ref"
+    fi
+  done
+}
+
+run_deterministic_validator() {
+  local session_id="$1"
+  local fixture_name="$2"
+  local cert_report="$3"
+  local trace_file
+  trace_file="$(trace_file_for_session "$session_id")"
+  local validator_report="$trace_dir/$session_id.validation.txt"
+  local reasons_file="$trace_dir/$session_id.validation.reasons"
+  : > "$reasons_file"
+
+  [[ -f "$trace_file" ]] || printf 'missing trace file: %s\n' "$trace_file" >> "$reasons_file"
+  [[ -f "$cert_report" ]] || printf 'missing certification artifact/report: %s\n' "$cert_report" >> "$reasons_file"
+
+  local evidence_failure=0 lifecycle_failure=0 contract_failure=0 scope_failure=0 steering_failure=0 spawn_failure=0
+
+  if [[ -f "$trace_file" ]]; then
+    grep -q 'session' "$trace_file" || { printf 'trace lacks session events: %s\n' "$trace_file" >> "$reasons_file"; evidence_failure=1; }
+    if trace_has_operational_failures "$trace_file"; then
+      printf 'trace contains operational failure event: %s\n' "$trace_file" >> "$reasons_file"
+      lifecycle_failure=1
+    fi
+
+    local missing_leads failed_agents leaked_contracts empty_outputs stale_participants steering_events review_report_failures blocking_reports repo_source_reads drift_count wrong_fixture_count worker_spawn_count missing_preview_count
+    missing_leads="$({ missing_required_review_leads "$trace_file" || true; })"
+    if [[ -n "$missing_leads" ]]; then
+      printf 'missing required review lead(s): %s in %s\n' "$missing_leads" "$trace_file" >> "$reasons_file"
+      lifecycle_failure=1
+    fi
+
+    failed_agents="$(unsuperseded_agent_failures "$trace_file" || true)"
+    if [[ "$failed_agents" != "0" ]]; then
+      printf 'unsuperseded failed agent completion(s): %s in %s\n' "$failed_agents" "$trace_file" >> "$reasons_file"
+      lifecycle_failure=1
+    fi
+
+    leaked_contracts="$({ non_synthesis_contract_artifacts "$trace_file" || true; })"
+    if [[ -n "$leaked_contracts" ]]; then
+      printf 'CERTIFICATION_CONTRACT outside synthesis artifact(s): %s\n' "$leaked_contracts" >> "$reasons_file"
+      contract_failure=1
+    fi
+
+    empty_outputs="$({ unsuperseded_empty_output_artifacts "$trace_file" || true; })"
+    if [[ -n "$empty_outputs" ]]; then
+      printf 'unsuperseded empty-output artifact(s): %s\n' "$empty_outputs" >> "$reasons_file"
+      evidence_failure=1
+    fi
+
+    stale_participants="$(jq -r '
+      select(.type == "participant.stale" or .event_type == "participant_stale" or .event_type == "participant.stale")
+      | (.participant_id // .data.participant_id // .agent_id // .data.agent_id // "unknown")
+    ' "$trace_file")"
+    if [[ -n "$stale_participants" ]]; then
+      printf 'stale/offline participant event(s): %s\n' "$stale_participants" >> "$reasons_file"
+      lifecycle_failure=1
+    fi
+
+    steering_events="$(jq -r '
+      def kind: (.kind // .data.kind // "");
+      def event_type: (.event_type // .type // "");
+      select((kind == "web-steer") or (kind == "cli-steer") or (event_type | test("steer|user_message|control")))
+      | event_type
+    ' "$trace_file")"
+    if [[ -n "$steering_events" ]]; then
+      printf 'unattended certification trace contains steering/control event(s): %s\n' "$steering_events" >> "$reasons_file"
+      steering_failure=1
+    fi
+
+    review_report_failures="$({ required_lead_review_report_failures "$trace_file" || true; })"
+    if [[ -n "$review_report_failures" ]]; then
+      printf 'required review artifact schema failure(s): %s\n' "$review_report_failures" >> "$reasons_file"
+      contract_failure=1
+    fi
+
+    blocking_reports="$({ blocking_review_report_artifacts "$trace_file" || true; })"
+    if [[ -n "$blocking_reports" && "$fixture_name" == "clean" ]]; then
+      printf 'clean fixture final contract conflicts with blocking review report artifact(s): %s\n' "$blocking_reports" >> "$reasons_file"
+      contract_failure=1
+    fi
+
+    worker_spawn_count="$(jq -r '
+      def aid: (.agent_id // .data.agent_id // "");
+      select(
+        (
+          .type == "agent.start" and
+          (aid != "") and
+          ((aid | test("-lead$")) | not) and
+          ((aid | startswith("synth-")) | not) and
+          aid != "pi-orchestrator" and
+          aid != "echo-orchestrator"
+        ) or
+        (.event_type == "agent_spawn" and ((.data.agent_role // "") == "worker"))
+      )
+      | aid // .id // "worker"
+    ' "$trace_file" | wc -l | tr -d ' ')"
+    if [[ "$worker_spawn_count" != "0" ]]; then
+      printf 'lead-only certification spawned worker(s): %s in %s\n' "$worker_spawn_count" "$trace_file" >> "$reasons_file"
+      spawn_failure=1
+    fi
+
+    missing_preview_count="$(jq -r 'select(.type == "tool.call") | select((.args_preview // "") == "")' "$trace_file" | wc -l | tr -d ' ')"
+    if [[ "$missing_preview_count" != "0" ]]; then
+      printf 'tool.call event(s) missing args_preview in certification mode: %s in %s\n' "$missing_preview_count" "$trace_file" >> "$reasons_file"
+      scope_failure=1
+    fi
+
+    repo_source_reads="$(jq -r --arg root "$root" --arg workdir "$workdir" 'select(.type == "tool.call") | (.args_preview // "") | select((index($root) != null) and (index($workdir) == null))' "$trace_file" | wc -l | tr -d ' ')"
+    if [[ "$repo_source_reads" != "0" ]]; then
+      printf 'repository source read during fixture-only certification: %s call(s) in %s\n' "$repo_source_reads" "$trace_file" >> "$reasons_file"
+      scope_failure=1
+    fi
+
+    drift_count="$(jq -r --arg workdir "$workdir" 'select(.type == "tool.call") | (.args_preview // "") | select(test("/mae-cert\\.[^/]+/") and (startswith($workdir) | not))' "$trace_file" | wc -l | tr -d ' ')"
+    if [[ "$drift_count" != "0" ]]; then
+      printf 'scope drift to previous certification workdir: %s call(s) in %s\n' "$drift_count" "$trace_file" >> "$reasons_file"
+      scope_failure=1
+    fi
+
+    if [[ -n "$fixture_name" ]]; then
+      wrong_fixture_count="$(jq -r --arg workdir "$workdir" --arg fixture "$fixture_name" 'select(.type == "tool.call") | (.args_preview // "") | select(startswith($workdir) and (test("/mae-cert\\.[^/]+/(clean|seeded|failing)(/|$)")) and (startswith($workdir + "/" + $fixture) | not))' "$trace_file" | wc -l | tr -d ' ')"
+      if [[ "$wrong_fixture_count" != "0" ]]; then
+        printf 'wrong fixture inspected for %s: %s call(s) in %s\n' "$fixture_name" "$wrong_fixture_count" "$trace_file" >> "$reasons_file"
+        scope_failure=1
+      fi
+    fi
+  else
+    evidence_failure=1
+    lifecycle_failure=1
+    scope_failure=1
+  fi
+
+  if [[ -f "$cert_report" ]]; then
+    validate_certification_contract "$cert_report" "$fixture_name" || { printf 'CERTIFICATION_CONTRACT does not match deterministic evidence for fixture %s: %s\n' "$fixture_name" "$cert_report" >> "$reasons_file"; contract_failure=1; }
+    if [[ -f "$trace_file" ]]; then
+      local canonical_ref canonical_path
+      canonical_ref="$(canonical_artifact_from_trace "$session_id" || true)"
+      canonical_path=""
+      [[ -n "$canonical_ref" ]] && canonical_path="$(artifact_path_for_ref "$session_id" "$canonical_ref" || true)"
+      if [[ -z "$canonical_ref" || -z "$canonical_path" ]]; then
+        printf 'canonical synthesis artifact missing in trace: %s\n' "$trace_file" >> "$reasons_file"
+        contract_failure=1
+      elif [[ "$(cd "$(dirname "$canonical_path")" && pwd -P)/$(basename "$canonical_path")" != "$(cd "$(dirname "$cert_report")" && pwd -P)/$(basename "$cert_report")" ]]; then
+        printf 'validator artifact is not canonical synthesis artifact: expected %s got %s\n' "$canonical_path" "$cert_report" >> "$reasons_file"
+        contract_failure=1
+      fi
+    fi
+  else
+    contract_failure=1
+  fi
+
+  local evidence_complete lifecycle_valid contract_matches_evidence scope_valid steering_valid spawn_policy_valid validated blocking_reasons
+  evidence_complete="$(validation_bool "$evidence_failure")"
+  lifecycle_valid="$(validation_bool "$lifecycle_failure")"
+  contract_matches_evidence="$(validation_bool "$contract_failure")"
+  scope_valid="$(validation_bool "$scope_failure")"
+  steering_valid="$(validation_bool "$steering_failure")"
+  spawn_policy_valid="$(validation_bool "$spawn_failure")"
+  blocking_reasons="$(join_validation_reasons "$reasons_file")"
+  if [[ "$evidence_complete" == "true" && "$lifecycle_valid" == "true" && "$contract_matches_evidence" == "true" && "$scope_valid" == "true" && "$steering_valid" == "true" && "$spawn_policy_valid" == "true" ]]; then
+    validated="true"
+  else
+    validated="false"
+  fi
+
+  {
+    printf 'VALIDATION_CONTRACT:\n'
+    printf 'schema_version: 1\n'
+    printf 'session_id: %s\n' "$session_id"
+    printf 'trace_ref: %s\n' "$trace_file"
+    printf 'artifact_ref: %s\n' "$cert_report"
+    printf 'validated: %s\n' "$validated"
+    printf 'evidence_complete: %s\n' "$evidence_complete"
+    printf 'lifecycle_valid: %s\n' "$lifecycle_valid"
+    printf 'contract_matches_evidence: %s\n' "$contract_matches_evidence"
+    printf 'scope_valid: %s\n' "$scope_valid"
+    printf 'steering_valid: %s\n' "$steering_valid"
+    printf 'spawn_policy_valid: %s\n' "$spawn_policy_valid"
+    printf 'blocking_reasons: %s\n' "$blocking_reasons"
+    printf 'END_VALIDATION_CONTRACT\n'
+  } > "$validator_report"
+
+  validate_validation_contract "$validator_report" || fail "validator emitted invalid VALIDATION_CONTRACT: $validator_report"
+  [[ "$validated" == "true" ]] || fail "deterministic validator rejected certification evidence; see $validator_report"
 }
 
 require_trace_health() {
@@ -355,7 +689,20 @@ run_review() {
   local timeout_secs="${MAE_CERT_TIMEOUT:-$default_timeout}"
   log "running $name review with adapter=$adapter timeout=${timeout_secs}s"
   local exit_code=0
-  timeout "$timeout_secs" bash -c "cd '$root' && MAE_CERTIFICATION_MODE=1 MAE_DASHBOARD_URL='$dashboard_url' MAE_TRACE_DIR='$trace_dir' bun '$root/engine/cli.ts' chain swarm-review '$prompt' --adapter '$adapter'" >"$outfile" 2>"$errfile" || exit_code=$?
+  (
+    cd "$root"
+    env MAE_CERTIFICATION_MODE=1 MAE_DASHBOARD_URL="$dashboard_url" MAE_TRACE_DIR="$trace_dir" \
+      bun "$root/engine/cli.ts" chain swarm-review "$prompt" --adapter "$adapter"
+  ) >"$outfile" 2>"$errfile" &
+  local review_pid=$!
+  timeout "$timeout_secs" bash -c 'while kill -0 "$1" 2>/dev/null; do sleep 0.2; done' _ "$review_pid" || {
+    kill "$review_pid" 2>/dev/null || true
+    wait "$review_pid" 2>/dev/null || true
+    exit_code=124
+  }
+  if [[ "$exit_code" == 0 ]]; then
+    wait "$review_pid" || exit_code=$?
+  fi
   if [[ "$exit_code" != 0 ]]; then
     if [[ "$exit_code" == 124 ]]; then
       fail "$name review timed out after ${timeout_secs}s; see $outfile and $errfile"
@@ -367,7 +714,12 @@ run_review() {
   session_id="$(extract_session_id "$outfile" "$errfile")"
   if [[ -n "$session_id" ]]; then
     require_trace_health "$session_id" "$name"
-    review_report_path "$session_id" "$outfile" || fail "canonical live synthesis artifact missing for session $session_id; see $outfile and $errfile"
+    local canonical_report
+    canonical_report="$(review_report_path "$session_id" "$outfile")" || fail "canonical live synthesis artifact missing for session $session_id; see $outfile and $errfile"
+    if [[ "$adapter" == "pi" ]]; then
+      run_deterministic_validator "$session_id" "$name" "$canonical_report"
+    fi
+    echo "$canonical_report"
   else
     if [[ "$adapter" == "pi" ]]; then
       fail "live review did not expose a session id; see $outfile and $errfile"

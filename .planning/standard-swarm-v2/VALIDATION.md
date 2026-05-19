@@ -104,12 +104,12 @@ Live Pi validation is **not** required for every phase and should not be used as
 | 2 | Heartbeat/activity bounded | #331 | event/trace unit tests | standard bundle | pending |
 | 2 | Stale/offline detectable | #331 | fake timer/trace tests | standard bundle | pending |
 | 2 | Participant capability metadata available | #331/#338/#340 | type/event tests | standard bundle | pending |
-| 3 | Validator catches lifecycle contradiction | #335 | validator unit tests | standard bundle | pending |
-| 3 | Validator catches scope drift | #335 | validator fixture tests | standard bundle | pending |
-| 3 | Validator catches missing/invalid team structured contracts | #335/#321 | validator fixture tests | standard bundle | pending |
-| 3 | Validator enforces REVIEW_REPORT vs CERTIFICATION_CONTRACT boundary | #335/#326 | validator/parser fixture tests | standard bundle | pending |
-| 3 | Validator cites evidence paths/events | #335 | validator output tests | standard bundle | pending |
-| 3 | Validator contract required in strict mode | #335 | cert integration test | standard bundle | pending |
+| 3 | Validator catches lifecycle contradiction | #335 | validator unit tests | standard bundle | implemented in `scripts/certify-live-swarm-test` |
+| 3 | Validator catches scope drift | #335 | validator fixture tests | standard bundle | implemented via deterministic validator scope checks |
+| 3 | Validator catches missing/invalid team structured contracts | #335/#321 | validator fixture tests | standard bundle | implemented for required lead artifacts with `REVIEW_REPORT` |
+| 3 | Validator enforces REVIEW_REPORT vs CERTIFICATION_CONTRACT boundary | #335/#326 | validator/parser fixture tests | standard bundle | implemented via non-synthesis contract and review-report checks |
+| 3 | Validator cites evidence paths/events | #335 | validator output tests | standard bundle | implemented: validator report includes trace/artifact refs and blocking reasons |
+| 3 | Validator contract required in strict mode | #335 | cert integration test | standard bundle | implemented for `--live-pi`; echo remains smoke-only |
 | 4 | Spawn decision schema validates | #340 | schema/unit tests | standard bundle | pending |
 | 4 | Worker spawn without decision fails strict mode | #340 | worker lifecycle tests | standard bundle | pending |
 | 4 | Worker prompts derive from spawn decision | #340 | snapshot/unit tests | standard bundle | pending |
@@ -146,6 +146,27 @@ MAE_CERT_KEEP_ARTIFACTS=1 scripts/certify-live-swarm --live-pi --only failing --
 ### Milestone B — after Phase 3
 
 Purpose: prove validator blocks final contract/evidence contradictions.
+
+`VALIDATION_CONTRACT` schema:
+
+```text
+VALIDATION_CONTRACT:
+schema_version: 1
+session_id: <uuid>
+trace_ref: <trace-jsonl-path>
+artifact_ref: <canonical-certification-artifact-path>
+validated: true|false
+evidence_complete: true|false
+lifecycle_valid: true|false
+contract_matches_evidence: true|false
+scope_valid: true|false
+steering_valid: true|false
+spawn_policy_valid: true|false
+blocking_reasons: none|<evidence-backed reasons>
+END_VALIDATION_CONTRACT
+```
+
+Strict production certification (`--live-pi`) requires a valid passing validator contract per fixture. Echo mode remains a cheap plumbing smoke and does not claim production certification.
 
 Required:
 

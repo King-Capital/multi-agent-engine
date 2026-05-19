@@ -4,11 +4,11 @@ Canonical PRD: `../standard-swarm-v2-prd-workflow.md`
 
 ## Current status
 
-**Phase 2 in progress on `pi-phase2-participant-presence`.** Branch was created from merged Phase 1 main (`1ce507f`). Participant types, event helpers, trace recorder support, bounded heartbeat/activity events, capability metadata, and stale-detection helper are implemented with targeted tests passing.
+**Phase 3 implemented on `phase3-deterministic-validator`.** The deterministic validator is wired into strict live-Pi certification, emits `VALIDATION_CONTRACT`, and keeps echo mode as smoke-only plumbing validation.
 
 ## Current phase
 
-Phase 2 participant presence/heartbeat implementation.
+Phase 3 deterministic validator/verifier.
 
 ## Scope reminder
 
@@ -31,9 +31,9 @@ Out of scope unless explicitly approved by post-v2 decision gate:
 
 ## Baseline notes
 
-Phase 2 preflight recorded on branch `pi-phase2-participant-presence`, created from merged Phase 1 `main` commit `1ce507f`.
+Phase 3 preflight recorded on branch `phase3-deterministic-validator`, created from merged Phase 2 main commit `6015e5a`.
 
-Current dirty state includes unrelated `.pi/skills/*.md` files and `.idea/` that must not be committed for this work. They pre-existed Phase 2 and are excluded.
+Main checkout dirty state includes unrelated `.pi/skills/*.md`, `.idea/`, review artifacts, and older swarm worktrees that must not be committed for this work. Phase 3 implementation is isolated in the `multi-agent-engine-phase3` worktree.
 
 Certification-foundation issue state checked with `gh issue view`: #288, #318, #319, #320, #321, #322, #323, #326, and #330 are all OPEN. Phase 1 must absorb/triage these rather than treating #330 alone.
 
@@ -93,15 +93,15 @@ Known historical risks:
 
 ### Phase 3 — Validator/verifier (#335)
 
-- [ ] `VALIDATION_CONTRACT` schema defined
-- [ ] Deterministic evidence checks implemented
-- [ ] Team-level structured contract validation implemented
-- [ ] `REVIEW_REPORT` vs `CERTIFICATION_CONTRACT` boundary validated
-- [ ] Validator cites trace/artifact evidence
-- [ ] LLM commentary documented as non-authoritative if present
-- [ ] Validator wired into strict cert path
-- [ ] Contradiction tests added
-- [ ] Echo cert smoke passes
+- [x] `VALIDATION_CONTRACT` schema defined
+- [x] Deterministic evidence checks implemented
+- [x] Team-level structured contract validation implemented
+- [x] `REVIEW_REPORT` vs `CERTIFICATION_CONTRACT` boundary validated
+- [x] Validator cites trace/artifact evidence
+- [x] LLM commentary documented as non-authoritative if present
+- [x] Validator wired into strict cert path
+- [x] Contradiction tests added
+- [x] Echo cert smoke passes
 
 ### Phase 4 — Structured spawn decisions (#340)
 
@@ -214,6 +214,17 @@ Use targeted checks during tasks and the local phase/PR bundle at phase boundari
 | 2026-05-18 | 2 | `cd engine && bunx tsc --noEmit` after final consolidation | pass | Typecheck clean |
 | 2026-05-18 | 2 | `git diff --check -- . ':(exclude).pi/skills/*' ':(exclude).idea/*'` after final consolidation | pass | No whitespace errors |
 | 2026-05-18 | 2 | focused final consolidation re-review | pass | No material in-scope Critical/High/Medium/P3 blockers; accepted Pi base + Codex metadata/stale + status normalization; Claude tracker deferred |
+| 2026-05-19 | 3 | `TMPDIR="$PWD/.tmp" scripts/certify-live-swarm-test` | pass | 42 certification + deterministic validator harness checks |
+| 2026-05-19 | 3 | `just check` | pass | `cd engine && bunx tsc --noEmit`; required `bun install` in `engine/` for this worktree |
+| 2026-05-19 | 3 | `TMPDIR="$PWD/.tmp" scripts/certify-live-swarm --only failing --dashboard-url ${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}` | pass | Echo smoke trace `.tmp/mae-cert.Gn7r56/traces/454b0fa1-1054-4ed7-aec6-b66a243e8722.jsonl` |
+| 2026-05-19 | 3 | `bun test` from `engine/` | pass | 565 pass, 1 skip, 0 fail |
+| 2026-05-19 | 3 | `git diff --check -- . ':(exclude).tmp/*'` | pass | No whitespace errors |
+| 2026-05-19 | 3 | review swarm round 1 | findings fixed | Closed P1/P2 false-pass and trust-boundary findings: failed lead grades, REVIEW_REPORT schema, squad/final contradictions, validation schema refs, nested trace fields, artifact path confinement, shell argv safety, missing tool previews |
+| 2026-05-19 | 3 | `scripts/certify-live-swarm-test` after review fixes | pass | 47 certification + deterministic validator harness checks |
+| 2026-05-19 | 3 | `just check` after review fixes | pass | TypeScript `tsc --noEmit` clean |
+| 2026-05-19 | 3 | `bun test` after review fixes | pass | 568 pass, 1 skip, 0 fail |
+| 2026-05-19 | 3 | final blocker-only re-review | pass | No remaining P1/P2 blockers; symlink artifact-root and clean blockers false-pass verified fixed |
+| 2026-05-19 | 3 | `scripts/certify-live-swarm --only failing --dashboard-url ${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}` after review fixes | pass | Echo smoke trace `/private/var/folders/pw/92qs6gh94z75p3ypb8y3v7lc0000gn/T/mae-cert.kC3fNc/traces/936d5407-67fc-45a9-bb5f-43b3cf2de7ab.jsonl` |
 
 ## Phase 1 evidence
 
