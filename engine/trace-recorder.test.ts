@@ -364,6 +364,46 @@ describe("trace-recorder", () => {
     recorder.close?.();
   });
 
+  test("records structured spawn decision trace fields", () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+    const sessionId = "test-spawn-decision";
+
+    recorder.write(makeEntry({
+      session_id: sessionId,
+      agent_id: "security-worker",
+      parent_id: "lead-1",
+      msg: "Spawn decision",
+      component: "event-emitter",
+      trace_type: "spawn.decision",
+      need_worker: true,
+      worker_name: "Security Auditor",
+      spawn_type: "worker",
+      reason: "x".repeat(600),
+      why_lead_cannot_do_it: "Independent security evidence is required.",
+      constraints: {
+        allowed_paths: ["engine/security.ts"],
+        allowed_tools: ["read", "rg"],
+        forbidden_paths: [".env"],
+      },
+      bus_policy: "isolated",
+      expected_output_schema: "REVIEW_REPORT: Security",
+      timeout_seconds: 600,
+      validation: { valid: true, errors: [] },
+    }));
+
+    const content = readFileSync(join(TEST_TRACE_DIR, `${sessionId}.jsonl`), "utf-8");
+    const event = JSON.parse(content.trim());
+
+    expect(event.type).toBe("spawn.decision");
+    expect(event.agent_id).toBe("security-worker");
+    expect(event.parent_id).toBe("lead-1");
+    expect(event.worker_name).toBe("Security Auditor");
+    expect(event.reason).toHaveLength(500);
+    expect(event.constraints.allowed_tools).toEqual(["read", "rg"]);
+    expect(event.validation.valid).toBe(true);
+    recorder.close?.();
+  });
+
   test("close resets internal state", async () => {
     const recorder = createTraceRecorder(TEST_TRACE_DIR);
 

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { leadReviewWorkers } from "./worker-lifecycle";
+import { leadReviewWorkers, retryWorker } from "./worker-lifecycle";
 import type {
   PlatformAdapter,
   DelegateOptions,
@@ -56,6 +56,15 @@ function makeTeamConfig(): TeamConfig {
     members: [
       { name: "Worker1", path: "agents/personas/w1.md", model: "sonnet", color: "#00ff00" },
       { name: "Worker2", path: "agents/personas/w2.md", model: "sonnet", color: "#0000ff" },
+    ],
+  };
+}
+
+function makeRetryTeamConfig(): TeamConfig {
+  return {
+    ...makeTeamConfig(),
+    members: [
+      { name: "Backend Engineer", path: "agents/personas/backend-engineer.md", model: "sonnet", color: "#00ff00" },
     ],
   };
 }
@@ -272,5 +281,49 @@ describe("leadReviewWorkers", () => {
     // Should truncate to ~3000 chars + truncation notice
     expect(capturedPrompt).toContain("...(truncated)");
     expect(capturedPrompt.length).toBeLessThan(longOutput.length);
+  });
+});
+
+describe("retryWorker", () => {
+  test("strict retry applies derived spawn decision constraints to delegate options", async () => {
+    const previous = process.env.MAE_SPAWN_DECISION_STRICT;
+    process.env.MAE_SPAWN_DECISION_STRICT = "1";
+    let capturedTools: string[] = [];
+    let capturedRead: string[] = [];
+    try {
+      const adapter: PlatformAdapter = {
+        name: "capture",
+        isAvailable: async () => true,
+        delegate: async (opts) => {
+          capturedTools = opts.tools;
+          capturedRead = opts.domain.read;
+          return makeResult("Backend Engineer", "retry", { output: "retry output" });
+        },
+      };
+      const emitter = {
+        ...makeStubEmitter(),
+        spawnDecision: async () => {},
+        agentSpawn: async () => {},
+      } as unknown as EventEmitter;
+
+      await retryWorker(
+        makeDeps({ emitter }),
+        makeSession({ workingDir: process.cwd() }),
+        makeRetryTeamConfig(),
+        makeRetryTeamConfig().members[0]!,
+        "Redo the backend pass",
+        "Review backend",
+        adapter,
+        "lead-1",
+        1,
+        makeStep({ strict_spawn: true }),
+      );
+
+      expect(capturedTools).not.toContain("delegate");
+      expect(capturedRead.length).toBeGreaterThan(0);
+    } finally {
+      if (previous === undefined) delete process.env.MAE_SPAWN_DECISION_STRICT;
+      else process.env.MAE_SPAWN_DECISION_STRICT = previous;
+    }
   });
 });

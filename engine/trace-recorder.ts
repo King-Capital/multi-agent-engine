@@ -13,7 +13,7 @@
 import type { LogSink, LogEntry } from "./logger";
 import { mkdirSync, appendFileSync, existsSync } from "fs";
 import { join } from "path";
-import { sanitizeAgentInput } from "./security";
+import { redactUnknown, sanitizeAgentInput } from "./security";
 import { TRACE_DIR } from "./trace-artifacts";
 
 export { TRACE_DIR };
@@ -33,6 +33,7 @@ type TraceType =
   | "chain.step.end"
   | "tool.call"
   | "llm.call"
+  | "spawn.decision"
   | "self_heal"
   | "verify"
   | "orch.decision"
@@ -110,7 +111,7 @@ function isTraceType(value: unknown): value is TraceType {
     "session.start", "session.end", "participant.start", "participant.activity",
     "participant.heartbeat", "participant.stale", "participant.end",
     "agent.start", "agent.end", "agent.error",
-    "chain.step.start", "chain.step.end", "tool.call", "llm.call",
+    "chain.step.start", "chain.step.end", "tool.call", "llm.call", "spawn.decision",
     "self_heal", "verify", "orch.decision", "log",
   ].includes(value);
 }
@@ -172,6 +173,8 @@ function extractTraceFields(entry: LogEntry, traceType: TraceType): Record<strin
 
     case "agent.start":
       if (entry.persona !== undefined) fields.persona = entry.persona;
+      if (entry.mae_agent_id !== undefined) fields.mae_agent_id = entry.mae_agent_id;
+      if (entry.mae_agent_name !== undefined) fields.mae_agent_name = entry.mae_agent_name;
       if (entry.model !== undefined) fields.model = entry.model;
       if (entry.team !== undefined) fields.team = entry.team;
       if (entry.role !== undefined) fields.role = entry.role;
@@ -225,6 +228,19 @@ function extractTraceFields(entry: LogEntry, traceType: TraceType): Record<strin
       if (entry.completion_tokens !== undefined) fields.completion_tokens = entry.completion_tokens;
       if (entry.duration_ms !== undefined) fields.duration_ms = entry.duration_ms;
       if (entry.cost !== undefined) fields.cost = entry.cost;
+      break;
+
+    case "spawn.decision":
+      if (entry.need_worker !== undefined) fields.need_worker = entry.need_worker;
+      if (entry.worker_name !== undefined) fields.worker_name = entry.worker_name;
+      if (entry.spawn_type !== undefined) fields.spawn_type = entry.spawn_type;
+      if (entry.reason !== undefined) fields.reason = sanitizeAgentInput(String(entry.reason)).slice(0, 500);
+      if (entry.why_lead_cannot_do_it !== undefined) fields.why_lead_cannot_do_it = sanitizeAgentInput(String(entry.why_lead_cannot_do_it)).slice(0, 500);
+      if (entry.constraints !== undefined) fields.constraints = redactUnknown(entry.constraints);
+      if (entry.bus_policy !== undefined) fields.bus_policy = entry.bus_policy;
+      if (entry.expected_output_schema !== undefined) fields.expected_output_schema = sanitizeAgentInput(String(entry.expected_output_schema)).slice(0, 500);
+      if (entry.timeout_seconds !== undefined) fields.timeout_seconds = entry.timeout_seconds;
+      if (entry.validation !== undefined) fields.validation = entry.validation;
       break;
 
     case "self_heal":

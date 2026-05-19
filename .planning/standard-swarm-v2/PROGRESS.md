@@ -4,11 +4,11 @@ Canonical PRD: `../standard-swarm-v2-prd-workflow.md`
 
 ## Current status
 
-**Phase 3 implementation complete on `pi-phase3`.** Branch was created from merged Phase 1+2 main (`6015e5a`). Deterministic certification validator implemented with 35 targeted tests, CLI command, and bash harness integration.
+**Phase 4 implementation started on `codex-phase4`.** Branch/worktree created from merged Phase 3 main (`5dc6c58`). Structured spawn decisions are implemented for strict mode with targeted parser, worker execution, and validator tests passing.
 
 ## Current phase
 
-Phase 3 deterministic validator — implementation complete, pending PR and review.
+Phase 4 structured spawn decisions — implementation in progress.
 
 ## Scope reminder
 
@@ -105,11 +105,11 @@ Known historical risks:
 
 ### Phase 4 — Structured spawn decisions (#340)
 
-- [ ] `SPAWN_DECISION` schema defined
-- [ ] Strict-mode worker spawn gate implemented
-- [ ] Worker prompts generated from spawn decisions
-- [ ] Validator checks spawn policy
-- [ ] Tests pass
+- [x] `SPAWN_DECISION` schema defined
+- [x] Strict-mode worker spawn gate implemented
+- [x] Worker prompts generated from spawn decisions
+- [x] Validator checks spawn policy
+- [x] Targeted tests pass
 
 ### Phase 5 — Web/CLI steer participants (#338)
 
@@ -240,9 +240,18 @@ Branch: `pi-phase3` from merged Phase 1+2 main (`6015e5a`).
 | `bun test` | pass | 603 pass, 1 skip, 0 fail |
 | `git diff --check` | pass | No whitespace errors |
 
+## Phase 4 targeted validation snapshot
+
+Branch: `codex-phase4` from merged Phase 3 main (`5dc6c58`).
+
+| Command | Result | Evidence |
+|---|---|---|
+| `bun test engine/spawn-decision.test.ts engine/team-execution.test.ts engine/certification-validator.test.ts` | pass | 68 pass, 0 fail; schema parsing, strict worker spawn rejection, decision-derived worker prompts, validator strict-spawn checks |
+| `cd engine && bunx tsc --noEmit` | pass | Typecheck clean |
+
 ## Open blockers
 
-None currently for Phase 3 implementation. Focused re-review of final consolidation still required before updating PR #356 as ready.
+None currently for the Phase 4 targeted implementation. Full local bundle and echo smoke still required before phase completion.
 
 ## Open risks
 

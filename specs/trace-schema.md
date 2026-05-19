@@ -76,6 +76,36 @@ Heartbeat volume is intentionally bounded: MAE emits heartbeats on lifecycle/cos
 {"ts":"...","type":"agent.end","id":"...","parent_id":"step-2","session_id":"...","agent_id":"pi-frontend-dev","grade":"VERIFIED|PARTIAL|FAILED","output_hash":"...","output_artifact":"session-id/artifacts/agent-output-abc123.txt","output_preview":"First 500 chars...","duration_ms":45000,"cost":0.45,"tokens":{"prompt":8000,"completion":3000,"cache_read":5000}}
 ```
 
+### Structured Spawn Decisions
+
+Phase 4 requires worker creation in strict Standard Swarm v2 mode to be preceded by a machine-readable `SPAWN_DECISION`. The dashboard event type is `spawn_decision`; the JSONL trace type is `spawn.decision`. The validator treats LLM prose about delegation as non-authoritative; strict mode only trusts a valid decision event that appears before the matching worker spawn.
+
+```jsonl
+{"ts":"...","type":"spawn.decision","id":"...","parent_id":"pi-security-lead","session_id":"...","agent_id":"security-reviewer","need_worker":true,"worker_name":"Security Reviewer","spawn_type":"worker","reason":"Focused auth boundary review is required","why_lead_cannot_do_it":"Independent security evidence is required","constraints":{"allowed_paths":["engine/security.ts"],"allowed_tools":["read","rg"],"forbidden_paths":[".env","node_modules"]},"bus_policy":"isolated","expected_output_schema":"REVIEW_REPORT: Security","timeout_seconds":600,"validation":{"valid":true,"errors":[]}}
+```
+
+Spawn decision fields:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `need_worker` | boolean | prompt contract | `false` lets a lead explicitly keep work lead-owned; traced worker decisions imply `true` |
+| `worker_name` | string | strict worker spawn | Exact worker/member name the decision authorizes |
+| `spawn_type` | string | yes | `worker` or `sr` |
+| `reason` | string | yes | Specific reason the specialist is needed |
+| `why_lead_cannot_do_it` | string | yes | Why the lead should not complete the work directly |
+| `constraints.allowed_paths` | string[] | yes | Paths/globs the worker may inspect or modify according to mode |
+| `constraints.allowed_tools` | string[] | yes | Tool names allowed for the worker assignment |
+| `constraints.forbidden_paths` | string[] | yes | Explicitly forbidden paths/globs |
+| `bus_policy` | string | yes | `isolated` for v2; `main_bus` is rejected until v2.1 sub-bus policy exists |
+| `expected_output_schema` | string | yes | Required worker final response schema |
+| `timeout_seconds` | number | yes | Positive per-worker timeout budget |
+
+Compatibility aliases accepted at parse/validation boundaries: `allowed_read_paths` and `allowed_write_paths` are folded into `constraints.allowed_paths`, `expected_output` is folded into `expected_output_schema`, and legacy nested dashboard payloads under `data.decision` are accepted. Runtime emission remains the canonical flat event shape above.
+
+Runtime strict mode uses valid decisions as the authorized worker roster. It rejects unknown workers, duplicate decisions, unsafe path constraints, unavailable tools, and `main_bus` before worker resources are created. The worker delegate receives the decision-derived prompt, `allowed_tools` is applied to the effective tool list, and `allowed_paths` becomes the effective worker domain scope. Retry workers and Sr. recovery agents emit derived decisions before their spawn events.
+
+Adapter-level traces may use adapter-local ids such as `pi-backend-engineer` or `echo-backend-engineer`; when available, `agent.start` includes `mae_agent_id` and `mae_agent_name` so validators can bind the adapter event back to the canonical MAE `spawn.decision` event.
+
 ### Tool Calls — Behavioral Fingerprint
 
 ```jsonl

@@ -18,9 +18,11 @@ Use the planning docs as the default basis for implementation decisions:
 
 - Read the relevant PRD/task/validation docs before changing code.
 - Keep docs updated as implementation changes scope, behavior, or acceptance criteria.
+- Update repo READMEs, `docs/`, `specs/`, and nearby module docs when commands, schemas, traces, config, validation, dashboards, or operator expectations change.
 - Do not rethink or rewrite working parts of MAE without evidence.
 - Any deviation from the docs requires a `DECISIONS.md` entry before or in the same commit as the code change.
 - If code reality contradicts the docs, inspect the code, update the docs with the discovered fact, and then proceed.
+- Do not mark a task or phase complete while documentation is stale or incomplete.
 
 ## Regression rule
 

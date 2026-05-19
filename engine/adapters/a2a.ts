@@ -201,6 +201,8 @@ export class A2AAdapter implements PlatformAdapter {
       trace_type: "agent.start",
       session_id: sessionId,
       agent_id: agentId,
+      mae_agent_id: opts.maeAgentId,
+      mae_agent_name: opts.maeAgentName,
       persona: opts.persona.name,
       team: opts.teamName,
       model: opts.model,

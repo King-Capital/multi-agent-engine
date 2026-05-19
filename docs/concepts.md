@@ -98,11 +98,36 @@ Every team has:
 1. The chain runner activates a team for a step
 2. The lead receives the task and the context from previous steps
 3. By default, the lead briefs workers with specific assignments
-4. Workers execute in parallel within their domain constraints
-5. The lead reviews worker output and produces a synthesized result
-6. The chain runner checks till_done criteria
+4. In Standard Swarm v2 strict mode, every worker must have a valid `SPAWN_DECISION`
+5. Workers execute in parallel within their domain constraints
+6. The lead reviews worker output and produces a synthesized result
+7. The chain runner checks till_done criteria
 
 Some review chains can set `lead_only: true` on a team step. In lead-only mode, MAE spawns only the team lead; the lead performs the review/work directly and no team members are spawned. Use this for bounded review swarms where the desired shape is one lead per perspective instead of full squads.
+
+### Structured Spawn Decisions
+
+A `SPAWN_DECISION` makes worker creation explicit and auditable. In strict mode, MAE spawns only configured team members with a valid decision for that exact worker; unknown workers, duplicate decisions, invalid constraints, or missing decisions fail before worker resources are created. Strict mode can be enabled per chain step with `strict_spawn: true` or globally with the Phase 4 strict/certification environment flags. The decision is emitted before worktree creation and before `agent_spawn` as a `spawn_decision` dashboard event and a `spawn.decision` JSONL trace event so validators and dashboard tooling can reason about why the worker exists. Legacy parser aliases are accepted at boundaries, but the canonical runtime contract is the flat Phase 4 schema.
+
+The decision constraints are enforced on execution. `allowed_tools` is checked against the worker's effective tools and applied to delegate options. `allowed_paths` becomes the worker's effective read scope and, for non-review steps, write/update scope. Absolute paths, traversal paths, broad wildcard-only scopes, and `forbidden_paths` already covered by allowed scopes are rejected in strict execution.
+
+Required decision data:
+
+- `need_worker`
+- `worker_name`
+- `spawn_type`
+- `reason`
+- `why_lead_cannot_do_it`
+- `constraints.allowed_paths`
+- `constraints.allowed_tools`
+- `constraints.forbidden_paths`
+- `bus_policy: isolated`
+- `expected_output_schema`
+- `timeout_seconds`
+
+`bus_policy: main_bus` is intentionally rejected in v2 strict mode until the v2.1 sub-bus design exists.
+
+Retry workers and Sr. recovery agents also emit strict spawn decisions before their `agent_spawn` events. Adapter-level `agent.start` traces include the canonical `mae_agent_id` so deterministic validation can bind Pi/Echo/A2A local agent ids back to the MAE worker authorization event.
 
 ### Domain Locking
 

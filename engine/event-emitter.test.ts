@@ -107,6 +107,38 @@ describe("EventEmitter", () => {
       expect(traceBody).not.toContain("trace-token");
     });
 
+    test("emits structured spawn decision events", async () => {
+      const emitter = new EventEmitter("http://test:8400");
+      await emitter.spawnDecision("s1", "worker-1", "lead-1", {
+        need_worker: true,
+        worker_name: "Security Auditor",
+        spawn_type: "worker",
+        reason: "Focused auth boundary review is required.",
+        why_lead_cannot_do_it: "Independent security evidence is required.",
+        constraints: {
+          allowed_paths: ["engine/security.ts"],
+          allowed_tools: ["read", "rg"],
+          forbidden_paths: [".env"],
+        },
+        bus_policy: "isolated",
+        expected_output_schema: "REVIEW_REPORT: Security",
+        timeout_seconds: 600,
+      }, { valid: true, errors: [] });
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      const body = fetchMock.calls
+        .filter((c) => c.url.includes("/api/events"))
+        .map((c) => JSON.parse(c.init.body as string))
+        .find((event: { event_type?: string }) => event.event_type === "spawn_decision");
+      expect(body).toBeDefined();
+      expect(body.agent_id).toBe("worker-1");
+      expect(body.parent_id).toBe("lead-1");
+      expect(body.data.worker_name).toBe("Security Auditor");
+      expect(body.data.constraints.allowed_tools).toEqual(["read", "rg"]);
+      expect(body.data.validation.valid).toBe(true);
+    });
+
     test("assigns monotonic sequence numbers", async () => {
       const emitter = new EventEmitter("http://test:8400");
       const bodies: unknown[] = [];

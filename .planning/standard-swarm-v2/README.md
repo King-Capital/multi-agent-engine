@@ -21,6 +21,10 @@ Files:
 - `VALIDATION.md` — acceptance/verification matrix
 - `DECISIONS.md` — implementation decision log template
 
+Documentation rule:
+
+Docs are part of the deliverable for every phase. Keep this packet, repo READMEs, `docs/`, and `specs/` aligned with code changes as they happen. A phase is not complete if behavior, commands, schemas, validation evidence, or operator expectations changed without matching documentation updates.
+
 Scope boundary:
 
 Standard Swarm v2 implementation scope is PRD Phases 1-6 only:

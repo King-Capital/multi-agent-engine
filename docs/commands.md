@@ -368,6 +368,42 @@ When the first argument is not a configured chain name, MAE treats the arguments
 
 ---
 
+## validate-cert
+
+Validate certification evidence from an existing trace file. This is deterministic: it checks trace events and artifacts and emits a machine-readable `VALIDATION_CONTRACT`; LLM commentary is not authoritative.
+
+**Usage:**
+
+```bash
+mae validate-cert <trace-file> [options]
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--trace-dir <dir>` | Trace/artifacts directory, defaults to the trace file parent |
+| `--work-dir <dir>` | Certification fixture workdir, defaults to the current directory |
+| `--repo-root <dir>` | Repository root used for source-read checks |
+| `--expected <fixture>` | Expected fixture: `clean`, `seeded`, or `failing` |
+| `--live-pi` | Enable live Pi checks such as worker-spawn and repo-source-read enforcement |
+| `--strict-spawn` | Require every worker spawn to have valid `SPAWN_DECISION` evidence |
+| `--json` | Emit the validation contract as JSON |
+
+**Examples:**
+
+```bash
+mae validate-cert ~/.mae/traces/abc123.jsonl
+mae validate-cert ./trace.jsonl --expected clean --live-pi
+mae validate-cert ./trace.jsonl --strict-spawn --json
+```
+
+Strict spawn validation is part of Standard Swarm v2 Phase 4. A valid worker spawn must have a prior `spawn_decision` dashboard event, backed by a `spawn.decision` JSONL trace entry, with scoped paths, allowed tools, forbidden paths, isolated bus policy, expected output schema, and timeout. Runtime strict mode can also be enabled from chain config with `strict_spawn: true`.
+
+In strict execution, the decision is the authorized worker roster: MAE spawns only configured team members with valid decisions, applies `allowed_tools` and `allowed_paths` to the delegate options, rejects broad or out-of-repo path constraints, rejects forbidden paths already covered by allowed scopes, and emits decisions before worktree creation and before `agent_spawn`. Retry workers and Sr. recovery agents emit derived decisions before their spawn events. Adapter `agent.start` traces include `mae_agent_id` so `validate-cert --strict-spawn` can bind Pi/Echo/A2A local ids back to the canonical worker decision. The parser accepts legacy aliases such as `allowed_read_paths`, `allowed_write_paths`, and `expected_output`, but canonical runtime output uses `allowed_paths` and `expected_output_schema`.
+
+---
+
 ## golden
 
 Manage golden traces -- verified-good (or verified-bad) session runs used as baselines for regression testing.

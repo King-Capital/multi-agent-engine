@@ -150,6 +150,7 @@ export interface ParallelTeamStep {
   team: string;
   read_only?: boolean;
   lead_only?: boolean;
+  strict_spawn?: boolean;
   tools_override?: string[];
   system_prompt_append?: string;
   till_done?: (string | { text: string; type: TillDoneVerifyType; verify?: string })[];
@@ -167,6 +168,7 @@ export interface ChainStep {
   parallel?: ParallelTeamStep[];
   read_only?: boolean;
   lead_only?: boolean;
+  strict_spawn?: boolean;
   deterministic?: {
     command: string;
     on_failure?: "loop" | "fail" | "continue";
@@ -350,6 +352,8 @@ export interface DelegateOptions {
   domain: DomainConfig;
   workingDir: string;
   sessionDir: string;
+  maeAgentId?: string;
+  maeAgentName?: string;
   parentId?: string;
   teamName: string;
   teamColor: string;

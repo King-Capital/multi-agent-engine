@@ -27,6 +27,8 @@ export class EchoAdapter implements PlatformAdapter {
       trace_type: "agent.start",
       session_id: sessionId,
       agent_id: agentId,
+      mae_agent_id: opts.maeAgentId,
+      mae_agent_name: opts.maeAgentName,
       agent: opts.persona.name,
       persona: opts.persona.name,
       model: opts.model,

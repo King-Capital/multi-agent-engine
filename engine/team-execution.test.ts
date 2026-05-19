@@ -105,6 +105,7 @@ function makeStubEmitter(): EventEmitter {
     sessionStart: noop,
     agentSpawn: noop,
     agentDone: noop,
+    spawnDecision: noop,
     message: noop,
     toolCall: noop,
     costUpdate: noop,
@@ -132,6 +133,9 @@ function makeRecordingEmitter(calls: Array<{ method: string; agentId?: string; r
     ...makeStubEmitter(),
     agentSpawn: async (_sessionId: string, agentId: string, _parentId: string, _name: string, role: string, _model: string, _teamName: string, _teamColor: string, kind?: string, capabilities?: { canSpawnWorkers?: boolean; readScopeCount?: number }) => {
       calls.push({ method: "agentSpawn", agentId, role, kind, capabilities });
+    },
+    spawnDecision: async (_sessionId: string, agentId: string) => {
+      calls.push({ method: "spawnDecision", agentId });
     },
     agentDone: async (_sessionId: string, agentId: string) => {
       calls.push({ method: "agentDone", agentId });
@@ -191,6 +195,7 @@ describe("buildParallelTeamStep", () => {
       till_done: ["Every squad reports evidence."],
       max_worker_retries: 2,
       read_only: true,
+      strict_spawn: true,
     });
 
     const built = buildParallelTeamStep(step, step.parallel![0]!);
@@ -203,6 +208,7 @@ describe("buildParallelTeamStep", () => {
     expect(built.system_prompt_append).toContain("Act as the security SME lead.");
     expect(built.till_done).toEqual(["Every squad reports evidence."]);
     expect(built.max_worker_retries).toBe(2);
+    expect(built.strict_spawn).toBe(true);
   });
 
   test("inherits parent parallel settings when a squad does not override them", () => {
@@ -733,6 +739,145 @@ describe("delegateToLead", () => {
 });
 
 describe("runTeamStep participant lifecycle", () => {
+  test("strict spawn mode rejects workers without SPAWN_DECISION", async () => {
+    const previous = process.env.MAE_SPAWN_DECISION_STRICT;
+    process.env.MAE_SPAWN_DECISION_STRICT = "1";
+    try {
+      const adapter = makeMockAdapter({
+        delegate: async (opts) => makeResult(opts.persona.name, "lead", {
+          output: "### ASSIGNMENT: Backend Engineer\nDo backend work.",
+        }),
+      });
+      const session = makeSession({ workingDir: "/tmp" });
+
+      await expect(runTeamStep({
+        emitter: makeStubEmitter(),
+        messageSenders: new Map(),
+        trackActivity: () => {},
+        untrackActivity: () => {},
+        trackToolCall: () => {},
+        checkBudget: () => {},
+        getAdapter: () => adapter,
+      }, session, { team: "Engineering", read_only: true }, "Do the thing", "", "mock")).rejects.toThrow("Missing valid SPAWN_DECISION");
+    } finally {
+      if (previous === undefined) delete process.env.MAE_SPAWN_DECISION_STRICT;
+      else process.env.MAE_SPAWN_DECISION_STRICT = previous;
+    }
+  });
+
+  test("step strict_spawn rejects workers without env flag", async () => {
+    const adapter = makeMockAdapter({
+      delegate: async (opts) => makeResult(opts.persona.name, "lead", {
+        output: "### ASSIGNMENT: Backend Engineer\nDo backend work.",
+      }),
+    });
+    const session = makeSession({ workingDir: "/tmp" });
+
+    await expect(runTeamStep({
+      emitter: makeStubEmitter(),
+      messageSenders: new Map(),
+      trackActivity: () => {},
+      untrackActivity: () => {},
+      trackToolCall: () => {},
+      checkBudget: () => {},
+      getAdapter: () => adapter,
+    }, session, { team: "Engineering", read_only: true, strict_spawn: true }, "Do the thing", "", "mock")).rejects.toThrow("Missing valid SPAWN_DECISION");
+  });
+
+  test("strict spawn mode builds worker prompts from SPAWN_DECISION", async () => {
+    const previous = process.env.MAE_SPAWN_DECISION_STRICT;
+    process.env.MAE_SPAWN_DECISION_STRICT = "1";
+    const workerPrompts: string[] = [];
+    const workerTools: string[][] = [];
+    const workerReadScopes: string[][] = [];
+    const events: string[] = [];
+    try {
+      const decisionFor = (name: string) => `
+SPAWN_DECISION:
+need_worker: true
+worker_name: ${name}
+spawn_type: worker
+reason: ${name} needs a scoped review.
+why_lead_cannot_do_it: Independent specialist evidence is required.
+constraints:
+  allowed_paths: engine/team-execution.ts
+  allowed_tools: read
+  forbidden_paths: .env, node_modules
+bus_policy: isolated
+expected_output_schema: REVIEW_REPORT: ${name}
+timeout_seconds: 600
+END_SPAWN_DECISION`;
+      let delegateCalls = 0;
+      const adapter = makeMockAdapter({
+        delegate: async (opts) => {
+          delegateCalls += 1;
+          if (delegateCalls === 1) {
+            return makeResult(opts.persona.name, "lead", {
+              output: [
+                decisionFor("Backend Engineer"),
+                decisionFor("Frontend Engineer"),
+                decisionFor("Infrastructure Engineer"),
+                decisionFor("Antagonist"),
+              ].join("\n"),
+            });
+          }
+          if (opts.userPrompt.includes("For each worker, respond with this exact format:")) {
+            return makeResult(opts.persona.name, "review", {
+              output: [
+                "### REVIEW: Backend Engineer",
+                "GRADE: PASS",
+                "### REVIEW: Frontend Engineer",
+                "GRADE: PASS",
+                "### REVIEW: Infrastructure Engineer",
+                "GRADE: PASS",
+                "### REVIEW: Antagonist",
+                "GRADE: PASS",
+              ].join("\n"),
+            });
+          }
+          workerPrompts.push(opts.userPrompt);
+          workerTools.push(opts.tools);
+          workerReadScopes.push(opts.domain.read);
+          return makeResult(opts.persona.name, `mock-${opts.persona.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`);
+        },
+      });
+      const emitter = {
+        ...makeStubEmitter(),
+        agentSpawn: async (_sessionId: string, agentId: string) => {
+          events.push(`agent_spawn:${agentId}`);
+        },
+        spawnDecision: async () => {
+          events.push("spawn_decision");
+        },
+      } as unknown as EventEmitter;
+      const session = makeSession({ workingDir: "/tmp" });
+
+      const result = await runTeamStep({
+        emitter,
+        messageSenders: new Map(),
+        trackActivity: () => {},
+        untrackActivity: () => {},
+        trackToolCall: () => {},
+        checkBudget: () => {},
+        getAdapter: () => adapter,
+      }, session, { team: "Engineering", read_only: true }, "Do the thing", "", "mock");
+
+      expect(result.grade).toBe("VERIFIED");
+      expect(events.filter((event) => event === "spawn_decision")).toHaveLength(4);
+      expect(events.indexOf("spawn_decision")).toBeLessThan(events.findIndex((event) => event === "agent_spawn:Engineering-backend-engineer"));
+      expect(workerPrompts).toHaveLength(4);
+      expect(workerTools[0]).toEqual(["read"]);
+      expect(workerReadScopes[0]).toEqual(["engine/team-execution.ts"]);
+      expect(workerPrompts[0]).toContain("Your assignment from SPAWN_DECISION");
+      expect(workerPrompts[0]).toContain("Allowed tools: read");
+      expect(workerPrompts[0]).toContain("Forbidden paths: .env, node_modules");
+      expect(workerPrompts[0]).toContain("Expected output schema:\nREVIEW_REPORT: Backend Engineer");
+    } finally {
+      if (previous === undefined) delete process.env.MAE_SPAWN_DECISION_STRICT;
+      else process.env.MAE_SPAWN_DECISION_STRICT = previous;
+    }
+  });
+
   test("normal multi-worker teams emit lead completion", async () => {
     const calls: Array<{ method: string; agentId?: string; role?: string; kind?: string; capabilities?: { canSpawnWorkers?: boolean; readScopeCount?: number } }> = [];
     const untracked: string[] = [];

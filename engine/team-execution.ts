@@ -24,6 +24,7 @@ import type {
   ChainStep,
   ParallelTeamStep,
   TeamConfig,
+  TeamMember,
   PersonaConfig,
   GradeLevel,
   WorkerReview,
@@ -31,6 +32,16 @@ import type {
 import { buildStreamHandler, buildSendMessage } from "./stream-handler";
 import { buildWorkerSystemPromptAppend, isReviewOnlyStep, readOnlyTools } from "./review-mode";
 import { buildParticipantCapabilities } from "./participant-capabilities";
+import {
+  applySpawnDecisionConstraints,
+  buildSpawnDecisionInstructions,
+  buildWorkerPromptFromDecision,
+  findSpawnDecisionForWorker,
+  isSpawnDecisionStrictMode,
+  parseSpawnDecisions,
+  validateSpawnDecision,
+  validateSpawnDecisionForExecution,
+} from "./spawn-decision";
 import type { OrchestratorLoop } from "./orchestrator-loop";
 import type { ConcurrencyLimiter } from "./concurrency";
 
@@ -222,6 +233,7 @@ export async function prepareTeamStep(
   trackActivity(leadId, teamConfig.lead.name, "lead");
   const leadResolved = resolveModelForRole("lead", teamConfig.lead.model);
   const leadOnly = step.lead_only === true || (process.env.MAE_CERTIFICATION_MODE === "1" && step.read_only === true);
+  const strictSpawn = isSpawnDecisionStrictMode(step);
   const reviewOnly = isReviewOnlyStep(step);
   const leadTools = reviewOnly ? readOnlyTools(step.tools_override ?? leadPersona.tools) : step.tools_override ?? leadPersona.tools;
   const leadDomain = reviewOnly ? { ...leadPersona.domain, write: [], update: [] } : leadPersona.domain;
@@ -236,10 +248,13 @@ export async function prepareTeamStep(
   // Lead gets either the task directly (lead-only mode) or the task + team roster
   // to produce a briefing for workers.
   const members = teamConfig.members.map((m) => `- ${m.name}: ${m["consult-when"] ?? "general tasks"}`).join("\n");
-  const prefilledAssignments = leadOnly ? [] : teamConfig.members.map((m) => {
+  const prefilledAssignments = leadOnly || strictSpawn ? [] : teamConfig.members.map((m) => {
     const focus = m["consult-when"] ?? "general tasks";
     return `\n### ASSIGNMENT: ${m.name}\nFocus: ${focus}\nOne task only: [one narrow, concrete review task this worker can do very well]\nFiles: [specific target files/directories]\nExpected output: findings with file path, line number, severity (P0-P3), description, fix`;
   });
+  const spawnDecisionInstructions = leadOnly ? "" : buildSpawnDecisionInstructions(
+    teamConfig.members.map((m) => ({ name: m.name, consultWhen: m["consult-when"] })),
+  );
   const leadPrompt = [
     `Task: ${task}`,
     previousOutput ? `\nContext from previous step:\n${previousOutput}` : "",
@@ -248,9 +263,16 @@ export async function prepareTeamStep(
       : `\nYour team:\n${members}`,
     leadOnly ? `Return the requested report directly with concrete evidence.` : `\nYour ONLY job: produce worker assignments. Do NOT do the review yourself.`,
     leadOnly ? `If the task mentions CERTIFICATION_CONTRACT, do not emit it. CERTIFICATION_CONTRACT is synthesis-only. Your team output must follow the REVIEW_REPORT or SQUAD_REPORT schema requested by this step.` : "",
-    leadOnly ? "" : `Assign every worker exactly one narrow task. Do not give broad multi-part review blobs.`,
-    leadOnly ? "" : `Start all workers immediately by filling every assignment below; each worker owns its task until complete.`,
-    leadOnly ? `Scan the relevant files and run lightweight evidence commands as needed.` : `Scan the directory structure (ls, find) to identify target files, then fill in the assignments below.`,
+    leadOnly ? "" : strictSpawn
+      ? `Authorize only the workers that are needed by emitting valid SPAWN_DECISION blocks. Do not create assignment sections for workers you do not authorize.`
+      : `Assign every worker exactly one narrow task. Do not give broad multi-part review blobs.`,
+    leadOnly ? "" : spawnDecisionInstructions,
+    leadOnly ? "" : strictSpawn
+      ? `The valid SPAWN_DECISION blocks are the worker roster; each authorized worker owns its scoped task until complete.`
+      : `Start all workers immediately by filling every assignment below; each worker owns its task until complete.`,
+    leadOnly ? `Scan the relevant files and run lightweight evidence commands as needed.` : strictSpawn
+      ? `Scan the directory structure (ls, find) to identify target files, then emit only the needed SPAWN_DECISION blocks.`
+      : `Scan the directory structure (ls, find) to identify target files, then fill in the assignments below.`,
     leadOnly ? "" : `Keep it fast — 5 tool calls max. The workers will do the deep analysis.`,
     ...prefilledAssignments,
     step.till_done ? `\nTill done:\n${step.till_done.map((t) => `- [ ] ${typeof t === "string" ? t : t.text}`).join("\n")}` : "",
@@ -361,18 +383,62 @@ export async function executeWorkers(
   const reviewOnly = isReviewOnlyStep(step);
 
   assertSessionActive(session, "worker spawn");
-  const useWorktrees = !reviewOnly && teamConfig.members.length > 1 && await isGitRepo(session.workingDir);
   const workerWtIds: string[] = [];
   const workerAssignments = new Map<string, string>();
+  const spawnDecisions = parseSpawnDecisions(leadResult.output).filter((decision) => decision.need_worker);
+  const strictSpawnDecisions = isSpawnDecisionStrictMode(step);
+  let workerEntries: Array<{ member: TeamMember; decision?: typeof spawnDecisions[number] }> = teamConfig.members.map((member) => ({
+    member,
+    decision: findSpawnDecisionForWorker(spawnDecisions, member.name),
+  }));
+
+  if (strictSpawnDecisions) {
+    const authorized: Array<{ member: TeamMember; decision: typeof spawnDecisions[number] }> = [];
+    const seenWorkers = new Set<string>();
+    const errors: string[] = [];
+
+    for (const decision of spawnDecisions) {
+      const workerName = decision.worker_name ?? "";
+      const matchingMember = teamConfig.members.find((member) => workerKey(member.name) === workerKey(workerName));
+      if (!matchingMember) {
+        errors.push(`${workerName || "(unknown)"} is not a configured worker for ${teamConfig["team-name"]}`);
+        continue;
+      }
+      const key = workerKey(matchingMember.name);
+      if (seenWorkers.has(key)) {
+        errors.push(`${matchingMember.name} has duplicate SPAWN_DECISION blocks`);
+        continue;
+      }
+      seenWorkers.add(key);
+
+      const workerPersona = loadPersona(matchingMember.path);
+      const availableTools = reviewOnly ? readOnlyTools(workerPersona.tools) : workerPersona.tools;
+      const validation = validateSpawnDecisionForExecution(decision, availableTools);
+      if (!validation.valid) {
+        errors.push(`${matchingMember.name}: ${validation.errors.join(", ")}`);
+        continue;
+      }
+      authorized.push({ member: matchingMember, decision });
+    }
+
+    if (errors.length > 0) {
+      throw new Error(`Invalid SPAWN_DECISION: ${errors.join("; ")}`);
+    }
+    if (authorized.length === 0) {
+      throw new Error("Missing valid SPAWN_DECISION for worker spawn");
+    }
+    workerEntries = authorized;
+  }
+  const useWorktrees = !reviewOnly && workerEntries.length > 1 && await isGitRepo(session.workingDir);
 
   log.info("Lead briefed, spawning workers", {
     team: teamConfig["team-name"],
-    worker_count: teamConfig.members.length,
-    workers: teamConfig.members.map((m) => m.name),
+    worker_count: workerEntries.length,
+    workers: workerEntries.map(({ member }) => member.name),
     session_id: session.id,
   });
   await emitter.message(session.id, "orch-1", "Orchestrator", "user",
-    `${teamConfig["team-name"]} lead assigned ${teamConfig.members.length} workers: ${teamConfig.members.map((m) => m.name).join(", ")}.`);
+    `${teamConfig["team-name"]} lead assigned ${workerEntries.length} workers: ${workerEntries.map(({ member }) => member.name).join(", ")}.`);
 
   // Create per-team concurrency limiter if configured
   const { ConcurrencyLimiter: LimiterClass } = await import("./concurrency");
@@ -380,15 +446,27 @@ export async function executeWorkers(
     ? new LimiterClass(deps.teamLimiterMax)
     : null;
 
-  const workerPromises = teamConfig.members.map(async (member) => {
+  const workerPromises = workerEntries.map(async ({ member, decision: authorizedDecision }) => {
     const runWorker = async () => {
       assertSessionActive(session, "worker start");
       const workerPersona = loadPersona(member.path);
       const workerId = `${step.team}-${member.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
-
-      trackActivity(workerId, member.name, "worker");
+      const spawnDecision = authorizedDecision ?? findSpawnDecisionForWorker(spawnDecisions, member.name);
 
       let workerDir = session.workingDir;
+
+      const workerResolved = resolveModelForRole("worker", member.model);
+      const workerDomain = reviewOnly ? { ...workerPersona.domain, write: [], update: [] } : workerPersona.domain;
+      const workerTools = reviewOnly ? readOnlyTools(workerPersona.tools) : workerPersona.tools;
+      const constrained = strictSpawnDecisions && spawnDecision
+        ? applySpawnDecisionConstraints(workerTools, workerDomain, spawnDecision, reviewOnly)
+        : { tools: workerTools, domain: workerDomain };
+
+      if (spawnDecision) {
+        await emitter.spawnDecision(session.id, workerId, leadId, spawnDecision, validateSpawnDecision(spawnDecision));
+      }
+
+      trackActivity(workerId, member.name, "worker");
 
       if (useWorktrees) {
         const wtId = `${session.id.slice(0, 8)}-${workerId}`;
@@ -396,22 +474,20 @@ export async function executeWorkers(
         workerWtIds.push(wtId);
       }
 
-      const workerResolved = resolveModelForRole("worker", member.model);
-      const workerDomain = reviewOnly ? { ...workerPersona.domain, write: [], update: [] } : workerPersona.domain;
-      const workerTools = reviewOnly ? readOnlyTools(workerPersona.tools) : workerPersona.tools;
-
       await emitter.agentSpawn(session.id, workerId, leadId, member.name, "worker",
         workerResolved.model, teamConfig["team-name"], member.color ?? teamConfig["team-color"], undefined,
         buildParticipantCapabilities({
-          tools: workerTools, domain: workerDomain, model: workerResolved.model,
+          tools: constrained.tools, domain: constrained.domain, model: workerResolved.model,
         }));
 
       // Extract this worker's assignment from the lead brief, or give full brief
       const assignment = parseAssignment(leadResult.output, member.name);
-      const workerPrompt = assignment
+      const workerPrompt = spawnDecision
+        ? buildWorkerPromptFromDecision(spawnDecision, task)
+        : assignment
         ? `Your assignment from ${teamConfig.lead.name}:\n${assignment}\n\nOriginal task: ${task}`
         : `Brief from ${teamConfig.lead.name}:\n${leadResult.output}\n\nOriginal task: ${task}`;
-      workerAssignments.set(workerId, assignment ?? leadResult.output);
+      workerAssignments.set(workerId, spawnDecision ? workerPrompt : assignment ?? leadResult.output);
 
       // Emit the prompt being sent to the worker
       await emitter.message(session.id, workerId, teamConfig.lead.name, "user",
@@ -428,10 +504,12 @@ export async function executeWorkers(
         userPrompt: workerPrompt,
         model: workerResolved.model,
         thinking: workerResolved.thinking,
-        tools: workerTools,
-        domain: workerDomain,
+        tools: constrained.tools,
+        domain: constrained.domain,
         workingDir: workerDir,
         sessionDir: `data/sessions/${session.id}`,
+        maeAgentId: workerId,
+        maeAgentName: member.name,
         parentId: leadId,
         teamName: teamConfig["team-name"],
         teamColor: member.color ?? teamConfig["team-color"],
@@ -860,6 +938,7 @@ export function buildParallelTeamStep(step: ChainStep, teamStep: ParallelTeamSte
     team: teamStep.team,
     read_only: teamStep.read_only ?? step.read_only,
     lead_only: teamStep.lead_only ?? step.lead_only,
+    strict_spawn: teamStep.strict_spawn ?? step.strict_spawn,
     tools_override: teamStep.tools_override ?? step.tools_override,
     system_prompt_append: systemPromptAppend,
     till_done: teamStep.till_done ?? step.till_done,
