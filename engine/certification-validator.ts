@@ -83,6 +83,14 @@ interface TraceEvent {
 	expected_output_schema?: string;
 	expected_output?: string;
 	timeout_seconds?: number;
+	// Steer event flat fields (trace-recorder format)
+	sender?: string;
+	source?: string;
+	authority?: number;
+	intent?: string;
+	action?: string;
+	target?: string;
+	certification_impact?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -786,20 +794,23 @@ function isSteerEvent(evt: TraceEvent): boolean {
 
 function isSteerParticipant(evt: TraceEvent): boolean {
 	if (!isAgentStart(evt)) return false;
-	const kind = evt.data?.kind as string | undefined;
+	const kind = (evt.data?.kind ?? (evt as Record<string, unknown>).kind) as string | undefined;
 	return kind === "web-steer" || kind === "cli-steer";
 }
 
 function checkSteerEvents(events: TraceEvent[], interactiveCert: boolean): ValidationCheck {
 	const steerEvents = events.filter(isSteerEvent);
-	const steerParticipants = events.filter(isSteerParticipant);
 	const steerCount = steerEvents.length;
+
+	// Helper: read steer field from evt.data (dashboard format) or flat evt (trace-recorder format)
+	const steerField = (evt: TraceEvent, field: string): unknown =>
+		(evt.data as Record<string, unknown> | undefined)?.[field] ?? (evt as Record<string, unknown>)[field];
 
 	// Collect steer intents for evidence detail
 	const intents: string[] = steerEvents
 		.map((evt) => {
-			const intent = (evt.data?.intent as string) ?? "unknown";
-			const source = (evt.data?.source as string) ?? "unknown";
+			const intent = String(steerField(evt, "intent") ?? "unknown");
+			const source = String(steerField(evt, "source") ?? "unknown");
 			return `${source}:${intent}`;
 		});
 
@@ -811,16 +822,17 @@ function checkSteerEvents(events: TraceEvent[], interactiveCert: boolean): Valid
 	}
 
 	// Authority validation: all steer actions must use authority 90
-	const invalidAuthority = steerEvents.filter((evt) =>
-		Number(evt.data?.authority ?? 0) !== 90,
-	);
+	const invalidAuthority = steerEvents.filter((evt) => {
+		const auth = steerField(evt, "authority");
+		return typeof auth !== "number" || auth !== 90;
+	});
 	if (invalidAuthority.length > 0) {
 		issues.push(`${invalidAuthority.length} steer action(s) had non-90 authority`);
 	}
 
 	// Certification impact validation: all steer actions must declare impact
 	const missingImpact = steerEvents.filter((evt) => {
-		const impact = evt.data?.certification_impact as string | undefined;
+		const impact = steerField(evt, "certification_impact") as string | undefined;
 		return !impact || (impact !== "blocks_unattended" && impact !== "none");
 	});
 	if (missingImpact.length > 0) {
@@ -831,21 +843,26 @@ function checkSteerEvents(events: TraceEvent[], interactiveCert: boolean): Valid
 	// incomplete lifecycle evidence
 	if (interactiveCert && steerCount > 0) {
 		const steerStops = steerEvents.filter((evt) => {
-			const intent = (evt.data?.intent as string) ?? "";
-			const action = (evt.data?.action as string) ?? "";
+			const intent = String(steerField(evt, "intent") ?? "");
+			const action = String(steerField(evt, "action") ?? "");
 			return intent === "stop" || action === "stop";
 		});
 		if (steerStops.length > 0) {
 			const lastSteerStopIdx = Math.max(...steerStops.map((s) => events.indexOf(s)));
-			// Count only required lead ends, not orchestrator/synthesis/worker ends
-			const leadEnds = events.filter((evt) => {
-				if (!isAgentEnd(evt)) return false;
+			// Count unique required leads completed before the stop
+			const leadsCompletedBeforeStop = new Set<string>();
+			for (const evt of events) {
+				if (events.indexOf(evt) >= lastSteerStopIdx) break;
+				if (!isAgentEnd(evt)) continue;
 				const id = agentId(evt);
-				return REQUIRED_LEADS.some((req) => req.leadPattern.test(id) || teamName(evt) === req.team);
-			});
-			const leadEndsAfterStop = leadEnds.filter((e) => events.indexOf(e) > lastSteerStopIdx);
-			if (leadEndsAfterStop.length === 0 && leadEnds.length < REQUIRED_LEADS.length) {
-				issues.push("Steer stop prevented remaining leads from completing");
+				for (const req of REQUIRED_LEADS) {
+					if (req.leadPattern.test(id) || teamName(evt) === req.team) {
+						leadsCompletedBeforeStop.add(req.team);
+					}
+				}
+			}
+			if (leadsCompletedBeforeStop.size < REQUIRED_LEADS.length) {
+				issues.push(`Steer stop prevented remaining leads from completing (${leadsCompletedBeforeStop.size}/${REQUIRED_LEADS.length} completed before stop)`);
 			}
 		}
 	}

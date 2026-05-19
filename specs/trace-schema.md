@@ -133,8 +133,8 @@ Steer event fields:
 | `message_id` | string | no | Message dedup ID if available |
 
 Certification semantics:
-- **Unattended mode** (`--unattended`): Any `steer_action` event fails the `steer_events_valid` validator check. This proves the session completed without human intervention.
-- **Interactive mode** (default): Steer events are recorded and allowed, but all must have a valid `certification_impact` value. The validator reports steer count and intents.
+- **Unattended mode** (default): Any `steer_action` event fails the `steer_events_valid` validator check. This proves the session completed without human intervention.
+- **Interactive mode** (`--interactive-cert`): Steer events are recorded and allowed, but all must have valid `authority` (90) and `certification_impact` values. A steer stop that prevents remaining leads from completing still fails validation. The validator reports steer count and intents.
 
 Steer source inference: CLI TUI messages use `tui-` prefixed message IDs (`source: "cli"`). Dashboard web messages arrive via the SSE listener (`source: "web"`). Direct API calls without a recognized prefix use `source: "unknown"` or `source: "api"`.
 

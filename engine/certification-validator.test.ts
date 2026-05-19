@@ -1122,6 +1122,28 @@ describe("certification-validator", () => {
 			expect(check?.details).toContain("Steer stop prevented remaining leads from completing");
 		});
 
+		test("evidence-hiding not bypassed by duplicate lead end after stop", () => {
+			const sid = makeSessionId(111);
+			const synthRef = writeArtifact(sid, "synth.txt", validFailContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				// Only 2 unique leads complete before stop
+				{ type: "agent.end", session_id: sid, agent_id: "pi-correctness-lead", team: "Correctness Review" },
+				{ type: "agent.end", session_id: sid, agent_id: "pi-adversarial-lead", team: "Adversarial Review" },
+				steerActionEvent(sid, { intent: "stop" }),
+				// Duplicate/fake lead end after stop — should NOT bypass the check
+				{ type: "agent.end", session_id: sid, agent_id: "pi-correctness-lead", team: "Correctness Review" },
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "error" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "failing", interactiveCert: true }));
+			const check = findCheck(result, "interactive_steering_valid");
+			expect(check?.passed).toBe(false);
+			expect(check?.details).toContain("Steer stop prevented remaining leads from completing");
+			expect(check?.details).toContain("2/5");
+		});
+
 		test("interactive mode passes when steer stop does not hide evidence", () => {
 			const sid = makeSessionId(109);
 			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
@@ -1153,7 +1175,7 @@ describe("certification-validator", () => {
 					agent_id: "web-steer-1",
 					data: {
 						sender: "user", source: "web", authority: 90,
-						intent: "stop", target: "orchestrator", content: "!stop",
+						intent: "pause", target: "orchestrator", content: "!pause",
 						certification_impact: "blocks_unattended",
 					},
 				},
@@ -1172,7 +1194,57 @@ describe("certification-validator", () => {
 			// In interactive mode, the intent should be visible
 			const interactive = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
 			const iCheck = findCheck(interactive, "interactive_steering_valid");
-			expect(iCheck?.details).toContain("web:stop");
+			expect(iCheck?.details).toContain("web:pause");
+		});
+
+		test("reads flat fields from trace-recorder format (no data wrapper)", () => {
+			const sid = makeSessionId(112);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				// Flat fields — trace-recorder format, no data wrapper
+				{
+					type: "steer.action",
+					session_id: sid,
+					agent_id: "cli-steer-1",
+					sender: "user",
+					source: "cli",
+					authority: 90,
+					intent: "budget",
+					target: "orchestrator",
+					certification_impact: "blocks_unattended",
+				},
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			// Interactive mode: should read flat fields correctly
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			const check = findCheck(result, "interactive_steering_valid");
+			expect(check?.passed).toBe(true);
+			expect(check?.details).toContain("cli:budget");
+
+			// Unattended: should still detect flat steer events
+			const unattended = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean" }));
+			expect(unattended.steering_valid).toBe(false);
+		});
+
+		test("rejects string authority even if it coerces to 90", () => {
+			const sid = makeSessionId(113);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				steerActionEvent(sid, { authority: "90" }),
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			expect(result.steering_valid).toBe(false);
+			const check = findCheck(result, "interactive_steering_valid");
+			expect(check?.details).toContain("non-90 authority");
 		});
 	});
 });

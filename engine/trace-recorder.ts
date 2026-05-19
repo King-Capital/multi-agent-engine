@@ -247,11 +247,13 @@ function extractTraceFields(entry: LogEntry, traceType: TraceType): Record<strin
     case "steer.action":
       if (entry.participant_id !== undefined) fields.participant_id = entry.participant_id;
       if (entry.sender !== undefined) fields.sender = entry.sender;
+      if (entry.source !== undefined) fields.source = entry.source;
       if (entry.authority !== undefined) fields.authority = entry.authority;
       if (entry.intent !== undefined) fields.intent = entry.intent;
       if (entry.action !== undefined) fields.action = entry.action;
       if (entry.target !== undefined) fields.target = entry.target;
       if (entry.reason !== undefined) fields.reason = sanitizeAgentInput(String(entry.reason)).slice(0, 500);
+      if (entry.content !== undefined) fields.content = sanitizeAgentInput(String(entry.content)).slice(0, 500);
       if (entry.certification_impact !== undefined) fields.certification_impact = entry.certification_impact;
       if (entry.message_id !== undefined) fields.message_id = entry.message_id;
       break;
