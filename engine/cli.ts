@@ -22,6 +22,7 @@ import { handleGoldenCommand } from "./cli-commands-golden";
 import { handleLangfuseCommand, handleRalphCommand } from "./cli-commands-ralph";
 import { runHealthCheck, formatHealthReport } from "./health";
 import { buildChainValidationReport, formatChainValidationReport, resolveValidateChainInput } from "./chain-validator";
+import { validateCertificationEvidence, formatValidationContract, type ValidatorContext } from "./certification-validator";
 import * as p from "@clack/prompts";
 
 const args = process.argv.slice(2);
@@ -185,6 +186,7 @@ Commands:
   compare         Compare two session fingerprints
   replay          Re-run a past session goal and compare behavior
   validate-chain  Preview configured chain agents, teams, checks, and cost
+  validate-cert   Validate certification evidence from a trace file
   golden          Manage golden reference traces
 
 Examples:
@@ -1006,6 +1008,63 @@ This reads YAML/persona config only. It does not start adapters, burn model toke
       process.exit(1);
     }
     break;
+  }
+
+  case "validate-cert": {
+    if (subHelp) showSubHelp(`
+mae validate-cert — Validate certification evidence from a trace
+
+Usage:
+  mae validate-cert <trace-file> [options]
+
+Options:
+  --trace-dir <dir>     Trace/artifacts directory (default: parent of trace file)
+  --work-dir <dir>      Certification workdir (default: current dir)
+  --repo-root <dir>     Repository root (default: current dir)
+  --expected <fixture>  Expected fixture: clean, seeded, failing
+  --live-pi             Enable live Pi checks (worker spawn, repo source reads)
+  --json                Output as JSON
+
+Examples:
+  mae validate-cert ~/.mae/traces/abc123.jsonl
+  mae validate-cert ./trace.jsonl --expected clean --live-pi
+  mae validate-cert ./trace.jsonl --json
+
+The validator checks trace evidence deterministically (no LLM calls).
+It validates lifecycle completeness, scope integrity, contract consistency,
+and produces a VALIDATION_CONTRACT with pass/fail for each check.
+`);
+    const positional = args.slice(1).filter((a) => !a.startsWith("--") && args[args.indexOf(a) - 1] !== "--trace-dir" && args[args.indexOf(a) - 1] !== "--work-dir" && args[args.indexOf(a) - 1] !== "--repo-root" && args[args.indexOf(a) - 1] !== "--expected");
+    const traceFile = positional[0];
+    if (!traceFile) {
+      console.error("Usage: mae validate-cert <trace-file> [options]");
+      process.exit(1);
+    }
+    const resolvedTrace = resolve(traceFile);
+    if (!existsSync(resolvedTrace)) {
+      console.error(`Trace file not found: ${resolvedTrace}`);
+      process.exit(1);
+    }
+    const traceDirFlag = getFlag(args, "--trace-dir");
+    const workDirFlag = getFlag(args, "--work-dir");
+    const repoRootFlag = getFlag(args, "--repo-root");
+    const expectedFlag = getFlag(args, "--expected") as "clean" | "seeded" | "failing" | undefined;
+    const isLivePi = args.includes("--live-pi");
+    const validatorCtx: ValidatorContext = {
+      traceFile: resolvedTrace,
+      traceDir: traceDirFlag ? resolve(traceDirFlag) : join(resolvedTrace, ".."),
+      workDir: workDirFlag ? resolve(workDirFlag) : process.cwd(),
+      repoRoot: repoRootFlag ? resolve(repoRootFlag) : process.cwd(),
+      expectedFixture: expectedFlag,
+      isLivePi,
+    };
+    const contract = validateCertificationEvidence(validatorCtx);
+    if (args.includes("--json")) {
+      console.log(JSON.stringify(contract, null, 2));
+    } else {
+      console.log(formatValidationContract(contract));
+    }
+    process.exit(contract.validated ? 0 : 1);
   }
 
   case "traces": {
