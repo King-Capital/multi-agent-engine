@@ -487,11 +487,41 @@ MD
     grep -q 'session' "$trace_file" || fail "trace lacks session events"
   fi
 
+  # Phase 3: run deterministic TS validator on live Pi traces
+  if [[ "$adapter" == "pi" && -n "$trace_file" ]]; then
+    log "running deterministic validator on $trace_file"
+    local validator_args=("$root/engine/cli.ts" validate-cert "$trace_file" --trace-dir "$trace_dir" --work-dir "$workdir" --repo-root "$root" --live-pi)
+    # Run validator for each completed fixture
+    for candidate in clean seeded failing; do
+      if [[ -f "$workdir/$candidate.out" || -f "$workdir/$candidate.err" ]]; then
+        local candidate_session
+        candidate_session="$(extract_session_id "$workdir/$candidate.out" "$workdir/$candidate.err")"
+        if [[ -n "$candidate_session" ]]; then
+          local candidate_trace
+          candidate_trace="$(trace_file_for_session "$candidate_session")"
+          if [[ -f "$candidate_trace" ]]; then
+            log "validator: $candidate fixture (session $candidate_session)"
+            if ! bun "$root/engine/cli.ts" validate-cert "$candidate_trace" \
+                --trace-dir "$trace_dir" --work-dir "$workdir" --repo-root "$root" \
+                --expected "$candidate" --live-pi >/dev/null 2>&1; then
+              # Show the full output on failure for debugging
+              bun "$root/engine/cli.ts" validate-cert "$candidate_trace" \
+                --trace-dir "$trace_dir" --work-dir "$workdir" --repo-root "$root" \
+                --expected "$candidate" --live-pi >&2 || true
+              fail "deterministic validator failed for $candidate fixture; trace=$candidate_trace"
+            fi
+          fi
+        fi
+      fi
+    done
+    log "deterministic validator passed all fixtures"
+  fi
+
   certification_done=1
   if [[ "$adapter" == "echo" ]]; then
     log "CERTIFICATION PASS (smoke-only) adapter=$adapter trace=$trace_file"
   else
-    log "CERTIFICATION PASS adapter=$adapter trace=$trace_file"
+    log "CERTIFICATION PASS (validator-verified) adapter=$adapter trace=$trace_file"
   fi
 }
 
