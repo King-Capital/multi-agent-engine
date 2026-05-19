@@ -4,11 +4,11 @@ Canonical PRD: `../standard-swarm-v2-prd-workflow.md`
 
 ## Current status
 
-**Phase 5 implementation complete on `pi-opus-phase5`.** Branch/worktree created from merged Phase 4 main (`ec1e895`). Web/CLI steer participants, steer action tracing, and certification semantics are implemented with 14 new tests, cert harness passing, and echo smoke passing.
+**Phase 5 consolidated and swarm-reviewed on `pi-opus-phase5`.** Base implementation + cherry-picks from codex (trace recorder, STEER_AUTHORITY, validator hardening), claude (evidence-hiding detection), and gpt55 (dashboard Go SteerSource). All swarm findings (3 High, 2 Medium, 7 Low) addressed. 650 tests pass, 0 fail.
 
 ## Current phase
 
-Phase 5 web/CLI steer as high-authority participants — implementation complete, pending review.
+Phase 5 web/CLI steer as high-authority participants — consolidated, swarm-reviewed, all findings fixed. Ready for PR.
 
 ## Scope reminder
 
@@ -262,20 +262,36 @@ Branch: `codex-phase4` from merged Phase 3 main (`5dc6c58`).
 
 ## Phase 5 targeted validation snapshot
 
-Branch: `pi-opus-phase5` from merged Phase 4 main (`ec1e895`).
+Branch: `pi-opus-phase5` from merged Phase 4 main (`ec1e895`). Consolidated with cherry-picks + swarm review fixes.
 
 | Command | Result | Evidence |
 |---|---|---|
-| `bun test engine/certification-validator.test.ts engine/event-emitter.test.ts engine/steering.test.ts engine/integration.test.ts` | pass | 125 pass, 0 fail; steer validator checks (8), steer emitter events (4), steer classification (2), integration mock updates (4) |
 | `cd engine && bunx tsc --noEmit` | pass | Typecheck clean |
-| `bun test` | pass | 643 pass, 1 skip, 0 fail |
+| `bun test` | pass | 650 pass, 1 skip, 0 fail |
 | `scripts/certify-live-swarm-test` | pass | 40 cert harness regression checks including steer_events_valid |
-| `scripts/certify-live-swarm --only failing --dashboard-url ${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}` | pass | Echo smoke; certification passed |
+| `scripts/certify-live-swarm --only failing` | pass | Echo smoke PASS |
 | `git diff --check` | pass | No whitespace errors |
+
+### Swarm review findings addressed
+
+| Finding | Severity | Fix |
+|---|---|---|
+| F1: Trace recorder missing source/content extraction | High | Added source + content to steer.action extractTraceFields |
+| F2: Validator flat-vs-nested field mismatch | High | Added steerField() helper + flat TraceEvent fields |
+| F3: Evidence-hiding bypass via duplicate lead end | High | Uses unique-lead Set, not any-end-after-stop |
+| F4: Unused steerParticipants variable | Medium | Removed |
+| F5: Trace-schema doc says wrong default | Medium | Fixed to match --interactive-cert opt-in |
+| L1: Participant ID prefix inconsistency | Low | Uses kind-based prefix |
+| L2: Wasted classifySteerIntent call | Low | Moved below ! branch |
+| L3: Tests duplicate logic | Low | Extracted as exported functions |
+| L5: No try/finally in steerAction | Low | Added try/finally bracket |
+| L6: "api" SteerSource unreachable | Low | Added doc comment |
+| L7: "none" cert impact untested | Low | Added test |
+| L9: Dashboard SSE missing steer_action | Low | Added to SSE_EVENT_TYPES |
 
 ## Open blockers
 
-None for Phase 5. Implementation complete, pending cross-worktree review.
+None. Phase 5 is complete with zero deferred findings.
 
 ## Open risks
 

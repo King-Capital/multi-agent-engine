@@ -291,7 +291,7 @@ Cross-model pairs are configured in `configs/model-routing.yaml` to ensure build
 
 ### Certification Validation
 
-`mae validate-cert <trace-file>` deterministically checks certification trace/artifact evidence and emits a `VALIDATION_CONTRACT`. Use `--live-pi` for live Pi certification checks and `--strict-spawn` to require every worker spawn to have valid prior `SPAWN_DECISION` evidence. Runtime `strict_spawn: true` uses valid decisions as the worker roster and applies decision tool/path constraints to worker delegate options.
+`mae validate-cert <trace-file>` deterministically checks certification trace/artifact evidence and emits a `VALIDATION_CONTRACT`. Use `--live-pi` for live Pi certification checks, `--strict-spawn` to require every worker spawn to have valid prior `SPAWN_DECISION` evidence, and `--interactive-cert` to allow steer events (default is unattended/fail-closed — any web/CLI steer event fails validation). Runtime `strict_spawn: true` uses valid decisions as the worker roster and applies decision tool/path constraints to worker delegate options.
 | `just expertise <name>` | Show an agent's expertise |
 | `just rules` | Show damage-control rules |
 
