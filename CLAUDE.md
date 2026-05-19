@@ -11,6 +11,10 @@
 - **CLI:** Built via `bun build engine/cli.ts --target=bun --outfile=./agent`. Installed at `~/.local/bin/mae`.
 - **Observability:** Langfuse v3. Auto-connects when `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY` are set. Host configured via `LANGFUSE_HOST` env var.
 
+## Documentation Policy
+
+Documentation is a source of truth for this repo. Any code, config, command, trace schema, validation, dashboard, workflow, or operator-facing behavior change must update the relevant docs in the same branch. Check `README.md`, `docs/`, `specs/`, `.planning/`, and nearby module READMEs before calling work complete. If implementation reality differs from a planning doc, update the doc and record intentional deviations in the appropriate `DECISIONS.md` or progress log.
+
 ## Directory Structure
 
 ```

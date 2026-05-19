@@ -76,6 +76,30 @@ Heartbeat volume is intentionally bounded: MAE emits heartbeats on lifecycle/cos
 {"ts":"...","type":"agent.end","id":"...","parent_id":"step-2","session_id":"...","agent_id":"pi-frontend-dev","grade":"VERIFIED|PARTIAL|FAILED","output_hash":"...","output_artifact":"session-id/artifacts/agent-output-abc123.txt","output_preview":"First 500 chars...","duration_ms":45000,"cost":0.45,"tokens":{"prompt":8000,"completion":3000,"cache_read":5000}}
 ```
 
+### Structured Spawn Decisions
+
+Phase 4 requires worker creation in strict Standard Swarm v2 mode to be preceded by a machine-readable `SPAWN_DECISION` and traced as a `spawn_decision` event. The validator treats LLM prose about delegation as non-authoritative; strict mode only trusts this event plus the derived worker prompt.
+
+```jsonl
+{"ts":"...","type":"spawn_decision","id":"...","parent_id":"pi-security-lead","session_id":"...","agent_id":"security-reviewer","worker_name":"Security Reviewer","spawn_type":"worker","reason":"Focused auth boundary review is required","why_lead_cannot_do_it":"Independent security evidence is required","constraints":{"allowed_paths":["engine/security.ts"],"allowed_tools":["read","rg"],"forbidden_paths":[".env","node_modules"]},"bus_policy":"isolated","expected_output_schema":"REVIEW_REPORT: Security","timeout_seconds":600}
+```
+
+Spawn decision fields:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `need_worker` | boolean | prompt contract | `false` lets a lead explicitly keep work lead-owned; traced worker decisions imply `true` |
+| `worker_name` | string | strict worker spawn | Exact worker/member name the decision authorizes |
+| `spawn_type` | string | yes | `worker` or `sr` |
+| `reason` | string | yes | Specific reason the specialist is needed |
+| `why_lead_cannot_do_it` | string | yes | Why the lead should not complete the work directly |
+| `constraints.allowed_paths` | string[] | yes | Paths/globs the worker may inspect or modify according to mode |
+| `constraints.allowed_tools` | string[] | yes | Tool names allowed for the worker assignment |
+| `constraints.forbidden_paths` | string[] | yes | Explicitly forbidden paths/globs |
+| `bus_policy` | string | yes | `isolated` for v2; `main_bus` is rejected until v2.1 sub-bus policy exists |
+| `expected_output_schema` | string | yes | Required worker final response schema |
+| `timeout_seconds` | number | yes | Positive per-worker timeout budget |
+
 ### Tool Calls — Behavioral Fingerprint
 
 ```jsonl

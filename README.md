@@ -288,6 +288,10 @@ Cross-model pairs are configured in `configs/model-routing.yaml` to ensure build
 | `just chains` | Show available chains |
 | `just prompts` | Show available prompts |
 | `just persona <name>` | Show an agent's persona |
+
+### Certification Validation
+
+`mae validate-cert <trace-file>` deterministically checks certification trace/artifact evidence and emits a `VALIDATION_CONTRACT`. Use `--live-pi` for live Pi certification checks and `--strict-spawn` to require every worker spawn to have a valid traced `SPAWN_DECISION`.
 | `just expertise <name>` | Show an agent's expertise |
 | `just rules` | Show damage-control rules |
 

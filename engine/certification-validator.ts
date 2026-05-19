@@ -9,6 +9,7 @@
  */
 
 import { readFileSync, existsSync } from "node:fs";
+import { validateSpawnDecision, type SpawnDecision } from "./spawn-decision";
 
 // ---------------------------------------------------------------------------
 // VALIDATION_CONTRACT schema
@@ -50,6 +51,7 @@ interface TraceEvent {
 	args_preview?: string;
 	data?: {
 		agent_id?: string;
+		agent_name?: string;
 		agent_role?: string;
 		team_name?: string;
 		grade?: string;
@@ -57,6 +59,18 @@ interface TraceEvent {
 		participant_id?: string;
 		kind?: string;
 		status?: string;
+		worker_name?: string;
+		spawn_type?: string;
+		reason?: string;
+		why_lead_cannot_do_it?: string;
+		constraints?: {
+			allowed_paths?: string[];
+			allowed_tools?: string[];
+			forbidden_paths?: string[];
+		};
+		bus_policy?: string;
+		expected_output_schema?: string;
+		timeout_seconds?: number;
 		[key: string]: unknown;
 	};
 }
@@ -87,6 +101,7 @@ export interface ValidatorContext {
 	repoRoot: string;
 	expectedFixture?: "clean" | "seeded" | "failing";
 	isLivePi: boolean;
+	strictSpawnDecisions?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +411,73 @@ function checkNoWorkerSpawns(events: TraceEvent[]): ValidationCheck {
 		details: spawns.length > 0
 			? spawns.map((e) => agentId(e)).join(", ")
 			: undefined,
+	};
+}
+
+function normalizeWorkerName(value: string): string {
+	return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function eventSpawnDecision(evt: TraceEvent): SpawnDecision | null {
+	if (evt.event_type !== "spawn_decision" || !evt.data) return null;
+	const data = evt.data;
+	return {
+		need_worker: true,
+		worker_name: typeof data.worker_name === "string" ? data.worker_name : undefined,
+		spawn_type: data.spawn_type === "sr" ? "sr" : "worker",
+		reason: typeof data.reason === "string" ? data.reason : "",
+		why_lead_cannot_do_it: typeof data.why_lead_cannot_do_it === "string" ? data.why_lead_cannot_do_it : "",
+		constraints: {
+			allowed_paths: Array.isArray(data.constraints?.allowed_paths) ? data.constraints.allowed_paths : [],
+			allowed_tools: Array.isArray(data.constraints?.allowed_tools) ? data.constraints.allowed_tools : [],
+			forbidden_paths: Array.isArray(data.constraints?.forbidden_paths) ? data.constraints.forbidden_paths : [],
+		},
+		bus_policy: data.bus_policy === "main_bus" ? "main_bus" : "isolated",
+		expected_output_schema: typeof data.expected_output_schema === "string" ? data.expected_output_schema : "",
+		timeout_seconds: typeof data.timeout_seconds === "number" ? data.timeout_seconds : 0,
+	};
+}
+
+function checkSpawnDecisions(events: TraceEvent[], strict: boolean): ValidationCheck {
+	const spawns = events.filter(isWorkerSpawn);
+	const decisionEvents = events
+		.map(eventSpawnDecision)
+		.filter((decision): decision is SpawnDecision => decision !== null);
+	const decisionsByWorker = new Map(
+		decisionEvents
+			.filter((decision) => decision.worker_name)
+			.map((decision) => [normalizeWorkerName(decision.worker_name!), decision]),
+	);
+	const failures: string[] = [];
+
+	for (const decision of decisionEvents) {
+		const validation = validateSpawnDecision(decision);
+		if (!validation.valid) {
+			failures.push(`${decision.worker_name ?? "(unknown)"} invalid: ${validation.errors.join(", ")}`);
+		}
+	}
+
+	if (strict) {
+		for (const spawn of spawns) {
+			const id = agentId(spawn);
+			const name = String(spawn.data?.agent_name ?? id);
+			const key = normalizeWorkerName(name);
+			const idKey = normalizeWorkerName(id);
+			if (!decisionsByWorker.has(key) && !decisionsByWorker.has(idKey)) {
+				failures.push(`${id} missing SPAWN_DECISION`);
+			}
+		}
+	}
+
+	return {
+		name: "spawn_decisions_valid",
+		passed: failures.length === 0,
+		evidence: failures.length === 0
+			? strict
+				? `${spawns.length} worker spawn(s) have valid SPAWN_DECISION evidence`
+				: `${decisionEvents.length} SPAWN_DECISION event(s) valid`
+			: `${failures.length} spawn decision failure(s)`,
+		details: failures.length > 0 ? failures.join("; ") : undefined,
 	};
 }
 
@@ -718,6 +800,11 @@ export function validateCertificationEvidence(ctx: ValidatorContext): Validation
 	checks.push(contractCheck);
 	if (!contractCheck.passed) blockingReasons.push(contractCheck.evidence);
 
+	// 13. Structured spawn decisions (Phase 4)
+	const spawnDecisions = checkSpawnDecisions(events, ctx.strictSpawnDecisions === true);
+	checks.push(spawnDecisions);
+	if (!spawnDecisions.passed) blockingReasons.push(spawnDecisions.evidence);
+
 	const allPassed = checks.every((c) => c.passed);
 
 	return {
@@ -728,7 +815,7 @@ export function validateCertificationEvidence(ctx: ValidatorContext): Validation
 		contract_matches_evidence: contractCheck.passed,
 		scope_valid: scopeDrift.passed && wrongFixture.passed,
 		steering_valid: true, // Phase 5 will implement steer checks
-		spawn_policy_valid: ctx.isLivePi ? checks.find((c) => c.name === "no_worker_spawns")?.passed ?? true : true,
+		spawn_policy_valid: (ctx.isLivePi ? checks.find((c) => c.name === "no_worker_spawns")?.passed ?? true : true) && spawnDecisions.passed,
 		blocking_reasons: blockingReasons,
 		checks,
 	};

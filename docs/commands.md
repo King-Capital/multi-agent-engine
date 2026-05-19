@@ -368,6 +368,40 @@ When the first argument is not a configured chain name, MAE treats the arguments
 
 ---
 
+## validate-cert
+
+Validate certification evidence from an existing trace file. This is deterministic: it checks trace events and artifacts and emits a machine-readable `VALIDATION_CONTRACT`; LLM commentary is not authoritative.
+
+**Usage:**
+
+```bash
+mae validate-cert <trace-file> [options]
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--trace-dir <dir>` | Trace/artifacts directory, defaults to the trace file parent |
+| `--work-dir <dir>` | Certification fixture workdir, defaults to the current directory |
+| `--repo-root <dir>` | Repository root used for source-read checks |
+| `--expected <fixture>` | Expected fixture: `clean`, `seeded`, or `failing` |
+| `--live-pi` | Enable live Pi checks such as worker-spawn and repo-source-read enforcement |
+| `--strict-spawn` | Require every worker spawn to have valid `SPAWN_DECISION` evidence |
+| `--json` | Emit the validation contract as JSON |
+
+**Examples:**
+
+```bash
+mae validate-cert ~/.mae/traces/abc123.jsonl
+mae validate-cert ./trace.jsonl --expected clean --live-pi
+mae validate-cert ./trace.jsonl --strict-spawn --json
+```
+
+Strict spawn validation is part of Standard Swarm v2 Phase 4. A valid worker spawn must have a prior `spawn_decision` event with scoped paths, allowed tools, forbidden paths, isolated bus policy, expected output schema, and timeout.
+
+---
+
 ## golden
 
 Manage golden traces -- verified-good (or verified-bad) session runs used as baselines for regression testing.

@@ -98,11 +98,32 @@ Every team has:
 1. The chain runner activates a team for a step
 2. The lead receives the task and the context from previous steps
 3. By default, the lead briefs workers with specific assignments
-4. Workers execute in parallel within their domain constraints
-5. The lead reviews worker output and produces a synthesized result
-6. The chain runner checks till_done criteria
+4. In Standard Swarm v2 strict mode, every worker must have a valid `SPAWN_DECISION`
+5. Workers execute in parallel within their domain constraints
+6. The lead reviews worker output and produces a synthesized result
+7. The chain runner checks till_done criteria
 
 Some review chains can set `lead_only: true` on a team step. In lead-only mode, MAE spawns only the team lead; the lead performs the review/work directly and no team members are spawned. Use this for bounded review swarms where the desired shape is one lead per perspective instead of full squads.
+
+### Structured Spawn Decisions
+
+A `SPAWN_DECISION` makes worker creation explicit and auditable. In strict mode, MAE rejects worker creation unless the lead provided a valid decision for that exact worker. The decision is also traced as a `spawn_decision` event so validators and dashboard tooling can reason about why the worker exists.
+
+Required decision data:
+
+- `need_worker`
+- `worker_name`
+- `spawn_type`
+- `reason`
+- `why_lead_cannot_do_it`
+- `constraints.allowed_paths`
+- `constraints.allowed_tools`
+- `constraints.forbidden_paths`
+- `bus_policy: isolated`
+- `expected_output_schema`
+- `timeout_seconds`
+
+`bus_policy: main_bus` is intentionally rejected in v2 strict mode until the v2.1 sub-bus design exists.
 
 ### Domain Locking
 

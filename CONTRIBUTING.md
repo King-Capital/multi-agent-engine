@@ -89,6 +89,20 @@ General rules:
 - Go: standard `gofmt`, no third-party linters required
 - YAML: 2-space indent, comments for non-obvious fields
 
+## Documentation Source Of Truth
+
+Docs are part of the implementation surface. Any change that affects behavior, commands, configuration, traces, validation, workflows, public APIs, or operator expectations must update the relevant documentation in the same branch.
+
+Before a PR is ready, check the likely doc surfaces:
+
+- `README.md` for user-facing capability or command changes
+- `docs/` for concepts, command references, configuration, observability, and operations
+- `specs/` for contracts and schemas
+- `.planning/` for active PRD, task, validation, progress, and decision records
+- package or module `README.md` files near changed code
+
+Do not mark work complete if the code and docs disagree. If the implementation intentionally deviates from a planning doc, record the reason in the relevant decision/progress document.
+
 ## Agent Development
 
 Create a new agent using the `just` command:

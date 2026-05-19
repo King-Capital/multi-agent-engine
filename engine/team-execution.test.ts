@@ -733,6 +733,116 @@ describe("delegateToLead", () => {
 });
 
 describe("runTeamStep participant lifecycle", () => {
+  test("strict spawn mode rejects workers without SPAWN_DECISION", async () => {
+    const previous = process.env.MAE_SPAWN_DECISION_STRICT;
+    process.env.MAE_SPAWN_DECISION_STRICT = "1";
+    try {
+      const adapter = makeMockAdapter({
+        delegate: async (opts) => makeResult(opts.persona.name, "lead", {
+          output: "### ASSIGNMENT: Backend Engineer\nDo backend work.",
+        }),
+      });
+      const session = makeSession({ workingDir: "/tmp" });
+
+      await expect(runTeamStep({
+        emitter: makeStubEmitter(),
+        messageSenders: new Map(),
+        trackActivity: () => {},
+        untrackActivity: () => {},
+        trackToolCall: () => {},
+        checkBudget: () => {},
+        getAdapter: () => adapter,
+      }, session, { team: "Engineering", read_only: true }, "Do the thing", "", "mock")).rejects.toThrow("Missing valid SPAWN_DECISION");
+    } finally {
+      if (previous === undefined) delete process.env.MAE_SPAWN_DECISION_STRICT;
+      else process.env.MAE_SPAWN_DECISION_STRICT = previous;
+    }
+  });
+
+  test("strict spawn mode builds worker prompts from SPAWN_DECISION", async () => {
+    const previous = process.env.MAE_SPAWN_DECISION_STRICT;
+    process.env.MAE_SPAWN_DECISION_STRICT = "1";
+    const workerPrompts: string[] = [];
+    const events: string[] = [];
+    try {
+      const decisionFor = (name: string) => `
+SPAWN_DECISION:
+need_worker: true
+worker_name: ${name}
+spawn_type: worker
+reason: ${name} needs a scoped review.
+why_lead_cannot_do_it: Independent specialist evidence is required.
+constraints:
+  allowed_paths: engine/team-execution.ts
+  allowed_tools: read, rg
+  forbidden_paths: .env, node_modules
+bus_policy: isolated
+expected_output_schema: REVIEW_REPORT: ${name}
+timeout_seconds: 600
+END_SPAWN_DECISION`;
+      let delegateCalls = 0;
+      const adapter = makeMockAdapter({
+        delegate: async (opts) => {
+          delegateCalls += 1;
+          if (delegateCalls === 1) {
+            return makeResult(opts.persona.name, "lead", {
+              output: [
+                decisionFor("Backend Engineer"),
+                decisionFor("Frontend Engineer"),
+                decisionFor("Infrastructure Engineer"),
+                decisionFor("Antagonist"),
+              ].join("\n"),
+            });
+          }
+          if (opts.userPrompt.includes("For each worker, respond with this exact format:")) {
+            return makeResult(opts.persona.name, "review", {
+              output: [
+                "### REVIEW: Backend Engineer",
+                "GRADE: PASS",
+                "### REVIEW: Frontend Engineer",
+                "GRADE: PASS",
+                "### REVIEW: Infrastructure Engineer",
+                "GRADE: PASS",
+                "### REVIEW: Antagonist",
+                "GRADE: PASS",
+              ].join("\n"),
+            });
+          }
+          workerPrompts.push(opts.userPrompt);
+          return makeResult(opts.persona.name, `mock-${opts.persona.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`);
+        },
+      });
+      const emitter = {
+        ...makeStubEmitter(),
+        emit: async (event: { event_type: string }) => {
+          events.push(event.event_type);
+        },
+      } as unknown as EventEmitter;
+      const session = makeSession({ workingDir: "/tmp" });
+
+      const result = await runTeamStep({
+        emitter,
+        messageSenders: new Map(),
+        trackActivity: () => {},
+        untrackActivity: () => {},
+        trackToolCall: () => {},
+        checkBudget: () => {},
+        getAdapter: () => adapter,
+      }, session, { team: "Engineering", read_only: true }, "Do the thing", "", "mock");
+
+      expect(result.grade).toBe("VERIFIED");
+      expect(events.filter((event) => event === "spawn_decision")).toHaveLength(4);
+      expect(workerPrompts).toHaveLength(4);
+      expect(workerPrompts[0]).toContain("Your assignment from SPAWN_DECISION");
+      expect(workerPrompts[0]).toContain("Allowed tools: read, rg");
+      expect(workerPrompts[0]).toContain("Forbidden paths: .env, node_modules");
+      expect(workerPrompts[0]).toContain("Expected output schema:\nREVIEW_REPORT: Backend Engineer");
+    } finally {
+      if (previous === undefined) delete process.env.MAE_SPAWN_DECISION_STRICT;
+      else process.env.MAE_SPAWN_DECISION_STRICT = previous;
+    }
+  });
+
   test("normal multi-worker teams emit lead completion", async () => {
     const calls: Array<{ method: string; agentId?: string; role?: string; kind?: string; capabilities?: { canSpawnWorkers?: boolean; readScopeCount?: number } }> = [];
     const untracked: string[] = [];

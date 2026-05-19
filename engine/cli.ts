@@ -1023,6 +1023,7 @@ Options:
   --repo-root <dir>     Repository root (default: current dir)
   --expected <fixture>  Expected fixture: clean, seeded, failing
   --live-pi             Enable live Pi checks (worker spawn, repo source reads)
+  --strict-spawn        Require every worker spawn to have valid SPAWN_DECISION evidence
   --json                Output as JSON
 
 Examples:
@@ -1050,6 +1051,7 @@ and produces a VALIDATION_CONTRACT with pass/fail for each check.
     const repoRootFlag = getFlag(args, "--repo-root");
     const expectedFlag = getFlag(args, "--expected") as "clean" | "seeded" | "failing" | undefined;
     const isLivePi = args.includes("--live-pi");
+    const strictSpawnDecisions = args.includes("--strict-spawn");
     const validatorCtx: ValidatorContext = {
       traceFile: resolvedTrace,
       traceDir: traceDirFlag ? resolve(traceDirFlag) : join(resolvedTrace, ".."),
@@ -1057,6 +1059,7 @@ and produces a VALIDATION_CONTRACT with pass/fail for each check.
       repoRoot: repoRootFlag ? resolve(repoRootFlag) : process.cwd(),
       expectedFixture: expectedFlag,
       isLivePi,
+      strictSpawnDecisions,
     };
     const contract = validateCertificationEvidence(validatorCtx);
     if (args.includes("--json")) {

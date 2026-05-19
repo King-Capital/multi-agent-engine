@@ -31,6 +31,14 @@ import type {
 import { buildStreamHandler, buildSendMessage } from "./stream-handler";
 import { buildWorkerSystemPromptAppend, isReviewOnlyStep, readOnlyTools } from "./review-mode";
 import { buildParticipantCapabilities } from "./participant-capabilities";
+import {
+  buildSpawnDecisionInstructions,
+  buildWorkerPromptFromDecision,
+  findSpawnDecisionForWorker,
+  isSpawnDecisionStrictMode,
+  parseSpawnDecisions,
+  validateSpawnDecision,
+} from "./spawn-decision";
 import type { OrchestratorLoop } from "./orchestrator-loop";
 import type { ConcurrencyLimiter } from "./concurrency";
 
@@ -240,6 +248,9 @@ export async function prepareTeamStep(
     const focus = m["consult-when"] ?? "general tasks";
     return `\n### ASSIGNMENT: ${m.name}\nFocus: ${focus}\nOne task only: [one narrow, concrete review task this worker can do very well]\nFiles: [specific target files/directories]\nExpected output: findings with file path, line number, severity (P0-P3), description, fix`;
   });
+  const spawnDecisionInstructions = leadOnly ? "" : buildSpawnDecisionInstructions(
+    teamConfig.members.map((m) => ({ name: m.name, consultWhen: m["consult-when"] })),
+  );
   const leadPrompt = [
     `Task: ${task}`,
     previousOutput ? `\nContext from previous step:\n${previousOutput}` : "",
@@ -249,6 +260,7 @@ export async function prepareTeamStep(
     leadOnly ? `Return the requested report directly with concrete evidence.` : `\nYour ONLY job: produce worker assignments. Do NOT do the review yourself.`,
     leadOnly ? `If the task mentions CERTIFICATION_CONTRACT, do not emit it. CERTIFICATION_CONTRACT is synthesis-only. Your team output must follow the REVIEW_REPORT or SQUAD_REPORT schema requested by this step.` : "",
     leadOnly ? "" : `Assign every worker exactly one narrow task. Do not give broad multi-part review blobs.`,
+    leadOnly ? "" : spawnDecisionInstructions,
     leadOnly ? "" : `Start all workers immediately by filling every assignment below; each worker owns its task until complete.`,
     leadOnly ? `Scan the relevant files and run lightweight evidence commands as needed.` : `Scan the directory structure (ls, find) to identify target files, then fill in the assignments below.`,
     leadOnly ? "" : `Keep it fast — 5 tool calls max. The workers will do the deep analysis.`,
@@ -364,6 +376,22 @@ export async function executeWorkers(
   const useWorktrees = !reviewOnly && teamConfig.members.length > 1 && await isGitRepo(session.workingDir);
   const workerWtIds: string[] = [];
   const workerAssignments = new Map<string, string>();
+  const spawnDecisions = parseSpawnDecisions(leadResult.output).filter((decision) => decision.need_worker);
+  const strictSpawnDecisions = isSpawnDecisionStrictMode();
+
+  if (strictSpawnDecisions) {
+    const invalid = spawnDecisions
+      .map((decision) => ({ decision, validation: validateSpawnDecision(decision) }))
+      .filter(({ validation }) => !validation.valid);
+    if (invalid.length > 0) {
+      throw new Error(`Invalid SPAWN_DECISION: ${invalid.map(({ decision, validation }) => `${decision.worker_name ?? "(unknown)"}: ${validation.errors.join(", ")}`).join("; ")}`);
+    }
+    for (const member of teamConfig.members) {
+      if (!findSpawnDecisionForWorker(spawnDecisions, member.name)) {
+        throw new Error(`Missing valid SPAWN_DECISION for worker ${member.name}`);
+      }
+    }
+  }
 
   log.info("Lead briefed, spawning workers", {
     team: teamConfig["team-name"],
@@ -406,12 +434,35 @@ export async function executeWorkers(
           tools: workerTools, domain: workerDomain, model: workerResolved.model,
         }));
 
+      const spawnDecision = findSpawnDecisionForWorker(spawnDecisions, member.name);
+      if (spawnDecision) {
+        await emitter.emit({
+          session_id: session.id,
+          agent_id: workerId,
+          parent_id: leadId,
+          event_type: "spawn_decision",
+          timestamp: new Date().toISOString(),
+          data: {
+            worker_name: member.name,
+            spawn_type: spawnDecision.spawn_type,
+            reason: spawnDecision.reason,
+            why_lead_cannot_do_it: spawnDecision.why_lead_cannot_do_it,
+            constraints: spawnDecision.constraints,
+            bus_policy: spawnDecision.bus_policy,
+            expected_output_schema: spawnDecision.expected_output_schema,
+            timeout_seconds: spawnDecision.timeout_seconds,
+          },
+        });
+      }
+
       // Extract this worker's assignment from the lead brief, or give full brief
       const assignment = parseAssignment(leadResult.output, member.name);
-      const workerPrompt = assignment
+      const workerPrompt = spawnDecision
+        ? buildWorkerPromptFromDecision(spawnDecision, task)
+        : assignment
         ? `Your assignment from ${teamConfig.lead.name}:\n${assignment}\n\nOriginal task: ${task}`
         : `Brief from ${teamConfig.lead.name}:\n${leadResult.output}\n\nOriginal task: ${task}`;
-      workerAssignments.set(workerId, assignment ?? leadResult.output);
+      workerAssignments.set(workerId, spawnDecision ? workerPrompt : assignment ?? leadResult.output);
 
       // Emit the prompt being sent to the worker
       await emitter.message(session.id, workerId, teamConfig.lead.name, "user",
