@@ -4,11 +4,11 @@ Canonical PRD: `../standard-swarm-v2-prd-workflow.md`
 
 ## Current status
 
-**Phase 4 implementation started on `codex-phase4`.** Branch/worktree created from merged Phase 3 main (`5dc6c58`). Structured spawn decisions are implemented for strict mode with targeted parser, worker execution, and validator tests passing.
+**Phase 5 implementation complete on `pi-opus-phase5`.** Branch/worktree created from merged Phase 4 main (`ec1e895`). Web/CLI steer participants, steer action tracing, and certification semantics are implemented with 14 new tests, cert harness passing, and echo smoke passing.
 
 ## Current phase
 
-Phase 4 structured spawn decisions — implementation in progress.
+Phase 5 web/CLI steer as high-authority participants — implementation complete, pending review.
 
 ## Scope reminder
 
@@ -113,13 +113,24 @@ Known historical risks:
 
 ### Phase 5 — Web/CLI steer participants (#338)
 
-- [ ] `web-steer` participant kind added
-- [ ] `cli-steer` participant kind added
-- [ ] Authority 90 default added
-- [ ] Steer events traced
-- [ ] Unattended vs interactive cert semantics implemented
-- [ ] Validator checks steer effects
-- [ ] Tests pass
+- [x] `web-steer` participant kind added (already in types.ts from Phase 2; now instrumented)
+- [x] `cli-steer` participant kind added (already in types.ts from Phase 2; now instrumented)
+- [x] Authority 90 default added
+- [x] SteerSource, SteerIntent, SteerEventData types defined
+- [x] EventEmitter.steerAction() emits transient participant lifecycle + steer_action event
+- [x] Orchestrator.inferSteerSource() classifies web vs CLI vs API
+- [x] Orchestrator.classifySteerIntent() maps messages to structured intents
+- [x] All steer commands and freeform messages traced with participant start/end bracket
+- [x] Ping remains diagnostic-only (no steer event)
+- [x] Unattended vs interactive cert semantics implemented (checkSteerEvents)
+- [x] Validator steering_valid field reflects actual evidence (not hardcoded true)
+- [x] --unattended CLI flag added for mae validate-cert
+- [x] Dashboard Go model adds EventSteerAction constant
+- [x] Trace schema docs updated with steer event section
+- [x] 14 targeted tests pass (8 validator + 4 emitter + 2 steering)
+- [x] Integration test mocks updated
+- [x] Echo cert smoke passes
+- [x] Cert harness (40 checks) passes
 
 ### Phase 6 — Dashboard agent pool (#332)
 
@@ -249,9 +260,22 @@ Branch: `codex-phase4` from merged Phase 3 main (`5dc6c58`).
 | `bun test engine/spawn-decision.test.ts engine/team-execution.test.ts engine/certification-validator.test.ts` | pass | 68 pass, 0 fail; schema parsing, strict worker spawn rejection, decision-derived worker prompts, validator strict-spawn checks |
 | `cd engine && bunx tsc --noEmit` | pass | Typecheck clean |
 
+## Phase 5 targeted validation snapshot
+
+Branch: `pi-opus-phase5` from merged Phase 4 main (`ec1e895`).
+
+| Command | Result | Evidence |
+|---|---|---|
+| `bun test engine/certification-validator.test.ts engine/event-emitter.test.ts engine/steering.test.ts engine/integration.test.ts` | pass | 125 pass, 0 fail; steer validator checks (8), steer emitter events (4), steer classification (2), integration mock updates (4) |
+| `cd engine && bunx tsc --noEmit` | pass | Typecheck clean |
+| `bun test` | pass | 643 pass, 1 skip, 0 fail |
+| `scripts/certify-live-swarm-test` | pass | 40 cert harness regression checks including steer_events_valid |
+| `scripts/certify-live-swarm --only failing --dashboard-url ${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}` | pass | Echo smoke; certification passed |
+| `git diff --check` | pass | No whitespace errors |
+
 ## Open blockers
 
-None currently for the Phase 4 targeted implementation. Full local bundle and echo smoke still required before phase completion.
+None for Phase 5. Implementation complete, pending cross-worktree review.
 
 ## Open risks
 
