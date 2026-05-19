@@ -1,64 +1,70 @@
 # Multi-Agent Engine — Current State
 
 ## What Works
-- **Release state:** `main` is at `v1.0.15`; PR #260 FOSS scrub was squash-merged (`dd0d5a4b`). All internal IPs scrubbed, git history clean of secrets.
-- **FOSS readiness:** Repo cleared for public visibility. Remaining Proxmox hostnames, agent persona names, and platform references reviewed and accepted.
-- **Installed hosts:** local wrapper and two remote hosts installed at `v1.0.4`; remote health is `HEALTHY`.
-- **Adapters:** `echo`, `pi`, and `a2a` available. A2A configured to MonkeyProof A2A endpoint.
-- **Langfuse:** Connected at `LANGFUSE_HOST` env var.
-- **Installer/update path:** `mae update` is atomic and symlink-chain aware.
-- **Stale session lifecycle:** stale sessions auto-close as `completed`.
-- **Dashboard deploy:** GitHub Actions deploys passing.
+- **Version:** v1.0.22 deployed to 10.71.20.72
+- **Phase 1 complete:** Lifecycle evidence gates — lead-only certification, degraded cert steps, canonical artifact selection, 36 harness regression tests. Live Pi 3-fixture certification PASS.
+- **Phase 2 complete:** Participant presence lifecycle — 5 event types (start/activity/heartbeat/stale/end), auto-emit from agentSpawn/agentDone/toolCall/costUpdate, coarse capability metadata, stale detection.
+- **Certification harness:** `scripts/certify-live-swarm` with lead-only mode (~$0.35/fixture), isolated trace dir, strict CERTIFICATION_CONTRACT validation, worker-spawn rejection, contract-leak detection.
+- **Multi-agent protocol:** Cross-Agent Convergence Review Protocol codified in `.planning/reviews/full-review/claude-consolidated-protocol.md`. Tested with 3 agents on Phases 1+2.
+- **Auto-version:** Workflow pushes version bumps directly to main + tags inline. No more intermediate PRs.
+- **Adapters:** echo, pi, a2a available. Pi adapter handles empty output as FAILED with findings.
+- **Dashboard:** React SPA deployed. Participant SSE events registered.
 
 ## What's Left
 
-### P0 — Before going public
-1. **Flip repo visibility to public** on GitHub.
+### P0 — Phase 3: Deterministic Validator
+1. `VALIDATION_CONTRACT` schema definition
+2. Deterministic evidence checks (lifecycle, scope, contract consistency)
+3. Validator wired into strict cert path
+4. `REVIEW_REPORT` vs `CERTIFICATION_CONTRACT` boundary validation
 
-### P1 — Post-public
-2. **Controlled real swarm smoke:** run a standard-swarm on a remote host and verify orchestrator events, steer, Langfuse cost, and dashboard terminal status.
-3. **Large-repo Pi behavior:** confirm nudge suppression and delegate timeout under real load.
+### P1 — Follow-up from Phase 2
+5. Wire `ParticipantTracker` into orchestrator (Phase 6 dependency)
+6. Map "scout" role in `participantKindForRole`
+7. Clean up dead `ParticipantEventData` type
+8. camelCase/snake_case consistency cleanup
 
-### P2 — Dashboard / Engine
-4. **Cost display consistency:** sidebar/session detail/summary alignment.
-5. **Installer smoke tests:** test `mae update` from installed and symlinked wrappers.
-6. **a2a.ts file length:** still above 750-line threshold.
+### P1 — From external review
+9. Close Ralph loop (#341) — wire applyMutation into runRalphLoop
+10. Cost tracking silent $0 (#342)
+11. Trace backup to TrueNAS (#343)
+12. Delete legacy templ files (#344)
+13. Inter-squad dispute resolution (#347/#351)
 
-## Version: v1.0.15
-## Recent PRs: #259, #260
+## Version: v1.0.22
+## Recent PRs: #354 (Phase 1), #358 (Phase 2)
+
+---
+
+**Last session:** 2026-05-18 -- Standard Swarm v2 Phase 1+2 (78E39BA8)
+**Done:** Phase 1 lifecycle gates (PR #354) | Phase 2 participant presence (PR #358) | 3-agent parallel protocol | external review → 8 issues | auto-version fix | v1.0.22
+**Decisions:** lead-only cert | Pi merge base | coarse capabilities | FEEDBACK→blocked status | auto-version direct push | multi-agent convergence protocol
+**Blockers:** none
+**Carry-forward:** Ralph loop closure #341 | cost tracking #342 | trace backup #343 | legacy templ #344 | inter-squad dispute #347
+**Next:** Phase 3 deterministic validator | scout role mapping | ParticipantEventData cleanup
+
+---
+
+**Last session:** 2026-05-18 -- Standard Swarm v2 PRD Review + Planning Skill (C0B45C18)
+**Done:** Multi-pass PRD review with 3 AI reviewers | certification foundation gap identified (#318-#321) | structured-goal-run skill installed
+**Decisions:** planning docs as source of truth | certification foundation issues are v2 prerequisites
+**Blockers:** none
 
 ---
 
 **Last session:** 2026-05-13 -- FOSS Prep Verification & Squash Merge (330A8926)
-**Done:** Full grep audit of PR #260 | IPs clean, git history clean, no secrets | Remaining infra/agent refs reviewed and accepted | PR #260 squash-merged to main as dd0d5a4b
-**Decisions:** Proxmox hostnames acceptable for public | Agent persona names are product identity | Deploy username = 'skippy' consistent with persona | Repo cleared for public visibility
+**Done:** Full grep audit of PR #260 | IPs clean, git history clean | PR #260 squash-merged as dd0d5a4b
+**Decisions:** Proxmox hostnames acceptable for public | Agent persona names are product identity
 **Blockers:** none
-**Carry-forward:** controlled real swarm smoke | large-repo Pi/nudge verification | cost display watch | stale-session issue cleanup
-**Next:** flip repo to public | consider FOSS announcement
 
 ---
 
 **Last session:** 2026-05-12 -- RC1 Release Hardening (AEDFB6E9)
-**Done:** PR #241 optional A2A/config/Pi timeout/nudge fixes | A2A configured on remote hosts | PR #242 atomic wrapper update with review swarm | PR #243 stale sessions done/completed | v1.0.4 deployed | remote hosts installed and verified
-**Decisions:** A2A optional unless configured | stale means completed, not error | atomic self-update only | remote health checks source real MAE env
-**Blockers:** none immediate
-**Carry-forward:** controlled real swarm smoke | large-repo Pi/nudge verification | cost display watch | installer smoke tests | issue cleanup
+**Done:** PR #241-243 fixes | A2A on remote hosts | v1.0.4 deployed | stale sessions auto-close
+**Decisions:** A2A optional | stale = completed | atomic self-update
 
 ---
 
-**Last session:** 2026-05-10 -- Design Specialist + Standard Swarm Squads + Engine Hardening (85743FF0)
-**Done:** #180 design specialist (persona, gallery, refs, CLI, chains) | standard swarm 5 squads x 7 agents | buildStreamHandler extraction | 46 new tests | orchestratorLoop to team-execution | IDLE_WARN_MS 180s | swarm reviews all CRITICAL/HIGH fixed | filed #187-192 | PR #193 merged
-**Decisions:** Bun.serve() gallery over Go | 5 squads over Red/Blue | leads stay running | 180s stall | metadata-only image refs
-**Blockers:** none
-
----
-
-**Last session:** 2026-05-10 -- Team Wizard + Expertise Authoring + Orchestrator Refactor (D77956BF)
-**Done:** #184 full implementation | 4 CLI commands | 4 templates | orchestrator split 844→297 | parallel retry fix | API token leak fix | SSRF protection | PR #186 merged v0.2.59
-**Decisions:** mae expert added beyond spec | raw fetch for CLI LLM calls | isInternalUrl to security.ts | two-round swarm before commit
-
----
-
-**Last session:** 2026-05-10 -- MAE Full Audit + Specialist Personas (F679C6EA)
-**Done:** PRs #169-179 merged | 9 specialist personas | full swarm audit 45/45 fixed | budget isolation | CC/Codex removed
-**Decisions:** Pi-only | Antagonist on all teams | hybrid nudge | never leave findings
+**Last session:** 2026-05-10 -- Design Specialist + Standard Swarm Squads (85743FF0)
+**Done:** #180 design specialist | standard swarm 5 squads | buildStreamHandler | 46 new tests | filed #187-192 | PR #193
+**Decisions:** Bun.serve() gallery | 5 squads over Red/Blue | 180s stall threshold
