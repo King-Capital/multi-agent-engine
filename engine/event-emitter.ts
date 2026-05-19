@@ -31,6 +31,9 @@ function participantKindForRole(role: string): ParticipantKind {
   return "system";
 }
 
+/** Default authority level for web/CLI steer operators. */
+export const STEER_AUTHORITY = 90;
+
 export class EventEmitter {
   private dashboardUrl: string;
   private apiToken: string | undefined;

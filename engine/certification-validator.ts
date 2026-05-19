@@ -112,8 +112,9 @@ export interface ValidatorContext {
 	expectedFixture?: "clean" | "seeded" | "failing";
 	isLivePi: boolean;
 	strictSpawnDecisions?: boolean;
-	/** When true, any steer event fails validation (unattended certification). */
-	unattended?: boolean;
+	/** When true, steer events are allowed but audited (interactive certification).
+	 *  Default is false (unattended/strict — any steer event fails validation). */
+	interactiveCert?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -789,7 +790,7 @@ function isSteerParticipant(evt: TraceEvent): boolean {
 	return kind === "web-steer" || kind === "cli-steer";
 }
 
-function checkSteerEvents(events: TraceEvent[], unattended: boolean): ValidationCheck {
+function checkSteerEvents(events: TraceEvent[], interactiveCert: boolean): ValidationCheck {
 	const steerEvents = events.filter(isSteerEvent);
 	const steerParticipants = events.filter(isSteerParticipant);
 	const steerCount = steerEvents.length;
@@ -802,37 +803,66 @@ function checkSteerEvents(events: TraceEvent[], unattended: boolean): Validation
 			return `${source}:${intent}`;
 		});
 
-	if (unattended) {
-		// Unattended certification: any steer event is a failure
-		return {
-			name: "steer_events_valid",
-			passed: steerCount === 0,
-			evidence: steerCount === 0
-				? "Unattended certification: no steer events"
-				: `Unattended certification failed: ${steerCount} steer event(s) detected`,
-			details: steerCount > 0
-				? `intents: ${intents.join(", ")}; participants: ${steerParticipants.map((e) => agentId(e)).join(", ")}`
-				: undefined,
-		};
+	const issues: string[] = [];
+
+	if (!interactiveCert && steerCount > 0) {
+		// Unattended/strict certification (default): any steer event is a failure
+		issues.push(`${steerCount} steer event(s) found in unattended certification`);
 	}
 
-	// Interactive certification: steer events are allowed but must not hide failures.
-	// Check that no steer event has certification_impact other than the expected values.
-	const suspiciousSteer = steerEvents.filter((evt) => {
+	// Authority validation: all steer actions must use authority 90
+	const invalidAuthority = steerEvents.filter((evt) =>
+		Number(evt.data?.authority ?? 0) !== 90,
+	);
+	if (invalidAuthority.length > 0) {
+		issues.push(`${invalidAuthority.length} steer action(s) had non-90 authority`);
+	}
+
+	// Certification impact validation: all steer actions must declare impact
+	const missingImpact = steerEvents.filter((evt) => {
 		const impact = evt.data?.certification_impact as string | undefined;
-		// All steer events should declare their certification impact
-		return impact !== "blocks_unattended" && impact !== "none";
+		return !impact || (impact !== "blocks_unattended" && impact !== "none");
 	});
+	if (missingImpact.length > 0) {
+		issues.push(`${missingImpact.length} steer action(s) with missing or invalid certification_impact`);
+	}
+
+	// Evidence-hiding detection (interactive mode): steer stop must not mask
+	// incomplete lifecycle evidence
+	if (interactiveCert && steerCount > 0) {
+		const steerStops = steerEvents.filter((evt) => {
+			const intent = (evt.data?.intent as string) ?? "";
+			const action = (evt.data?.action as string) ?? "";
+			return intent === "stop" || action === "stop";
+		});
+		if (steerStops.length > 0) {
+			const lastSteerStopIdx = Math.max(...steerStops.map((s) => events.indexOf(s)));
+			// Count only required lead ends, not orchestrator/synthesis/worker ends
+			const leadEnds = events.filter((evt) => {
+				if (!isAgentEnd(evt)) return false;
+				const id = agentId(evt);
+				return REQUIRED_LEADS.some((req) => req.leadPattern.test(id) || teamName(evt) === req.team);
+			});
+			const leadEndsAfterStop = leadEnds.filter((e) => events.indexOf(e) > lastSteerStopIdx);
+			if (leadEndsAfterStop.length === 0 && leadEnds.length < REQUIRED_LEADS.length) {
+				issues.push("Steer stop prevented remaining leads from completing");
+			}
+		}
+	}
+
+	const checkName = interactiveCert ? "interactive_steering_valid" : "steer_events_valid";
 
 	return {
-		name: "steer_events_valid",
-		passed: suspiciousSteer.length === 0,
-		evidence: suspiciousSteer.length === 0
-			? `Interactive certification: ${steerCount} steer event(s) recorded, all with valid certification impact`
-			: `${suspiciousSteer.length} steer event(s) with invalid certification impact`,
-		details: steerCount > 0
-			? `intents: ${intents.join(", ")}`
-			: undefined,
+		name: checkName,
+		passed: issues.length === 0,
+		evidence: issues.length === 0
+			? interactiveCert
+				? `Interactive certification: ${steerCount} steer event(s) recorded, all valid`
+				: "Unattended certification: no steer events"
+			: `${issues.length} steering policy issue(s)`,
+		details: issues.length > 0
+			? issues.join("; ")
+			: steerCount > 0 ? `intents: ${intents.join(", ")}` : undefined,
 	};
 }
 
@@ -956,7 +986,7 @@ export function validateCertificationEvidence(ctx: ValidatorContext): Validation
 	if (!spawnDecisions.passed) blockingReasons.push(spawnDecisions.evidence);
 
 	// 14. Steer events (Phase 5)
-	const steerCheck = checkSteerEvents(events, ctx.unattended === true);
+	const steerCheck = checkSteerEvents(events, ctx.interactiveCert === true);
 	checks.push(steerCheck);
 	if (!steerCheck.passed) blockingReasons.push(steerCheck.evidence);
 

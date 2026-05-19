@@ -7,6 +7,7 @@ import { createLangfuseSink } from "./langfuse-sink";
 import { createTraceRecorder, TRACE_DIR } from "./trace-recorder";
 import { sanitizeAgentInput } from "./security";
 import { buildParticipantCapabilities } from "./participant-capabilities";
+import { STEER_AUTHORITY } from "./event-emitter";
 
 if (process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY) {
   addSink(createLangfuseSink({
@@ -156,7 +157,7 @@ export class Orchestrator {
     void this.emitter.steerAction(sessionId, {
       sender: "user",
       source,
-      authority: 90,
+      authority: STEER_AUTHORITY,
       intent,
       target: targetAgentId ?? "orchestrator",
       content: message,
@@ -195,7 +196,7 @@ export class Orchestrator {
     void this.emitter.steerAction(sessionId, {
       sender: "user",
       source,
-      authority: 90,
+      authority: STEER_AUTHORITY,
       intent,
       target: "orchestrator",
       content: args ? `!${command} ${args}` : `!${command}`,

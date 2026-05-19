@@ -103,11 +103,12 @@ type EventData struct {
 	PersonaPath string    `json:"persona_path,omitempty"`
 
 	// message
-	From      string `json:"from,omitempty"`
-	To        string `json:"to,omitempty"`
-	Content   string `json:"content,omitempty"`
-	MessageID string `json:"message_id,omitempty"`
-	AckFor    string `json:"ack_for,omitempty"`
+	From        string `json:"from,omitempty"`
+	To          string `json:"to,omitempty"`
+	Content     string `json:"content,omitempty"`
+	MessageID   string `json:"message_id,omitempty"`
+	AckFor      string `json:"ack_for,omitempty"`
+	SteerSource string `json:"steer_source,omitempty"`
 
 	// tool_call
 	Tool       string `json:"tool,omitempty"`
@@ -155,7 +156,7 @@ func (d *EventData) UnmarshalJSON(data []byte) error {
 	knownKeys := map[string]bool{
 		"session_name": true, "team_config": true, "task_prompt": true,
 		"agent_name": true, "agent_role": true, "model": true, "team_name": true, "team_color": true, "persona_path": true,
-		"from": true, "to": true, "content": true, "message_id": true, "ack_for": true,
+		"from": true, "to": true, "content": true, "message_id": true, "ack_for": true, "steer_source": true,
 		"tool": true, "tool_args": true, "tool_result": true, "tool_status": true, "file_path": true,
 		"tilldone": true,
 		"blocked_path": true, "blocked_action": true, "block_reason": true,
