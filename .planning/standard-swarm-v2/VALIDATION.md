@@ -110,7 +110,7 @@ Live Pi validation is **not** required for every phase and should not be used as
 | 3 | Validator enforces REVIEW_REPORT vs CERTIFICATION_CONTRACT boundary | #335/#326 | validator/parser fixture tests | standard bundle | pending |
 | 3 | Validator cites evidence paths/events | #335 | validator output tests | standard bundle | pending |
 | 3 | Validator contract required in strict mode | #335 | cert integration test | standard bundle | pending |
-| 4 | Spawn decision schema validates | #340 | schema/unit tests | standard bundle | targeted pass on `codex-phase4` |
+| 4 | Spawn decision schema validates | #340 | schema/unit tests, parser edge cases | standard bundle | targeted pass on `codex-phase4` |
 | 4 | Worker spawn without decision fails strict mode | #340 | worker lifecycle tests | standard bundle | targeted pass on `codex-phase4` |
 | 4 | Worker prompts derive from spawn decision | #340 | snapshot/unit tests | standard bundle | targeted pass on `codex-phase4` |
 | 5 | Web/CLI steer participant traced | #338 | API/trace tests | standard bundle | pending |

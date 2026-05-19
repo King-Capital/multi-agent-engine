@@ -149,6 +149,63 @@ END_SPAWN_DECISION
     expect(validateSpawnDecision(decision!).valid).toBe(true);
   });
 
+  test("parses lead-only no-worker decisions without requiring worker fields", () => {
+    const [decision] = parseSpawnDecisions(`
+SPAWN_DECISION:
+need_worker: false
+reason: Lead can complete this directly with the available context.
+END_SPAWN_DECISION
+`);
+
+    expect(decision).toBeDefined();
+    expect(decision!.need_worker).toBe(false);
+    expect(decision!.reason).toBe("Lead can complete this directly with the available context.");
+    expect(validateSpawnDecision(decision!).valid).toBe(true);
+  });
+
+  test("parses multiple decision blocks and skips malformed blocks", () => {
+    const decisions = parseSpawnDecisions(`
+SPAWN_DECISION:
+reason: Missing need_worker is ignored
+END_SPAWN_DECISION
+
+SPAWN_DECISION:
+need_worker: true
+worker_name: Security Auditor
+spawn_type: worker
+reason: Review auth boundary.
+why_lead_cannot_do_it: Needs focused independent evidence.
+allowed_read_paths: engine/security.ts
+allowed_tools: read
+forbidden_paths: .env
+expected_output: REVIEW_REPORT: Security
+timeout_seconds: 300
+END_SPAWN_DECISION
+
+SPAWN_DECISION:
+need_worker: true
+worker_name: Quality
+spawn_type: worker
+reason: Review regression coverage.
+why_lead_cannot_do_it: Needs focused test evidence.
+allowed_paths: engine/*.test.ts
+allowed_tools: read, rg
+forbidden_paths: node_modules
+expected_output_schema: REVIEW_REPORT: Quality
+timeout_seconds: 300
+END_SPAWN_DECISION
+`);
+
+    expect(decisions).toHaveLength(2);
+    expect(decisions.map((decision) => decision.worker_name)).toEqual(["Security Auditor", "Quality"]);
+    expect(decisions[0]!.constraints.allowed_paths).toEqual(["engine/security.ts"]);
+    expect(decisions[1]!.expected_output_schema).toBe("REVIEW_REPORT: Quality");
+  });
+
+  test("returns an empty list when no decision blocks are present", () => {
+    expect(parseSpawnDecisions("No spawn decision here.")).toEqual([]);
+  });
+
   test("execution validation rejects unsafe paths, unavailable tools, and forbidden overlaps", () => {
     const [decision] = parseSpawnDecisions(`
 SPAWN_DECISION:
