@@ -233,6 +233,41 @@ Validation required:
 - `just check`
 - `git diff --check`
 
+### D-2026-05-19-P5 — Steer participants are transient with authority 90
+
+Date: 2026-05-19
+Phase: 5 — Web/CLI steer as high-authority participants
+Issue(s): #338
+
+Decision:
+
+Steer interactions (dashboard web, CLI TUI, API) are modeled as transient participants with a start/end lifecycle bracket per steer message. Each steer message gets a unique participant ID (`web-steer-N` or `cli-steer-N`), authority 90, and a `steer_action` trace event between the lifecycle events. Steer source is inferred from message_id prefix (`tui-*` = CLI, otherwise web). Ping messages are diagnostic and produce no steer events.
+
+Certification semantics: unattended mode (`--unattended`) fails if any steer event exists in the trace. Interactive mode (default) allows steer events but requires valid `certification_impact` values.
+
+Reason:
+
+Transient participants avoid accumulating long-running state for brief human interactions. Authority 90 is below orchestrator (100) but above leads (70), matching the PRD's intent that operator steer has high but not absolute priority. Source inference from message_id is zero-config — no API changes needed.
+
+Alternatives considered:
+
+- Long-lived steer participant per session: rejected because steer actors are intermittent, and a single long-lived participant would give misleading presence/stale signals.
+- Steer events without participant lifecycle: rejected because Phase 2 participant events are the canonical visibility layer and Phase 6 dashboard agent pool needs steer participants.
+- Authority 100 (same as orchestrator): rejected because operator steer should not mechanically override orchestrator decisions, only influence them.
+
+Impact:
+
+All steer interactions are now trace-visible. Unattended certification can prove no human intervention occurred. Interactive certification records steer effects for later analysis. Dashboard agent pool (Phase 6) will display steer participants.
+
+Validation required:
+
+- `bun test engine/certification-validator.test.ts engine/event-emitter.test.ts engine/steering.test.ts engine/integration.test.ts`
+- `scripts/certify-live-swarm-test`
+- `scripts/certify-live-swarm --only failing --dashboard-url "${MAE_DASHBOARD_URL:-http://10.71.20.72:8400}"`
+- `bun test`
+- `cd engine && bunx tsc --noEmit`
+- `git diff --check`
+
 ### D-XXX — Title
 
 Date:
