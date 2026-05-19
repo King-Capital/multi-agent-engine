@@ -348,4 +348,40 @@ expect_failure "live pi non-synthesis certification contract rejected" require_t
 
 adapter=echo
 
+# --- Phase 3: TS validator integration tests ---
+
+validator_session="00000000-0000-0000-0000-000000000020"
+mkdir -p "$trace_dir/$validator_session/artifacts"
+printf 'CERTIFICATION_CONTRACT:\nschema_version: 1\nverdict: pass\np0_count: 0\np1_count: 0\nperspectives_covered: correctness, adversarial, quality, security, domain\nblockers: none\nfailed_teams: none\ncertification_ready: true\nEND_CERTIFICATION_CONTRACT\n' > "$trace_dir/$validator_session/artifacts/synth-output.txt"
+printf '%s\n' \
+  '{"type":"session.start","session_id":"'"$validator_session"'"}' \
+  '{"type":"agent.end","session_id":"'"$validator_session"'","agent_id":"pi-correctness-lead","team":"Correctness Review"}' \
+  '{"type":"agent.end","session_id":"'"$validator_session"'","agent_id":"pi-adversarial-lead","team":"Adversarial Review"}' \
+  '{"type":"agent.end","session_id":"'"$validator_session"'","agent_id":"pi-quality-lead","team":"Quality Review"}' \
+  '{"type":"agent.end","session_id":"'"$validator_session"'","agent_id":"pi-security-lead","team":"Security Review"}' \
+  '{"type":"agent.end","session_id":"'"$validator_session"'","agent_id":"pi-domain-lead","team":"Domain Review"}' \
+  '{"type":"agent.end","session_id":"'"$validator_session"'","agent_id":"pi-orchestrator","output_artifact":"'"$validator_session"'/artifacts/synth-output.txt"}' \
+  '{"type":"session.end","session_id":"'"$validator_session"'","status":"completed"}' \
+  > "$trace_dir/$validator_session.jsonl"
+
+expect_success "TS validator passes clean trace" \
+  bun "$root/engine/cli.ts" validate-cert "$trace_dir/$validator_session.jsonl" \
+    --trace-dir "$trace_dir" --expected clean
+pass_count=$((pass_count + 1))
+
+validator_fail_session="00000000-0000-0000-0000-000000000021"
+mkdir -p "$trace_dir/$validator_fail_session/artifacts"
+printf 'CERTIFICATION_CONTRACT:\nschema_version: 1\nverdict: pass\np0_count: 0\np1_count: 0\nperspectives_covered: correctness, adversarial, quality, security, domain\nblockers: none\nfailed_teams: none\ncertification_ready: true\nEND_CERTIFICATION_CONTRACT\n' > "$trace_dir/$validator_fail_session/artifacts/synth-output.txt"
+printf '%s\n' \
+  '{"type":"session.start","session_id":"'"$validator_fail_session"'"}' \
+  '{"type":"agent.end","session_id":"'"$validator_fail_session"'","agent_id":"pi-correctness-lead","team":"Correctness Review"}' \
+  '{"type":"agent.end","session_id":"'"$validator_fail_session"'","agent_id":"pi-orchestrator","output_artifact":"'"$validator_fail_session"'/artifacts/synth-output.txt"}' \
+  '{"type":"session.end","session_id":"'"$validator_fail_session"'","status":"completed"}' \
+  > "$trace_dir/$validator_fail_session.jsonl"
+
+expect_failure "TS validator rejects incomplete lifecycle" \
+  bun "$root/engine/cli.ts" validate-cert "$trace_dir/$validator_fail_session.jsonl" \
+    --trace-dir "$trace_dir" --expected clean
+pass_count=$((pass_count + 1))
+
 printf 'certify-live-swarm tests passed: %s\n' "$pass_count"
