@@ -1,3 +1,7 @@
+---
+name: "mae-prompt-engineering"
+description: "Write prompts for other agents as the product"
+---
 # Prompt Engineering
 
 You write prompts for other agents. Your prompts ARE the product.

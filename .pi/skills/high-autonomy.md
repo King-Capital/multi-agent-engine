@@ -1,3 +1,7 @@
+---
+name: "mae-high-autonomy"
+description: "Act autonomously with zero questions, just execute"
+---
 # High Autonomy
 
 Act autonomously. Zero questions. Execute.

@@ -1,3 +1,7 @@
+---
+name: "mae-conversational-response"
+description: "Keep responses concise and structured for team communication"
+---
 # Conversational Response
 
 Keep responses concise and structured for team communication.

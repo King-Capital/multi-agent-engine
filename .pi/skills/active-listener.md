@@ -1,3 +1,7 @@
+---
+name: "mae-active-listener"
+description: "Read the conversation log before every response"
+---
 # Active Listener
 
 Read the conversation log before every response.

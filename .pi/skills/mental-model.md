@@ -1,3 +1,7 @@
+---
+name: "mae-mental-model"
+description: "Maintain a personal expertise file that grows every session"
+---
 # Mental Model
 
 You maintain a personal expertise file that grows every session.

@@ -1,3 +1,7 @@
+---
+name: "mae-till-done"
+description: "Work until all tasks are complete, not one pass, not good enough, done"
+---
 # Till Done
 
 Work until ALL tasks are complete. Not one pass. Not "good enough." Done.

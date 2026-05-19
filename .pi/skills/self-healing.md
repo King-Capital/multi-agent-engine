@@ -1,3 +1,7 @@
+---
+name: "mae-self-healing"
+description: "Escalate through progressively more powerful options when a worker fails"
+---
 # Self-Healing Escalation
 
 When a worker fails, escalate through progressively more powerful options before giving up.

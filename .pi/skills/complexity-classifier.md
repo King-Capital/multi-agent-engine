@@ -1,3 +1,7 @@
+---
+name: "mae-complexity-classifier"
+description: "Classify task complexity to select the right model and thinking level"
+---
 # Complexity Classifier
 
 Classify task complexity to select the right model + thinking level.
