@@ -286,13 +286,7 @@ export class EventEmitter {
       teamName,
       model,
       currentTask: `agent:${kind}`,
-      capabilities: {
-        model,
-        canReceiveSteer: true,
-        canSteer: true,
-        canUseTools: true,
-        ...capabilities,
-      },
+      capabilities: capabilities ?? { model, canReceiveSteer: true },
     });
     return this.emit({
       session_id: sessionId,
@@ -311,11 +305,14 @@ export class EventEmitter {
   }
 
   async agentDone(sessionId: string, agentId: string, grade?: string, costUsd?: number, artifacts: { outputArtifact?: string; taskReport?: string } = {}) {
+    const participantStatus = grade === "FAILED" ? "failed" as const
+      : grade === "FEEDBACK" ? "blocked" as const
+      : "completed" as const;
     await this.pgUpdateAgent(agentId, {
-      status: grade === "FAILED" ? "failed" : "completed",
+      status: participantStatus === "blocked" ? "failed" : participantStatus,
       cost_usd: costUsd ?? 0,
     });
-    await this.participantEnd(sessionId, agentId, grade === "FAILED" ? "failed" : "completed", {
+    await this.participantEnd(sessionId, agentId, participantStatus, {
       lastEvent: "agent_done",
       costUsd: costUsd ?? 0,
       reason: grade ?? "unknown",

@@ -179,7 +179,7 @@ describe("EventEmitter", () => {
         role: "lead",
         teamName: "Correctness Review",
         model: "gpt-5.5",
-        capabilities: { canReceiveSteer: true, canUseTools: true, tools: ["read", "bash"] },
+        capabilities: { canReceiveSteer: true, toolCount: 2, model: "gpt-5.5" },
       });
       await emitter.participantActivity("s1", "lead-1", { currentTool: "read", currentTask: "README.md" });
       await emitter.participantHeartbeat("s1", "lead-1", { costUsd: 0.12, tokensUsed: 42 });
@@ -198,7 +198,7 @@ describe("EventEmitter", () => {
         "participant_stale",
         "participant_end",
       ]);
-      expect(bodies[0]!.data.capabilities.tools).toEqual(["read", "bash"]);
+      expect(bodies[0]!.data.capabilities.toolCount).toBe(2);
       expect(bodies[1]!.data.current_tool).toBe("read");
       expect(bodies[2]!.data.cost_usd).toBe(0.12);
       expect(bodies[3]!.data.status).toBe("stale");
@@ -451,7 +451,7 @@ describe("EventEmitter", () => {
         .map((c) => JSON.parse(c.init.body as string))
         .find((event: { event_type?: string }) => event.event_type === "participant_start");
       expect(participantStart.data.capabilities.model).toBe("opus");
-      expect(participantStart.data.capabilities.canSteer).toBe(true);
+      expect(participantStart.data.capabilities.canReceiveSteer).toBe(true);
     });
 
     test("costUpdate includes token and cost data", async () => {

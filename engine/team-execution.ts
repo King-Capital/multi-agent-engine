@@ -30,6 +30,7 @@ import type {
 } from "./types";
 import { buildStreamHandler, buildSendMessage } from "./stream-handler";
 import { buildWorkerSystemPromptAppend, isReviewOnlyStep, readOnlyTools } from "./review-mode";
+import { buildParticipantCapabilities } from "./participant-capabilities";
 import type { OrchestratorLoop } from "./orchestrator-loop";
 import type { ConcurrencyLimiter } from "./concurrency";
 
@@ -226,20 +227,11 @@ export async function prepareTeamStep(
   const leadDomain = reviewOnly ? { ...leadPersona.domain, write: [], update: [] } : leadPersona.domain;
 
   await emitter.agentSpawn(session.id, leadId, "orch-1", teamConfig.lead.name, "lead",
-    leadResolved.model, teamConfig["team-name"], teamConfig["team-color"], undefined, {
-      tools: leadTools,
-      domains: leadDomain,
-      domain_read: leadDomain.read,
-      domain_write: leadDomain.write,
-      domain_update: leadDomain.update,
-      readGlobs: leadDomain.read,
-      writeGlobs: leadDomain.write,
-      can_delegate: !leadOnly,
-      canSpawnWorkers: !leadOnly,
-      canReviewWorkers: true,
-      canWriteFiles: leadDomain.write.length > 0 || leadDomain.update.length > 0,
-      authority: 70,
-    });
+    leadResolved.model, teamConfig["team-name"], teamConfig["team-color"], undefined,
+    buildParticipantCapabilities({
+      tools: leadTools, domain: leadDomain, model: leadResolved.model,
+      canDelegate: !leadOnly, canSpawnWorkers: !leadOnly, canReviewWorkers: true, authority: 70,
+    }));
 
   // Lead gets either the task directly (lead-only mode) or the task + team roster
   // to produce a briefing for workers.
@@ -409,20 +401,10 @@ export async function executeWorkers(
       const workerTools = reviewOnly ? readOnlyTools(workerPersona.tools) : workerPersona.tools;
 
       await emitter.agentSpawn(session.id, workerId, leadId, member.name, "worker",
-        workerResolved.model, teamConfig["team-name"], member.color ?? teamConfig["team-color"], undefined, {
-          tools: workerTools,
-          domains: workerDomain,
-          domain_read: workerDomain.read,
-          domain_write: workerDomain.write,
-          domain_update: workerDomain.update,
-          readGlobs: workerDomain.read,
-          writeGlobs: workerDomain.write,
-          can_delegate: false,
-          canSpawnWorkers: false,
-          canReviewWorkers: false,
-          canWriteFiles: workerDomain.write.length > 0 || workerDomain.update.length > 0,
-          authority: 40,
-        });
+        workerResolved.model, teamConfig["team-name"], member.color ?? teamConfig["team-color"], undefined,
+        buildParticipantCapabilities({
+          tools: workerTools, domain: workerDomain, model: workerResolved.model,
+        }));
 
       // Extract this worker's assignment from the lead brief, or give full brief
       const assignment = parseAssignment(leadResult.output, member.name);
@@ -1003,20 +985,11 @@ export async function runParallelStep(
   log.info("Synthesizing parallel team outputs", { result_count: results.length, session_id: session.id });
 
   await emitter.agentSpawn(session.id, synthId, "orch-1", "Synthesis", "orchestrator",
-    synthResolved.model, "Synthesis", "#a855f7", "synthesis", {
-      tools: synthPersona.tools,
-      domains: synthPersona.domain,
-      domain_read: synthPersona.domain.read,
-      domain_write: synthPersona.domain.write,
-      domain_update: synthPersona.domain.update,
-      readGlobs: synthPersona.domain.read,
-      writeGlobs: synthPersona.domain.write,
-      can_delegate: false,
-      canSpawnWorkers: false,
-      canReviewWorkers: true,
-      canWriteFiles: synthPersona.domain.write.length > 0 || synthPersona.domain.update.length > 0,
-      authority: 65,
-    });
+    synthResolved.model, "Synthesis", "#a855f7", "synthesis",
+    buildParticipantCapabilities({
+      tools: synthPersona.tools, domain: synthPersona.domain, model: synthResolved.model,
+      canReviewWorkers: true, authority: 65,
+    }));
 
   const teamOutputs = results.map((r, i) =>
     `### Team: ${teams[i]?.team ?? `Team ${i + 1}`}\nGrade: ${r.grade ?? "UNGRADED"}\n\n${r.output}`

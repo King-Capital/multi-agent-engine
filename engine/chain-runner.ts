@@ -13,6 +13,7 @@ import { checkBudget } from "./budget";
 import type { BudgetState } from "./budget";
 import { runTeamStep, runParallelStep } from "./team-execution";
 import { isReviewOnlyStep, readOnlyTools } from "./review-mode";
+import { buildParticipantCapabilities } from "./participant-capabilities";
 import type { TeamExecutionDeps } from "./team-execution";
 import { logPerformance } from "./perf-log";
 import { buildStreamHandler, buildSendMessage } from "./stream-handler";
@@ -292,20 +293,10 @@ export async function runAgent(
   const agentDomain = reviewOnly ? { ...persona.domain, write: [], update: [] } : persona.domain;
 
   await emitter.agentSpawn(session.id, agentId, parentId, agentConfig.name, "worker",
-    agentResolved.model, teamName, teamColor, undefined, {
-      tools: agentTools,
-      domains: agentDomain,
-      domain_read: agentDomain.read,
-      domain_write: agentDomain.write,
-      domain_update: agentDomain.update,
-      readGlobs: agentDomain.read,
-      writeGlobs: agentDomain.write,
-      can_delegate: false,
-      canSpawnWorkers: false,
-      canReviewWorkers: false,
-      canWriteFiles: agentDomain.write.length > 0 || agentDomain.update.length > 0,
-      authority: 40,
-    });
+    agentResolved.model, teamName, teamColor, undefined,
+    buildParticipantCapabilities({
+      tools: agentTools, domain: agentDomain, model: agentResolved.model,
+    }));
 
   const prompt = [
     `Task: ${task}`,

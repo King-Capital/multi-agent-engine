@@ -6,22 +6,15 @@ export type ParticipantStatus = "starting" | "active" | "idle" | "stale" | "comp
 export interface ParticipantCapabilities {
   canReceiveSteer?: boolean;
   canSteer?: boolean;
-  canSendToLead?: boolean;
   canSpawnWorkers?: boolean;
   canReviewWorkers?: boolean;
   canWriteFiles?: boolean;
-  canUseTools?: boolean;
-  can_delegate?: boolean;
+  canDelegate?: boolean;
   authority?: number;
-  tools?: string[];
-  domains?: DomainConfig;
-  domain_read?: string[];
-  domain_write?: string[];
-  domain_update?: string[];
-  readGlobs?: string[];
-  writeGlobs?: string[];
+  toolCount?: number;
+  readScopeCount?: number;
+  writeScopeCount?: number;
   model?: string;
-  provider?: string;
 }
 
 export interface ParticipantState {

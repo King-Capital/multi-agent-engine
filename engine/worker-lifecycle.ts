@@ -15,6 +15,7 @@ import { summarizeOutput } from "./output-parsing";
 import { parseReviews } from "./output-parsing";
 import { buildStreamHandler, buildSendMessage } from "./stream-handler";
 import { buildWorkerSystemPromptAppend, isReviewOnlyStep, readOnlyTools } from "./review-mode";
+import { buildParticipantCapabilities } from "./participant-capabilities";
 import type { EventEmitter } from "./event-emitter";
 import type { OrchestratorLoop } from "./orchestrator-loop";
 import type {
@@ -73,20 +74,10 @@ export async function retryWorker(
   const workerTools = reviewOnly ? readOnlyTools(workerPersona.tools) : workerPersona.tools;
 
   await emitter.agentSpawn(session.id, workerId, leadId, `${member.name} (retry ${attempt})`, "worker",
-    retryResolved.model, teamConfig["team-name"], member.color ?? teamConfig["team-color"], undefined, {
-      tools: workerTools,
-      domains: workerDomain,
-      domain_read: workerDomain.read,
-      domain_write: workerDomain.write,
-      domain_update: workerDomain.update,
-      readGlobs: workerDomain.read,
-      writeGlobs: workerDomain.write,
-      can_delegate: false,
-      canSpawnWorkers: false,
-      canReviewWorkers: false,
-      canWriteFiles: workerDomain.write.length > 0 || workerDomain.update.length > 0,
-      authority: 40,
-    });
+    retryResolved.model, teamConfig["team-name"], member.color ?? teamConfig["team-color"], undefined,
+    buildParticipantCapabilities({
+      tools: workerTools, domain: workerDomain, model: retryResolved.model,
+    }));
 
   const retryUserPrompt = [
     `RETRY (attempt ${attempt}): Your previous output was reviewed and needs rework.`,
@@ -250,20 +241,10 @@ export async function spawnSenior(
 
   await emitter.agentSpawn(session.id, srId, leadId,
     `Sr. (${domainNames.join("+")})`, "sr",
-    srResolved.model, teamConfig["team-name"], "#ffaa00", undefined, {
-      tools: srTools,
-      domains: srDomain,
-      domain_read: srDomain.read,
-      domain_write: srDomain.write,
-      domain_update: srDomain.update,
-      readGlobs: srDomain.read,
-      writeGlobs: srDomain.write,
-      can_delegate: false,
-      canSpawnWorkers: false,
-      canReviewWorkers: false,
-      canWriteFiles: srDomain.write.length > 0 || srDomain.update.length > 0,
-      authority: 55,
-    });
+    srResolved.model, teamConfig["team-name"], "#ffaa00", undefined,
+    buildParticipantCapabilities({
+      tools: srTools, domain: srDomain, model: srResolved.model, authority: 55,
+    }));
 
   await emitter.message(session.id, srId, teamConfig.lead.name, "user",
     `📋 **Sr. assignment (${domainNames.join("+")})**:\n\n${srPrompt.slice(0, 3000)}`);
