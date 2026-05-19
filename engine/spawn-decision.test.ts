@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  applySpawnDecisionConstraints,
   buildWorkerPromptFromDecision,
   findSpawnDecisionForWorker,
   isSpawnDecisionStrictMode,
@@ -228,5 +229,114 @@ END_SPAWN_DECISION
     expect(result.valid).toBe(false);
     expect(result.errors).toContain("tool not available to worker: sudo");
     expect(result.errors).toContain("forbidden path is covered by allowed path: engine/secrets.ts");
+  });
+
+  test("execution validation rejects absolute paths and broad wildcard-only scopes", () => {
+    const [decision] = parseSpawnDecisions(`
+SPAWN_DECISION:
+need_worker: true
+worker_name: Infrastructure
+spawn_type: worker
+reason: Verify deployment scope.
+why_lead_cannot_do_it: Needs focused infrastructure review.
+constraints:
+  allowed_paths: /etc/passwd, **/*
+  allowed_tools: read
+  forbidden_paths: .env
+bus_policy: isolated
+expected_output_schema: REVIEW_REPORT: Infrastructure
+timeout_seconds: 300
+END_SPAWN_DECISION
+`);
+
+    const result = validateSpawnDecisionForExecution(decision!, ["read"]);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain("unsafe path constraint: /etc/passwd");
+    expect(result.errors).toContain("unsafe path constraint: **/*");
+  });
+
+  test("execution validation accepts safe paths and available tools", () => {
+    const [decision] = parseSpawnDecisions(`
+SPAWN_DECISION:
+need_worker: true
+worker_name: Security Auditor
+spawn_type: worker
+reason: Verify auth boundary.
+why_lead_cannot_do_it: Security-specific review is needed.
+constraints:
+  allowed_paths: engine/security.ts, engine/auth.ts
+  allowed_tools: read, rg
+  forbidden_paths: .env
+bus_policy: isolated
+expected_output_schema: REVIEW_REPORT: Security
+timeout_seconds: 300
+END_SPAWN_DECISION
+`);
+
+    expect(validateSpawnDecisionForExecution(decision!, ["read", "rg"]).valid).toBe(true);
+  });
+
+  test("constraint application restricts tools and domain to allowed paths", () => {
+    const [decision] = parseSpawnDecisions(`
+SPAWN_DECISION:
+need_worker: true
+worker_name: Backend Engineer
+spawn_type: worker
+reason: Review API boundary.
+why_lead_cannot_do_it: Needs focused backend evidence.
+constraints:
+  allowed_paths: engine/api.ts, engine/auth.ts
+  allowed_tools: read, rg
+  forbidden_paths: .env
+bus_policy: isolated
+expected_output_schema: REVIEW_REPORT: Backend
+timeout_seconds: 300
+END_SPAWN_DECISION
+`);
+
+    const result = applySpawnDecisionConstraints(
+      ["read", "rg", "bash", "write"],
+      { read: ["**/*"], write: ["**/*"], update: ["**/*"] },
+      decision!,
+      false,
+    );
+
+    expect(result.tools).toEqual(["read", "rg"]);
+    expect(result.domain.read).toEqual(["engine/api.ts", "engine/auth.ts"]);
+    expect(result.domain.write).toEqual(["engine/api.ts", "engine/auth.ts"]);
+    expect(result.domain.update).toEqual(["engine/api.ts", "engine/auth.ts"]);
+    expect((result.domain as { delete?: string[] }).delete).toEqual([]);
+  });
+
+  test("constraint application clears write/update/delete in review-only mode", () => {
+    const [decision] = parseSpawnDecisions(`
+SPAWN_DECISION:
+need_worker: true
+worker_name: Quality
+spawn_type: worker
+reason: Review tests.
+why_lead_cannot_do_it: Needs independent review evidence.
+constraints:
+  allowed_paths: engine/*.test.ts
+  allowed_tools: read
+  forbidden_paths: node_modules
+bus_policy: isolated
+expected_output_schema: REVIEW_REPORT: Quality
+timeout_seconds: 300
+END_SPAWN_DECISION
+`);
+
+    const result = applySpawnDecisionConstraints(
+      ["read", "write"],
+      { read: ["**/*"], write: ["**/*"], update: ["**/*"] },
+      decision!,
+      true,
+    );
+
+    expect(result.tools).toEqual(["read"]);
+    expect(result.domain.read).toEqual(["engine/*.test.ts"]);
+    expect(result.domain.write).toEqual([]);
+    expect(result.domain.update).toEqual([]);
+    expect((result.domain as { delete?: string[] }).delete).toEqual([]);
   });
 });
