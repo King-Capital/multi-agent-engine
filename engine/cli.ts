@@ -1052,6 +1052,7 @@ and produces a VALIDATION_CONTRACT with pass/fail for each check.
     const expectedFlag = getFlag(args, "--expected") as "clean" | "seeded" | "failing" | undefined;
     const isLivePi = args.includes("--live-pi");
     const strictSpawnDecisions = args.includes("--strict-spawn");
+    const interactiveCert = args.includes("--interactive-cert");
     const validatorCtx: ValidatorContext = {
       traceFile: resolvedTrace,
       traceDir: traceDirFlag ? resolve(traceDirFlag) : join(resolvedTrace, ".."),
@@ -1060,6 +1061,7 @@ and produces a VALIDATION_CONTRACT with pass/fail for each check.
       expectedFixture: expectedFlag,
       isLivePi,
       strictSpawnDecisions,
+      interactiveCert,
     };
     const contract = validateCertificationEvidence(validatorCtx);
     if (args.includes("--json")) {

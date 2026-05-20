@@ -388,6 +388,7 @@ mae validate-cert <trace-file> [options]
 | `--expected <fixture>` | Expected fixture: `clean`, `seeded`, or `failing` |
 | `--live-pi` | Enable live Pi checks such as worker-spawn and repo-source-read enforcement |
 | `--strict-spawn` | Require every worker spawn to have valid `SPAWN_DECISION` evidence |
+| `--interactive-cert` | Allow steer events (interactive certification); default is unattended/fail-closed |
 | `--json` | Emit the validation contract as JSON |
 
 **Examples:**
@@ -396,6 +397,7 @@ mae validate-cert <trace-file> [options]
 mae validate-cert ~/.mae/traces/abc123.jsonl
 mae validate-cert ./trace.jsonl --expected clean --live-pi
 mae validate-cert ./trace.jsonl --strict-spawn --json
+mae validate-cert ./trace.jsonl --interactive-cert  # allow dashboard/CLI steer events
 ```
 
 Strict spawn validation is part of Standard Swarm v2 Phase 4. A valid worker spawn must have a prior `spawn_decision` dashboard event, backed by a `spawn.decision` JSONL trace entry, with scoped paths, allowed tools, forbidden paths, isolated bus policy, expected output schema, and timeout. Runtime strict mode can also be enabled from chain config with `strict_spawn: true`.

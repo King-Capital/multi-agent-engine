@@ -52,8 +52,12 @@ multi-agent-engine/
     ralph-evolver.ts # Population C — proposes config mutations from findings
     llm-gateway.ts   # LiteLLM gateway client for standalone LLM calls
     budget.ts        # Budget enforcement with safe defaults on failure
-    security.ts      # Input sanitization + URL validation (42 lines, no dead code)
-    event-emitter.ts # Dashboard event system with HTTP retry + circuit breaker
+    certification-validator.ts # Deterministic cert evidence validator (Phase 3)
+    spawn-decision.ts  # Structured worker spawn decision parser/validator (Phase 4)
+    participant-presence.ts # Stale participant detection (Phase 2)
+    participant-capabilities.ts # Bounded capability metadata builder (Phase 2)
+    security.ts      # Input sanitization + URL validation
+    event-emitter.ts # Dashboard event system with HTTP retry + circuit breaker + steer participant lifecycle (Phase 5)
     health.ts        # Health check — adapter, trace, dashboard, Langfuse probes
     tui-harness.ts   # tmux-backed CLI/TUI smoke test harness
     adapters/        # Platform adapters (pi, a2a, echo)
@@ -93,6 +97,10 @@ multi-agent-engine/
 | `mae expert <path>` | Interactive expert REPL |
 | `mae health` | Engine health check (adapters, traces, dashboard, Langfuse) |
 | `mae health --json` | Machine-readable JSON health output |
+| `mae validate-cert <trace>` | Validate certification evidence from trace (deterministic) |
+| `mae validate-cert <trace> --interactive-cert` | Allow steer events in interactive certification |
+| `mae validate-cert <trace> --strict-spawn` | Require SPAWN_DECISION evidence for all workers |
+| `mae validate-cert <trace> --json` | Machine-readable validation contract |
 
 ## Observability Stack
 
@@ -130,22 +138,69 @@ No agent modifies its own config. Run `mae ralph` overnight.
 
 ## Key Files
 
-- `engine/orchestrator.ts` — session lifecycle, adapter management, steer commands
+- `engine/orchestrator.ts` — session lifecycle, adapter management, steer commands, steer participant emission
 - `engine/chain-runner.ts` — chain execution loop, till_done verification
 - `engine/chain-validator.ts` — config-only chain previews for teams, agents, checks, and cost
+- `engine/certification-validator.ts` — deterministic certification evidence validator (14 checks including steer policy)
+- `engine/spawn-decision.ts` — SPAWN_DECISION parser, validator, prompt builder
 - `engine/team-execution.ts` — decomposed into 7 sub-functions (prepareTeamStep → buildTeamResult)
+- `engine/worker-lifecycle.ts` — worker retry, Sr. spawning, lead review, spawn decision enforcement
 - `engine/session-state.ts` — centralized status transitions (active → paused → completed/error)
+- `engine/event-emitter.ts` — dashboard events, participant lifecycle, steer action bracket (start→action→end)
 - `engine/logger.ts` — all logging goes through this, no raw console.log
-- `engine/security.ts` — input sanitization only (42 lines, enforcement delegated to Pi extensions)
-- `specs/trace-schema.md` — the contract between traces and the Ralph loop
+- `engine/security.ts` — input sanitization, secret redaction
+- `engine/trace-recorder.ts` — per-session JSONL traces with typed field extraction for all event types
+- `specs/trace-schema.md` — the contract between traces and the Ralph loop (includes steer events)
 - `agents/teams/chains.yaml` — chain definitions (plan-build-review, swarm-review, etc.)
 - `agents/teams/teams.yaml` — team structure with all agents
+
+## Standard Swarm v2 Certification
+
+The certification system validates swarm review sessions through deterministic evidence checks. No LLM calls — all checks inspect trace events and artifacts.
+
+### Validator checks (14)
+
+| # | Check | Description |
+|---|-------|-------------|
+| 1 | `lifecycle_complete` | All 5 required review leads completed |
+| 2 | `no_operational_failures` | No session crashes, agent.error, worker_failed |
+| 3 | `no_empty_outputs` | No unsuperseded empty output artifacts |
+| 4 | `no_scope_drift` | No tool calls escaped certification workdir |
+| 5 | `no_wrong_fixture` | No tool calls to wrong fixture |
+| 6 | `no_repo_source_reads` | No reads to repo source during fixture cert (live Pi) |
+| 7 | `no_worker_spawns` | Lead-only mode enforced (live Pi) |
+| 8 | `no_leaked_contracts` | Non-synthesis agents didn’t emit CERTIFICATION_CONTRACT |
+| 9 | `canonical_artifact_exists` | Synthesis artifact with valid contract block found |
+| 10 | `team_contracts_valid` | Leads use REVIEW_REPORT, not CERTIFICATION_CONTRACT |
+| 11 | `no_stale_participants` | No unresolved stale participants |
+| 12 | `contract_matches_evidence` | Contract fields match trace evidence |
+| 13 | `spawn_decisions_valid` | Spawn decisions valid (strict mode: all workers covered) |
+| 14 | `steer_events_valid` | No steer events in unattended cert; valid steer with lifecycle bracket in interactive cert |
+
+### Certification modes
+
+- **Unattended** (default, fail-closed): Any web/CLI steer event fails validation. Proves no human intervention.
+- **Interactive** (`--interactive-cert`): Steer events allowed but audited. Each steer action must have a complete `participant_start → steer_action → participant_end` lifecycle bracket. Authority must be 90, `certification_impact` must be valid, steer stop must not mask incomplete lead lifecycles.
+
+### Steer participants (Phase 5)
+
+Every dashboard/CLI/API steer interaction creates a transient participant lifecycle:
+
+```
+participant_start (web-steer-1) → steer_action → participant_end (web-steer-1)
+```
+
+- Authority: 90 (constant `STEER_AUTHORITY`)
+- Kinds: `web-steer`, `cli-steer`
+- Source inference: `tui-*` messageId prefix → CLI, otherwise web
+- Ping is diagnostic-only (no steer event)
+- Events traced in JSONL as `steer.action` with structured field extraction
 
 ## Testing
 
 Run with `bun test` or `just test`. Tmux smoke coverage is opt-in with `MAE_RUN_TMUX_TESTS=1 bun test engine/tui-harness.test.ts`.
 
-Critical modules tested: team-execution (18), event-emitter (13), session-state (13), worker-lifecycle (6), replay (17), ralph-loop (25), logger (13), goal-classifier (8).
+Critical modules tested: certification-validator (59), team-execution (24), event-emitter (26), session-state (13), trace-recorder (19), worker-lifecycle (6), replay (17), ralph-loop (25), steering (20), logger (13), spawn-decision (12), goal-classifier (8), integration (30).
 
 ## Build & Install
 

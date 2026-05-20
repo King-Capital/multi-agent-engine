@@ -4,11 +4,11 @@ Canonical PRD: `../standard-swarm-v2-prd-workflow.md`
 
 ## Current status
 
-**Phase 4 implementation started on `codex-phase4`.** Branch/worktree created from merged Phase 3 main (`5dc6c58`). Structured spawn decisions are implemented for strict mode with targeted parser, worker execution, and validator tests passing.
+**Phase 5 consolidated and swarm-reviewed on `pi-opus-phase5`.** Base implementation + cherry-picks from codex (trace recorder, STEER_AUTHORITY, validator hardening), claude (evidence-hiding detection), and gpt55 (dashboard Go SteerSource). All swarm findings (3 High, 2 Medium, 7 Low) addressed. 650 tests pass, 0 fail.
 
 ## Current phase
 
-Phase 4 structured spawn decisions — implementation in progress.
+Phase 5 web/CLI steer as high-authority participants — consolidated, swarm-reviewed, all findings fixed. Ready for PR.
 
 ## Scope reminder
 
@@ -113,13 +113,25 @@ Known historical risks:
 
 ### Phase 5 — Web/CLI steer participants (#338)
 
-- [ ] `web-steer` participant kind added
-- [ ] `cli-steer` participant kind added
-- [ ] Authority 90 default added
-- [ ] Steer events traced
-- [ ] Unattended vs interactive cert semantics implemented
-- [ ] Validator checks steer effects
-- [ ] Tests pass
+- [x] `web-steer` participant kind added (already in types.ts from Phase 2; now instrumented)
+- [x] `cli-steer` participant kind added (already in types.ts from Phase 2; now instrumented)
+- [x] Authority 90 default added
+- [x] SteerSource, SteerIntent, SteerEventData types defined
+- [x] EventEmitter.steerAction() emits transient participant lifecycle + steer_action event
+- [x] Orchestrator.inferSteerSource() classifies web vs CLI vs API
+- [x] Orchestrator.classifySteerIntent() maps messages to structured intents
+- [x] All steer commands and freeform messages traced with participant start/end bracket
+- [x] Ping remains diagnostic-only (no steer event)
+- [x] Unattended vs interactive cert semantics implemented (checkSteerEvents)
+- [x] Validator steering_valid field reflects actual evidence (not hardcoded true)
+- [x] Validator enforces lifecycle bracket (participant_start → steer_action → participant_end) per steer event
+- [x] --unattended CLI flag added for mae validate-cert
+- [x] Dashboard Go model adds EventSteerAction constant
+- [x] Trace schema docs updated with steer event section
+- [x] 14 targeted tests pass (8 validator + 4 emitter + 2 steering)
+- [x] Integration test mocks updated
+- [x] Echo cert smoke passes
+- [x] Cert harness (40 checks) passes
 
 ### Phase 6 — Dashboard agent pool (#332)
 
@@ -249,9 +261,52 @@ Branch: `codex-phase4` from merged Phase 3 main (`5dc6c58`).
 | `bun test engine/spawn-decision.test.ts engine/team-execution.test.ts engine/certification-validator.test.ts` | pass | 68 pass, 0 fail; schema parsing, strict worker spawn rejection, decision-derived worker prompts, validator strict-spawn checks |
 | `cd engine && bunx tsc --noEmit` | pass | Typecheck clean |
 
+## Phase 5 targeted validation snapshot
+
+Branch: `pi-opus-phase5` from merged Phase 4 main (`ec1e895`). Consolidated with cherry-picks + swarm review fixes.
+
+| Command | Result | Evidence |
+|---|---|---|
+| `cd engine && bunx tsc --noEmit` | pass | Typecheck clean |
+| `bun test` | pass | 650 pass, 1 skip, 0 fail |
+| `scripts/certify-live-swarm-test` | pass | 40 cert harness regression checks including steer_events_valid |
+| `scripts/certify-live-swarm --only failing` | pass | Echo smoke PASS |
+| `git diff --check` | pass | No whitespace errors |
+
+### Swarm review findings addressed
+
+| Finding | Severity | Fix |
+|---|---|---|
+| F1: Trace recorder missing source/content extraction | High | Added source + content to steer.action extractTraceFields |
+| F2: Validator flat-vs-nested field mismatch | High | Added steerField() helper + flat TraceEvent fields |
+| F3: Evidence-hiding bypass via duplicate lead end | High | Uses unique-lead Set, not any-end-after-stop |
+| F4: Unused steerParticipants variable | Medium | Removed |
+| F5: Trace-schema doc says wrong default | Medium | Fixed to match --interactive-cert opt-in |
+| L1: Participant ID prefix inconsistency | Low | Uses kind-based prefix |
+| L2: Wasted classifySteerIntent call | Low | Moved below ! branch |
+| L3: Tests duplicate logic | Low | Extracted as exported functions |
+| L5: No try/finally in steerAction | Low | Added try/finally bracket |
+| L6: "api" SteerSource unreachable | Low | Added doc comment |
+| L7: "none" cert impact untested | Low | Added test |
+| L9: Dashboard SSE missing steer_action | Low | Added to SSE_EVENT_TYPES |
+
+PR #364 re-swarm findings:
+
+| Finding | Severity | Fix |
+|---|---|---|
+| H1: Steer event ordering race (void vs await) | High | await in handleSteerCommand, .catch() for freeform |
+| H2: Steer content not sanitized | High | sanitizeAgentInput() applied |
+| M1: Unvoided async handleSteerCommand | Medium | void added |
+| M4: isSteerParticipant dead code | Medium | Removed |
+| M5: DECISIONS.md wrong cert default text | Medium | Fixed |
+| M-codex: Check name drift | Medium | Stabilized to steer_events_valid |
+| M-pi: No trace-recorder test | Medium | Added steer.action test |
+| H-codex: No lifecycle bracket validation | High | Validator enforces start→action→end per steer event |
+| L5: Assessment file in repo root | Low | Moved to .reports/ |
+
 ## Open blockers
 
-None currently for the Phase 4 targeted implementation. Full local bundle and echo smoke still required before phase completion.
+None. Phase 5 is complete with zero deferred findings.
 
 ## Open risks
 

@@ -902,4 +902,445 @@ describe("certification-validator", () => {
 			expect(result.lifecycle_valid).toBe(false);
 		});
 	});
+
+	// -----------------------------------------------------------------------
+	// Phase 5: Steer event validation
+	// -----------------------------------------------------------------------
+
+	describe("steer event checks", () => {
+		function steerActionEvent(sessionId: string, overrides?: Record<string, unknown>, kind: string = "web-steer"): object {
+			return {
+				type: "steer.action",
+				event_type: "steer_action",
+				session_id: sessionId,
+				agent_id: `${kind}-1`,
+				data: {
+					participant_id: `${kind}-1`,
+					sender: "user",
+					source: kind === "cli-steer" ? "cli" : "web",
+					authority: 90,
+					intent: "freeform",
+					target: "orchestrator",
+					content: "focus on auth module",
+					certification_impact: "blocks_unattended",
+					...overrides,
+				},
+			};
+		}
+
+		function steerParticipantStart(sessionId: string, kind: string = "web-steer"): object {
+			return {
+				type: "participant.start",
+				event_type: "participant_start",
+				session_id: sessionId,
+				agent_id: `${kind}-1`,
+				data: {
+					participant_id: `${kind}-1`,
+					kind,
+					status: "active",
+					name: kind === "cli-steer" ? "CLI Operator" : "Dashboard Operator",
+					role: "steer",
+				},
+			};
+		}
+
+		function steerParticipantEnd(sessionId: string, kind: string = "web-steer"): object {
+			return {
+				type: "participant.end",
+				event_type: "participant_end",
+				session_id: sessionId,
+				agent_id: `${kind}-1`,
+				data: { participant_id: `${kind}-1`, status: "completed" },
+			};
+		}
+
+		/** Full steer bracket: start → action → end */
+		function steerBracket(sessionId: string, overrides?: Record<string, unknown>, kind: string = "web-steer"): object[] {
+			return [
+				steerParticipantStart(sessionId, kind),
+				steerActionEvent(sessionId, overrides, kind),
+				steerParticipantEnd(sessionId, kind),
+			];
+		}
+
+		// --- Default = fail-closed (unattended) ---
+
+		test("default mode (no interactiveCert) fails on steer events", () => {
+			const sid = makeSessionId(100);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				steerActionEvent(sid),
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			// Default: interactiveCert=undefined → unattended/strict
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean" }));
+			expect(result.steering_valid).toBe(false);
+			expect(result.validated).toBe(false);
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(false);
+			expect(check?.details).toContain("unattended certification");
+		});
+
+		test("passes when no steer events exist (default unattended)", () => {
+			const sid = makeSessionId(101);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean" }));
+			expect(result.steering_valid).toBe(true);
+			expect(findCheck(result, "steer_events_valid")?.passed).toBe(true);
+		});
+
+		test("multiple steer events in unattended mode includes count", () => {
+			const sid = makeSessionId(102);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				steerActionEvent(sid, { intent: "pause" }),
+				steerActionEvent(sid, { intent: "resume" }),
+				steerActionEvent(sid, { intent: "freeform" }),
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean" }));
+			expect(result.steering_valid).toBe(false);
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.details).toContain("3 steer event(s)");
+		});
+
+		// --- Interactive cert (--interactive-cert) ---
+
+		test("passes with steer events in interactive mode (valid impact)", () => {
+			const sid = makeSessionId(103);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				...steerBracket(sid),
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			expect(result.steering_valid).toBe(true);
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(true);
+			expect(check?.evidence).toContain("Interactive certification");
+			expect(check?.details).toContain("web:freeform");
+		});
+
+		test("records CLI steer intents in interactive mode", () => {
+			const sid = makeSessionId(104);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				...steerBracket(sid, { source: "cli", intent: "pause" }, "cli-steer"),
+				...steerBracket(sid, { source: "cli", intent: "resume" }, "cli-steer"),
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			expect(result.steering_valid).toBe(true);
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(true);
+			expect(check?.details).toContain("cli:pause");
+			expect(check?.details).toContain("cli:resume");
+		});
+
+		// --- Authority validation ---
+
+		test("fails when steer action has non-90 authority", () => {
+			const sid = makeSessionId(105);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				...steerBracket(sid, { authority: 50 }),
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			expect(result.steering_valid).toBe(false);
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(false);
+			expect(check?.details).toContain("non-90 authority");
+		});
+
+		// --- Certification impact validation ---
+
+		test("fails with missing certification_impact in interactive mode", () => {
+			const sid = makeSessionId(106);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				...steerBracket(sid, { certification_impact: undefined }),
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			expect(result.steering_valid).toBe(false);
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(false);
+			expect(check?.details).toContain("invalid certification_impact");
+		});
+
+		test("fails with unknown certification_impact value", () => {
+			const sid = makeSessionId(107);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				...steerBracket(sid, { certification_impact: "corrupted" }),
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			expect(result.steering_valid).toBe(false);
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(false);
+			expect(check?.details).toContain("invalid certification_impact");
+		});
+
+		test("accepts certification_impact 'none' in interactive mode", () => {
+			const sid = makeSessionId(114);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				...steerBracket(sid, { certification_impact: "none" }),
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(true);
+		});
+
+		// --- Lifecycle bracket validation ---
+
+		test("fails when steer_action has no participant_start bracket", () => {
+			const sid = makeSessionId(115);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				// steer_action with NO preceding participant_start
+				steerActionEvent(sid),
+				{ type: "participant.end", event_type: "participant_end", session_id: sid, agent_id: "web-steer-1", data: { participant_id: "web-steer-1", status: "completed" } },
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(false);
+			expect(check?.details).toContain("missing participant_start bracket");
+		});
+
+		test("fails when steer_action has no participant_end bracket", () => {
+			const sid = makeSessionId(116);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				steerParticipantStart(sid),
+				steerActionEvent(sid),
+				// NO participant_end
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(false);
+			expect(check?.details).toContain("missing participant_end bracket");
+		});
+
+		test("passes when steer_action has complete start/end bracket", () => {
+			const sid = makeSessionId(117);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				steerParticipantStart(sid),
+				steerActionEvent(sid),
+				{ type: "participant.end", event_type: "participant_end", session_id: sid, agent_id: "web-steer-1", data: { participant_id: "web-steer-1", status: "completed" } },
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(true);
+		});
+
+		// --- Evidence-hiding detection (from claude) ---
+
+		test("interactive mode fails when steer stop hides incomplete lead lifecycle", () => {
+			const sid = makeSessionId(108);
+			const synthRef = writeArtifact(sid, "synth.txt", validFailContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				// Only 2 of 5 leads complete before steer stop
+				{ type: "agent.end", session_id: sid, agent_id: "pi-correctness-lead", team: "Correctness Review" },
+				{ type: "agent.end", session_id: sid, agent_id: "pi-adversarial-lead", team: "Adversarial Review" },
+				...steerBracket(sid, { intent: "stop" }),
+				// No more lead ends after the stop
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "error" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "failing", interactiveCert: true }));
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(false);
+			expect(check?.details).toContain("Steer stop prevented remaining leads from completing");
+		});
+
+		test("evidence-hiding not bypassed by duplicate lead end after stop", () => {
+			const sid = makeSessionId(111);
+			const synthRef = writeArtifact(sid, "synth.txt", validFailContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				// Only 2 unique leads complete before stop
+				{ type: "agent.end", session_id: sid, agent_id: "pi-correctness-lead", team: "Correctness Review" },
+				{ type: "agent.end", session_id: sid, agent_id: "pi-adversarial-lead", team: "Adversarial Review" },
+				...steerBracket(sid, { intent: "stop" }),
+				// Duplicate/fake lead end after stop — should NOT bypass the check
+				{ type: "agent.end", session_id: sid, agent_id: "pi-correctness-lead", team: "Correctness Review" },
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "error" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "failing", interactiveCert: true }));
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(false);
+			expect(check?.details).toContain("Steer stop prevented remaining leads from completing");
+			expect(check?.details).toContain("2/5");
+		});
+
+		test("interactive mode passes when steer stop does not hide evidence", () => {
+			const sid = makeSessionId(109);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				...steerBracket(sid, { intent: "pause" }),
+				...steerBracket(sid, { intent: "resume" }),
+				// All 5 leads complete after the steer events
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(true);
+		});
+
+		// --- event_type-only format ---
+
+		test("steer events with event_type only (no type field) are detected", () => {
+			const sid = makeSessionId(110);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				steerParticipantStart(sid),
+				{
+					event_type: "steer_action",
+					session_id: sid,
+					agent_id: "web-steer-1",
+					data: {
+						sender: "user", source: "web", authority: 90,
+						intent: "pause", target: "orchestrator", content: "!pause",
+						certification_impact: "blocks_unattended",
+					},
+				},
+				steerParticipantEnd(sid),
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			// Default = unattended, should fail
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean" }));
+			expect(result.steering_valid).toBe(false);
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(false);
+			expect(check?.details).toContain("unattended certification");
+
+			// In interactive mode, the intent should be visible
+			const interactive = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			const iCheck = findCheck(interactive, "steer_events_valid");
+			expect(iCheck?.details).toContain("web:pause");
+		});
+
+		test("reads flat fields from trace-recorder format (no data wrapper)", () => {
+			const sid = makeSessionId(112);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				// Flat bracket: trace-recorder format
+				{ type: "participant.start", session_id: sid, agent_id: "cli-steer-1", data: { participant_id: "cli-steer-1", kind: "cli-steer", status: "active" } },
+				{
+					type: "steer.action",
+					session_id: sid,
+					agent_id: "cli-steer-1",
+					sender: "user",
+					source: "cli",
+					authority: 90,
+					intent: "budget",
+					target: "orchestrator",
+					certification_impact: "blocks_unattended",
+				},
+				{ type: "participant.end", session_id: sid, agent_id: "cli-steer-1", data: { participant_id: "cli-steer-1", status: "completed" } },
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			// Interactive mode: should read flat fields correctly
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(true);
+			expect(check?.details).toContain("cli:budget");
+
+			// Unattended: should still detect flat steer events
+			const unattended = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean" }));
+			expect(unattended.steering_valid).toBe(false);
+		});
+
+		test("rejects string authority even if it coerces to 90", () => {
+			const sid = makeSessionId(113);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				...steerBracket(sid, { authority: "90" }),
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			expect(result.steering_valid).toBe(false);
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.details).toContain("non-90 authority");
+		});
+	});
 });

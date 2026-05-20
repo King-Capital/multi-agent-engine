@@ -191,6 +191,10 @@ func handleUserMessage(w http.ResponseWriter, r *http.Request) {
 		messageID = fmt.Sprintf("msg-%d", time.Now().UnixNano())
 	}
 	targetAgentID := strings.TrimSpace(r.FormValue("target_agent_id"))
+	steerSource := strings.TrimSpace(r.FormValue("steer_source"))
+	if steerSource != "cli" {
+		steerSource = "web"
+	}
 	if targetAgentID == "" {
 		targetAgentID = "orchestrator"
 	} else if !isSafeMessageTarget(targetAgentID) {
@@ -214,10 +218,11 @@ func handleUserMessage(w http.ResponseWriter, r *http.Request) {
 		AgentID:   "user",
 		EventType: models.EventMessage,
 		Data: models.EventData{
-			From:      "user",
-			To:        targetAgentID,
-			Content:   content,
-			MessageID: messageID,
+			From:        "user",
+			To:          targetAgentID,
+			Content:     content,
+			MessageID:   messageID,
+			SteerSource: steerSource,
 		},
 	}
 	if err := persistEventForSSE(r.Context(), &evt); err != nil {

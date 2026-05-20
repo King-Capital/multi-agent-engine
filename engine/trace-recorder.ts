@@ -34,6 +34,7 @@ type TraceType =
   | "tool.call"
   | "llm.call"
   | "spawn.decision"
+  | "steer.action"
   | "self_heal"
   | "verify"
   | "orch.decision"
@@ -111,7 +112,7 @@ function isTraceType(value: unknown): value is TraceType {
     "session.start", "session.end", "participant.start", "participant.activity",
     "participant.heartbeat", "participant.stale", "participant.end",
     "agent.start", "agent.end", "agent.error",
-    "chain.step.start", "chain.step.end", "tool.call", "llm.call", "spawn.decision",
+    "chain.step.start", "chain.step.end", "tool.call", "llm.call", "spawn.decision", "steer.action",
     "self_heal", "verify", "orch.decision", "log",
   ].includes(value);
 }
@@ -241,6 +242,20 @@ function extractTraceFields(entry: LogEntry, traceType: TraceType): Record<strin
       if (entry.expected_output_schema !== undefined) fields.expected_output_schema = sanitizeAgentInput(String(entry.expected_output_schema)).slice(0, 500);
       if (entry.timeout_seconds !== undefined) fields.timeout_seconds = entry.timeout_seconds;
       if (entry.validation !== undefined) fields.validation = entry.validation;
+      break;
+
+    case "steer.action":
+      if (entry.participant_id !== undefined) fields.participant_id = entry.participant_id;
+      if (entry.sender !== undefined) fields.sender = entry.sender;
+      if (entry.source !== undefined) fields.source = entry.source;
+      if (entry.authority !== undefined) fields.authority = entry.authority;
+      if (entry.intent !== undefined) fields.intent = entry.intent;
+      if (entry.action !== undefined) fields.action = entry.action;
+      if (entry.target !== undefined) fields.target = entry.target;
+      if (entry.reason !== undefined) fields.reason = sanitizeAgentInput(String(entry.reason)).slice(0, 500);
+      if (entry.content !== undefined) fields.content = sanitizeAgentInput(String(entry.content)).slice(0, 500);
+      if (entry.certification_impact !== undefined) fields.certification_impact = entry.certification_impact;
+      if (entry.message_id !== undefined) fields.message_id = entry.message_id;
       break;
 
     case "self_heal":

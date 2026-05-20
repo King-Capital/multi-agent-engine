@@ -129,6 +129,22 @@ Required decision data:
 
 Retry workers and Sr. recovery agents also emit strict spawn decisions before their `agent_spawn` events. Adapter-level `agent.start` traces include the canonical `mae_agent_id` so deterministic validation can bind Pi/Echo/A2A local agent ids back to the MAE worker authorization event.
 
+### Steer Participants
+
+Dashboard operators, CLI users, and API callers who send steer messages (`!pause`, `!resume`, `!stop`, `!budget`, or freeform text) are traced as **steer participants**. Each steer interaction creates a transient participant lifecycle bracket:
+
+1. `participant_start` — registers the steer actor with kind `web-steer` or `cli-steer`, authority 90
+2. `steer_action` — structured trace event with sender, source, authority, intent, target, content, and certification impact
+3. `participant_end` — closes the bracket (transient, not long-lived)
+
+Steer source is inferred from the `message_id` prefix: `tui-*` = CLI, otherwise web. Ping messages are diagnostic and do not create steer events.
+
+Steer events affect certification:
+- **Unattended mode** (default): any steer event fails the `steer_events_valid` validator check. Use this to prove a session completed without human intervention.
+- **Interactive mode** (`--interactive-cert`): steer events are allowed but audited. Each steer action must have a complete `participant_start → steer_action → participant_end` lifecycle bracket. Authority must be 90, `certification_impact` must be `blocks_unattended` or `none`, and a steer stop must not mask incomplete lead lifecycles (evidence-hiding detection).
+
+See `specs/trace-schema.md` for the full event schema and `mae validate-cert --interactive-cert` for interactive certification.
+
 ### Domain Locking
 
 Each agent has a `domain` config that restricts what files they can read and write:

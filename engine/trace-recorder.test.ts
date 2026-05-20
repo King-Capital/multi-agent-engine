@@ -404,6 +404,47 @@ describe("trace-recorder", () => {
     recorder.close?.();
   });
 
+  test("records structured steer action trace fields", () => {
+    const recorder = createTraceRecorder(TEST_TRACE_DIR);
+    const sessionId = "test-steer-action";
+
+    recorder.write(makeEntry({
+      session_id: sessionId,
+      agent_id: "web-steer-1",
+      msg: "Steer action",
+      component: "event-emitter",
+      trace_type: "steer.action",
+      participant_id: "web-steer-1",
+      sender: "user",
+      source: "web",
+      authority: 90,
+      intent: "freeform",
+      action: "freeform",
+      target: "orchestrator",
+      reason: "focus on auth module",
+      content: "focus on auth module",
+      certification_impact: "blocks_unattended",
+      message_id: "msg-123",
+    }));
+
+    const content = readFileSync(join(TEST_TRACE_DIR, `${sessionId}.jsonl`), "utf-8");
+    const event = JSON.parse(content.trim());
+
+    expect(event.type).toBe("steer.action");
+    expect(event.agent_id).toBe("web-steer-1");
+    expect(event.participant_id).toBe("web-steer-1");
+    expect(event.sender).toBe("user");
+    expect(event.source).toBe("web");
+    expect(event.authority).toBe(90);
+    expect(event.intent).toBe("freeform");
+    expect(event.target).toBe("orchestrator");
+    expect(event.reason).toBe("focus on auth module");
+    expect(event.content).toBe("focus on auth module");
+    expect(event.certification_impact).toBe("blocks_unattended");
+    expect(event.message_id).toBe("msg-123");
+    recorder.close?.();
+  });
+
   test("close resets internal state", async () => {
     const recorder = createTraceRecorder(TEST_TRACE_DIR);
 

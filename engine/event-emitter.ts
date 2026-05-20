@@ -1,4 +1,4 @@
-import type { ParticipantCapabilities, ParticipantKind, ParticipantStatus, SessionEvent, SessionStateEvent } from "./types";
+import type { ParticipantCapabilities, ParticipantKind, ParticipantStatus, SessionEvent, SessionStateEvent, SteerEventData, SteerSource, SteerIntent } from "./types";
 import type { BudgetProjection } from "./budget";
 import type { SpawnDecision, SpawnDecisionValidation } from "./spawn-decision";
 import { createLogger } from "./logger";
@@ -30,6 +30,9 @@ function participantKindForRole(role: string): ParticipantKind {
   if (role === "orchestrator" || role === "lead" || role === "worker" || role === "sr" || role === "synthesis") return role;
   return "system";
 }
+
+/** Default authority level for web/CLI steer operators. */
+export const STEER_AUTHORITY = 90;
 
 export class EventEmitter {
   private dashboardUrl: string;
@@ -173,6 +176,88 @@ export class EventEmitter {
       reason: opts.reason,
       lastEvent: opts.lastEvent ?? "participant_end",
     });
+  }
+
+  // --- Phase 5: Steer participant lifecycle and steer events ---
+
+  private steerParticipantCounter = 0;
+
+  /**
+   * Generate a stable steer participant ID.
+   * Web steer and CLI steer are transient participants — each steer action
+   * gets a start/end lifecycle bracket. The counter ensures unique IDs within
+   * a session.
+   */
+  private nextSteerParticipantId(source: SteerSource): string {
+    this.steerParticipantCounter++;
+    const kind = source === "cli" ? "cli-steer" : "web-steer";
+    return `${kind}-${this.steerParticipantCounter}`;
+  }
+
+  /**
+   * Emit a steer event and bracket it with participant start/end lifecycle.
+   * Steer participants are transient — they represent a single human or API
+   * interaction, not a long-running agent.
+   */
+  async steerAction(sessionId: string, data: SteerEventData): Promise<string> {
+    const participantId = this.nextSteerParticipantId(data.source);
+    const kind: ParticipantKind = data.source === "cli" ? "cli-steer" : "web-steer";
+    const name = data.source === "cli" ? "CLI Operator" : data.source === "web" ? "Dashboard Operator" : "API Operator";
+    const timestamp = new Date().toISOString();
+
+    // 1. participant_start
+    await this.participantStart(sessionId, participantId, {
+      name,
+      kind,
+      role: "steer",
+      currentTask: `${data.intent}: ${data.content.slice(0, 80)}`,
+      capabilities: {
+        canSteer: true,
+        canReceiveSteer: false,
+        canSpawnWorkers: false,
+        canReviewWorkers: false,
+        canWriteFiles: false,
+        canDelegate: false,
+        authority: data.authority,
+      },
+    });
+
+    try {
+      // 2. steer_action event with full structured data
+      const payload: Record<string, unknown> = {
+        sender: data.sender,
+        source: data.source,
+        authority: data.authority,
+        intent: data.intent,
+        target: data.target,
+        content: redactSecrets(data.content),
+        certification_impact: data.certification_impact,
+        ...(data.reason ? { reason: redactSecrets(data.reason) } : {}),
+        ...(data.message_id ? { message_id: data.message_id } : {}),
+      };
+
+      log.info("Steer action", {
+        trace_type: "steer.action",
+        session_id: sessionId,
+        participant_id: participantId,
+        ...payload,
+      });
+
+      await this.emit({
+        session_id: sessionId,
+        agent_id: participantId,
+        event_type: "steer_action",
+        timestamp,
+        data: payload,
+      });
+    } finally {
+      // 3. participant_end (transient — always close the bracket)
+      await this.participantEnd(sessionId, participantId, "completed", {
+        lastEvent: "steer_action",
+      });
+    }
+
+    return participantId;
   }
 
   private async fetchWithRetry(url: string, init: RequestInit): Promise<Response | null> {

@@ -1,5 +1,6 @@
 import { afterEach, describe, test, expect, mock } from "bun:test";
 import { listenForUserMessages, sendUserMessage, broadcastControlMessage } from "./messaging";
+import { inferSteerSource, classifySteerIntent } from "./orchestrator";
 
 const originalFetch = globalThis.fetch;
 
@@ -183,6 +184,32 @@ describe("steering commands (#147)", () => {
       // !stop should also clear pause
       paused.delete("sess-1");
       expect(paused.has("sess-1")).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Phase 5: Steer source inference and intent classification
+  // -------------------------------------------------------------------------
+
+  describe("steer source inference", () => {
+    test("tui- prefix identifies CLI source", () => {
+      expect(inferSteerSource("tui-12345-abc")).toBe("cli");
+      expect(inferSteerSource("msg-12345")).toBe("web");
+      expect(inferSteerSource(undefined)).toBe("unknown");
+      expect(inferSteerSource("")).toBe("unknown");
+    });
+  });
+
+  describe("steer intent classification", () => {
+    test("classifies ! commands as steer intents", () => {
+      expect(classifySteerIntent("!pause")).toBe("pause");
+      expect(classifySteerIntent("!resume")).toBe("resume");
+      expect(classifySteerIntent("!stop")).toBe("stop");
+      expect(classifySteerIntent("!budget 100")).toBe("budget");
+      expect(classifySteerIntent("!unknown")).toBe("unknown");
+      expect(classifySteerIntent("ping")).toBe("ping");
+      expect(classifySteerIntent("focus on auth")).toBe("freeform");
+      expect(classifySteerIntent("@lead check tests")).toBe("freeform");
     });
   });
 });

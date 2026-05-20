@@ -7,6 +7,7 @@ import { createLangfuseSink } from "./langfuse-sink";
 import { createTraceRecorder, TRACE_DIR } from "./trace-recorder";
 import { sanitizeAgentInput } from "./security";
 import { buildParticipantCapabilities } from "./participant-capabilities";
+import { STEER_AUTHORITY } from "./event-emitter";
 
 if (process.env.LANGFUSE_PUBLIC_KEY && process.env.LANGFUSE_SECRET_KEY) {
   addSink(createLangfuseSink({
@@ -41,10 +42,36 @@ import type {
   PlatformAdapter,
   SessionState,
   OrchestratorAction,
+  SteerSource,
+  SteerIntent,
 } from "./types";
 import { transitionStatus } from "./session-state";
 
 const log = createLogger("orchestrator");
+
+/**
+ * Infer steer source from message metadata.
+ * CLI TUI uses `tui-` prefixed message IDs; dashboard web posts go through
+ * the SSE listener; direct API calls have no prefix.
+ */
+export function inferSteerSource(messageId?: string): SteerSource {
+  if (!messageId) return "unknown";
+  if (messageId.startsWith("tui-")) return "cli";
+  return "web";
+}
+
+/**
+ * Classify the intent of a steer message.
+ */
+export function classifySteerIntent(message: string): SteerIntent {
+  if (message.startsWith("!")) {
+    const cmd = message.slice(1).split(/\s+/)[0]?.toLowerCase() ?? "";
+    if (cmd === "pause" || cmd === "resume" || cmd === "stop" || cmd === "budget") return cmd;
+    return "unknown";
+  }
+  if (message.trim().toLowerCase() === "ping") return "ping";
+  return "freeform";
+}
 
 export class Orchestrator {
   private adapters: Map<string, PlatformAdapter> = new Map();
@@ -107,20 +134,44 @@ export class Orchestrator {
     this.defaultAdapter = name;
   }
 
+  private inferSteerSource(messageId?: string): SteerSource {
+    return inferSteerSource(messageId);
+  }
+
+  private classifySteerIntent(message: string): SteerIntent {
+    return classifySteerIntent(message);
+  }
+
   sendUserMessage(sessionId: string, message: string, messageId?: string, targetAgentId?: string): void {
+    const source = this.inferSteerSource(messageId);
+
     if (message.startsWith("!")) {
       const parts = message.slice(1).split(/\s+/);
       const cmd = parts[0] ?? "";
       const args = parts.slice(1).join(" ");
-      this.handleSteerCommand(sessionId, cmd, args);
+      void this.handleSteerCommand(sessionId, cmd, args, source, messageId);
       return;
     }
     const ackMetadata = messageId ? { ack_for: messageId } : {};
     const normalizedMessage = message.trim().toLowerCase();
     if (normalizedMessage === "ping") {
       void this.emitter.message(sessionId, "orch-1", "Orchestrator", "user", "pong", ackMetadata);
+      // Ping is diagnostic, no steer event
       return;
     }
+
+    // Freeform steer message — emit steer participant event
+    const intent = this.classifySteerIntent(message);
+    void this.emitter.steerAction(sessionId, {
+      sender: "user",
+      source,
+      authority: STEER_AUTHORITY,
+      intent,
+      target: targetAgentId ?? "orchestrator",
+      content: sanitizeAgentInput(message),
+      certification_impact: "blocks_unattended",
+      message_id: messageId,
+    }).catch(err => log.error("Steer action emit failed", { error: err instanceof Error ? err.message : String(err) }));
 
     void this.emitter.message(
       sessionId,
@@ -140,13 +191,29 @@ export class Orchestrator {
     sendUserMessage(this.messageSenders, sessionId, message, targetAgentId);
   }
 
-  private async handleSteerCommand(sessionId: string, command: string, args: string): Promise<void> {
+  private async handleSteerCommand(sessionId: string, command: string, args: string, source: SteerSource = "unknown", messageId?: string): Promise<void> {
     const ts = new Date().toISOString();
+    const intent: SteerIntent = (command === "pause" || command === "resume" || command === "stop" || command === "budget") ? command : "unknown";
     const emit = (type: string, msg: string) =>
       Promise.all([
         this.emitter.message(sessionId, "orch-1", "Orchestrator", "user", msg),
         this.emitter.emit({ session_id: sessionId, agent_id: "orch-1", event_type: type, timestamp: ts, data: {} }),
       ]);
+
+    // Emit steer participant event for all commands — await to ensure
+    // trace ordering (start → action → end) before the command's own events
+    await this.emitter.steerAction(sessionId, {
+      sender: "user",
+      source,
+      authority: STEER_AUTHORITY,
+      intent,
+      target: "orchestrator",
+      content: sanitizeAgentInput(args ? `!${command} ${args}` : `!${command}`),
+      reason: args || undefined,
+      certification_impact: "blocks_unattended",
+      message_id: messageId,
+    });
+
     switch (command) {
       case "pause": {
         this.pausedSessions.add(sessionId);
@@ -192,7 +259,7 @@ export class Orchestrator {
         await this.emitter.message(sessionId, "orch-1", "Orchestrator", "user",
           `Unknown command: !${command}. Available: !pause, !resume, !stop, !budget <amount>`);
     }
-    log.info("Steer command received", { session_id: sessionId, command });
+    log.info("Steer command received", { session_id: sessionId, command, source });
   }
 
   private drainMessageBuffer(sessionId: string): string {

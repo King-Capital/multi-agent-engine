@@ -154,7 +154,7 @@ describe("steering", () => {
     
     // Access the private messageSenders map via any cast
     const orchAny = orch as any;
-    orchAny.emitter = { message: async () => {} };
+    orchAny.emitter = { message: async () => {}, steerAction: async () => "steer-1" };
     orchAny.messageSenders = new Map([
       ["session-1:code-reviewer", (msg: string) => received.push({ agent: "code-reviewer", message: msg })],
       ["session-1:security-reviewer", (msg: string) => received.push({ agent: "security-reviewer", message: msg })],
@@ -173,7 +173,7 @@ describe("steering", () => {
     const received: string[] = [];
     
     const orchAny = orch as any;
-    orchAny.emitter = { message: async () => {} };
+    orchAny.emitter = { message: async () => {}, steerAction: async () => "steer-1" };
     orchAny.messageSenders = new Map([
       ["session-1:lead", (msg: string) => received.push(msg)],
       ["session-1:worker", (msg: string) => received.push(msg)],
@@ -201,6 +201,7 @@ describe("steering", () => {
       ) => {
         messages.push({ content, metadata });
       },
+      steerAction: async () => "steer-1",
     };
     orchAny.orchestratorLoop = {
       handleUserMessage: async (content: string) => {
@@ -233,6 +234,7 @@ describe("steering", () => {
       ) => {
         messages.push({ content, metadata });
       },
+      steerAction: async () => "steer-1",
     };
     orchAny.orchestratorLoop = {
       handleUserMessage: async (content: string) => {
@@ -274,6 +276,7 @@ describe("steering", () => {
       pgUpdateSession: async (id: string, updates: { status?: string }) => {
         pgUpdates.push({ id, status: updates.status });
       },
+      steerAction: async () => "steer-1",
     };
 
     orch.sendUserMessage("session-1", "!pause");

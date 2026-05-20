@@ -106,6 +106,38 @@ Runtime strict mode uses valid decisions as the authorized worker roster. It rej
 
 Adapter-level traces may use adapter-local ids such as `pi-backend-engineer` or `echo-backend-engineer`; when available, `agent.start` includes `mae_agent_id` and `mae_agent_name` so validators can bind the adapter event back to the canonical MAE `spawn.decision` event.
 
+### Steer Events
+
+Phase 5 adds steer events as the canonical trace for human/API interactions that influence a running session. Every `!pause`, `!resume`, `!stop`, `!budget`, and freeform steer message creates a `steer.action` event bracketed by a transient `participant.start`/`participant.end` lifecycle.
+
+```jsonl
+{"ts":"...","type":"participant.start","id":"...","session_id":"...","agent_id":"web-steer-1","participant_id":"web-steer-1","kind":"web-steer","status":"active","name":"Dashboard Operator","role":"steer","current_task":"freeform: focus on auth module","last_heartbeat_ts":"...","capabilities":{"canSteer":true,"canReceiveSteer":false,"canSpawnWorkers":false,"canReviewWorkers":false,"canWriteFiles":false,"canDelegate":false,"authority":90}}
+
+{"ts":"...","type":"steer.action","id":"...","session_id":"...","agent_id":"web-steer-1","sender":"user","source":"web|cli|api|unknown","authority":90,"intent":"pause|resume|stop|budget|freeform|ping|unknown","target":"orchestrator","content":"focus on auth module","certification_impact":"blocks_unattended|none","message_id":"msg-123"}
+
+{"ts":"...","type":"participant.end","id":"...","session_id":"...","agent_id":"web-steer-1","participant_id":"web-steer-1","status":"completed","last_event":"steer_action"}
+```
+
+Steer event fields:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `sender` | string | yes | Who sent the steer message (`user`, system name) |
+| `source` | string | yes | Origin: `web` (dashboard), `cli` (TUI), `api` (direct API call), `unknown` |
+| `authority` | number | yes | Authority level of the steer actor (default 90 for human operators) |
+| `intent` | string | yes | `pause`, `resume`, `stop`, `budget`, `freeform`, `ping`, `unknown` |
+| `target` | string | yes | Intended recipient (`orchestrator`, specific agent ID) |
+| `content` | string | yes | The steer message content |
+| `reason` | string | no | Additional reason/context (e.g., budget amount) |
+| `certification_impact` | string | yes | `blocks_unattended` for human steer, `none` for diagnostic-only |
+| `message_id` | string | no | Message dedup ID if available |
+
+Certification semantics:
+- **Unattended mode** (default): Any `steer_action` event fails the `steer_events_valid` validator check. This proves the session completed without human intervention.
+- **Interactive mode** (`--interactive-cert`): Steer events are recorded and allowed, but each must have a complete `participant_start → steer_action → participant_end` lifecycle bracket with valid `authority` (90) and `certification_impact` values. A steer stop that prevents remaining leads from completing still fails validation. The validator reports steer count and intents.
+
+Steer source inference: CLI TUI messages use `tui-` prefixed message IDs (`source: "cli"`). Dashboard web messages arrive via the SSE listener (`source: "web"`). Direct API calls without a recognized prefix use `source: "unknown"` or `source: "api"`.
+
 ### Tool Calls — Behavioral Fingerprint
 
 ```jsonl
