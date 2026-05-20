@@ -149,7 +149,7 @@ export class Orchestrator {
       const parts = message.slice(1).split(/\s+/);
       const cmd = parts[0] ?? "";
       const args = parts.slice(1).join(" ");
-      this.handleSteerCommand(sessionId, cmd, args, source, messageId);
+      void this.handleSteerCommand(sessionId, cmd, args, source, messageId);
       return;
     }
     const ackMetadata = messageId ? { ack_for: messageId } : {};
@@ -168,10 +168,10 @@ export class Orchestrator {
       authority: STEER_AUTHORITY,
       intent,
       target: targetAgentId ?? "orchestrator",
-      content: message,
+      content: sanitizeAgentInput(message),
       certification_impact: "blocks_unattended",
       message_id: messageId,
-    });
+    }).catch(err => log.error("Steer action emit failed", { error: err instanceof Error ? err.message : String(err) }));
 
     void this.emitter.message(
       sessionId,
@@ -200,14 +200,15 @@ export class Orchestrator {
         this.emitter.emit({ session_id: sessionId, agent_id: "orch-1", event_type: type, timestamp: ts, data: {} }),
       ]);
 
-    // Emit steer participant event for all commands
-    void this.emitter.steerAction(sessionId, {
+    // Emit steer participant event for all commands — await to ensure
+    // trace ordering (start → action → end) before the command's own events
+    await this.emitter.steerAction(sessionId, {
       sender: "user",
       source,
       authority: STEER_AUTHORITY,
       intent,
       target: "orchestrator",
-      content: args ? `!${command} ${args}` : `!${command}`,
+      content: sanitizeAgentInput(args ? `!${command} ${args}` : `!${command}`),
       reason: args || undefined,
       certification_impact: "blocks_unattended",
       message_id: messageId,

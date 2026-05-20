@@ -1015,7 +1015,7 @@ describe("certification-validator", () => {
 
 			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
 			expect(result.steering_valid).toBe(true);
-			const check = findCheck(result, "interactive_steering_valid");
+			const check = findCheck(result, "steer_events_valid");
 			expect(check?.passed).toBe(true);
 			expect(check?.evidence).toContain("Interactive certification");
 			expect(check?.details).toContain("web:freeform");
@@ -1036,7 +1036,7 @@ describe("certification-validator", () => {
 
 			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
 			expect(result.steering_valid).toBe(true);
-			const check = findCheck(result, "interactive_steering_valid");
+			const check = findCheck(result, "steer_events_valid");
 			expect(check?.passed).toBe(true);
 			expect(check?.details).toContain("cli:pause");
 			expect(check?.details).toContain("cli:resume");
@@ -1057,7 +1057,7 @@ describe("certification-validator", () => {
 
 			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
 			expect(result.steering_valid).toBe(false);
-			const check = findCheck(result, "interactive_steering_valid");
+			const check = findCheck(result, "steer_events_valid");
 			expect(check?.passed).toBe(false);
 			expect(check?.details).toContain("non-90 authority");
 		});
@@ -1077,7 +1077,7 @@ describe("certification-validator", () => {
 
 			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
 			expect(result.steering_valid).toBe(false);
-			const check = findCheck(result, "interactive_steering_valid");
+			const check = findCheck(result, "steer_events_valid");
 			expect(check?.passed).toBe(false);
 			expect(check?.details).toContain("invalid certification_impact");
 		});
@@ -1095,7 +1095,7 @@ describe("certification-validator", () => {
 
 			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
 			expect(result.steering_valid).toBe(false);
-			const check = findCheck(result, "interactive_steering_valid");
+			const check = findCheck(result, "steer_events_valid");
 			expect(check?.passed).toBe(false);
 			expect(check?.details).toContain("invalid certification_impact");
 		});
@@ -1112,7 +1112,7 @@ describe("certification-validator", () => {
 			]);
 
 			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
-			const check = findCheck(result, "interactive_steering_valid");
+			const check = findCheck(result, "steer_events_valid");
 			expect(check?.passed).toBe(true);
 		});
 
@@ -1133,7 +1133,7 @@ describe("certification-validator", () => {
 			]);
 
 			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "failing", interactiveCert: true }));
-			const check = findCheck(result, "interactive_steering_valid");
+			const check = findCheck(result, "steer_events_valid");
 			expect(check?.passed).toBe(false);
 			expect(check?.details).toContain("Steer stop prevented remaining leads from completing");
 		});
@@ -1154,7 +1154,7 @@ describe("certification-validator", () => {
 			]);
 
 			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "failing", interactiveCert: true }));
-			const check = findCheck(result, "interactive_steering_valid");
+			const check = findCheck(result, "steer_events_valid");
 			expect(check?.passed).toBe(false);
 			expect(check?.details).toContain("Steer stop prevented remaining leads from completing");
 			expect(check?.details).toContain("2/5");
@@ -1174,7 +1174,7 @@ describe("certification-validator", () => {
 			]);
 
 			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
-			const check = findCheck(result, "interactive_steering_valid");
+			const check = findCheck(result, "steer_events_valid");
 			expect(check?.passed).toBe(true);
 		});
 
@@ -1209,7 +1209,7 @@ describe("certification-validator", () => {
 
 			// In interactive mode, the intent should be visible
 			const interactive = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
-			const iCheck = findCheck(interactive, "interactive_steering_valid");
+			const iCheck = findCheck(interactive, "steer_events_valid");
 			expect(iCheck?.details).toContain("web:pause");
 		});
 
@@ -1237,7 +1237,7 @@ describe("certification-validator", () => {
 
 			// Interactive mode: should read flat fields correctly
 			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
-			const check = findCheck(result, "interactive_steering_valid");
+			const check = findCheck(result, "steer_events_valid");
 			expect(check?.passed).toBe(true);
 			expect(check?.details).toContain("cli:budget");
 
@@ -1259,7 +1259,7 @@ describe("certification-validator", () => {
 
 			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
 			expect(result.steering_valid).toBe(false);
-			const check = findCheck(result, "interactive_steering_valid");
+			const check = findCheck(result, "steer_events_valid");
 			expect(check?.details).toContain("non-90 authority");
 		});
 	});

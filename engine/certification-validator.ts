@@ -792,12 +792,6 @@ function isSteerEvent(evt: TraceEvent): boolean {
 	return evt.type === "steer.action" || evt.event_type === "steer_action";
 }
 
-function isSteerParticipant(evt: TraceEvent): boolean {
-	if (!isAgentStart(evt)) return false;
-	const kind = (evt.data?.kind ?? (evt as Record<string, unknown>).kind) as string | undefined;
-	return kind === "web-steer" || kind === "cli-steer";
-}
-
 function checkSteerEvents(events: TraceEvent[], interactiveCert: boolean): ValidationCheck {
 	const steerEvents = events.filter(isSteerEvent);
 	const steerCount = steerEvents.length;
@@ -867,7 +861,7 @@ function checkSteerEvents(events: TraceEvent[], interactiveCert: boolean): Valid
 		}
 	}
 
-	const checkName = interactiveCert ? "interactive_steering_valid" : "steer_events_valid";
+	const checkName = "steer_events_valid";
 
 	return {
 		name: checkName,

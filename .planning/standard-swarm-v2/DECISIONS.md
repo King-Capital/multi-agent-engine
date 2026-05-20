@@ -243,7 +243,7 @@ Decision:
 
 Steer interactions (dashboard web, CLI TUI, API) are modeled as transient participants with a start/end lifecycle bracket per steer message. Each steer message gets a unique participant ID (`web-steer-N` or `cli-steer-N`), authority 90, and a `steer_action` trace event between the lifecycle events. Steer source is inferred from message_id prefix (`tui-*` = CLI, otherwise web). Ping messages are diagnostic and produce no steer events.
 
-Certification semantics: unattended mode (`--unattended`) fails if any steer event exists in the trace. Interactive mode (default) allows steer events but requires valid `certification_impact` values.
+Certification semantics: unattended mode (default, fail-closed) fails if any steer event exists in the trace. Interactive mode (`--interactive-cert` opt-in) allows steer events but requires authority=90, valid `certification_impact` values, and no evidence-hiding by steer stop.
 
 Reason:
 
