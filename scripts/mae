@@ -5,7 +5,7 @@ set -euo pipefail
 # Install: curl -fsSL https://raw.githubusercontent.com/King-Capital/multi-agent-engine/main/scripts/mae | bash -s install
 # Or:      mae install
 
-MAE_VERSION="1.0.24"
+MAE_VERSION="1.0.25"
 MAE_REPO="King-Capital/multi-agent-engine"
 MAE_GIT_URL="${MAE_GIT_URL:-https://github.com/${MAE_REPO}.git}"
 MAE_REF="${MAE_REF:-main}"
