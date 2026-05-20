@@ -124,6 +124,7 @@ Known historical risks:
 - [x] Ping remains diagnostic-only (no steer event)
 - [x] Unattended vs interactive cert semantics implemented (checkSteerEvents)
 - [x] Validator steering_valid field reflects actual evidence (not hardcoded true)
+- [x] Validator enforces lifecycle bracket (participant_start → steer_action → participant_end) per steer event
 - [x] --unattended CLI flag added for mae validate-cert
 - [x] Dashboard Go model adds EventSteerAction constant
 - [x] Trace schema docs updated with steer event section
@@ -288,6 +289,20 @@ Branch: `pi-opus-phase5` from merged Phase 4 main (`ec1e895`). Consolidated with
 | L6: "api" SteerSource unreachable | Low | Added doc comment |
 | L7: "none" cert impact untested | Low | Added test |
 | L9: Dashboard SSE missing steer_action | Low | Added to SSE_EVENT_TYPES |
+
+PR #364 re-swarm findings:
+
+| Finding | Severity | Fix |
+|---|---|---|
+| H1: Steer event ordering race (void vs await) | High | await in handleSteerCommand, .catch() for freeform |
+| H2: Steer content not sanitized | High | sanitizeAgentInput() applied |
+| M1: Unvoided async handleSteerCommand | Medium | void added |
+| M4: isSteerParticipant dead code | Medium | Removed |
+| M5: DECISIONS.md wrong cert default text | Medium | Fixed |
+| M-codex: Check name drift | Medium | Stabilized to steer_events_valid |
+| M-pi: No trace-recorder test | Medium | Added steer.action test |
+| H-codex: No lifecycle bracket validation | High | Validator enforces start→action→end per steer event |
+| L5: Assessment file in repo root | Low | Moved to .reports/ |
 
 ## Open blockers
 

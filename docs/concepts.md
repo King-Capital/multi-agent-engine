@@ -141,7 +141,7 @@ Steer source is inferred from the `message_id` prefix: `tui-*` = CLI, otherwise 
 
 Steer events affect certification:
 - **Unattended mode** (default): any steer event fails the `steer_events_valid` validator check. Use this to prove a session completed without human intervention.
-- **Interactive mode** (`--interactive-cert`): steer events are allowed but audited. Authority must be 90, `certification_impact` must be `blocks_unattended` or `none`, and a steer stop must not mask incomplete lead lifecycles (evidence-hiding detection).
+- **Interactive mode** (`--interactive-cert`): steer events are allowed but audited. Each steer action must have a complete `participant_start → steer_action → participant_end` lifecycle bracket. Authority must be 90, `certification_impact` must be `blocks_unattended` or `none`, and a steer stop must not mask incomplete lead lifecycles (evidence-hiding detection).
 
 See `specs/trace-schema.md` for the full event schema and `mae validate-cert --interactive-cert` for interactive certification.
 

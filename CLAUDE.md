@@ -175,12 +175,12 @@ The certification system validates swarm review sessions through deterministic e
 | 11 | `no_stale_participants` | No unresolved stale participants |
 | 12 | `contract_matches_evidence` | Contract fields match trace evidence |
 | 13 | `spawn_decisions_valid` | Spawn decisions valid (strict mode: all workers covered) |
-| 14 | `steer_events_valid` | No steer events in unattended cert; valid steer in interactive cert |
+| 14 | `steer_events_valid` | No steer events in unattended cert; valid steer with lifecycle bracket in interactive cert |
 
 ### Certification modes
 
 - **Unattended** (default, fail-closed): Any web/CLI steer event fails validation. Proves no human intervention.
-- **Interactive** (`--interactive-cert`): Steer events allowed but audited. Authority must be 90, `certification_impact` must be valid, steer stop must not mask incomplete lead lifecycles.
+- **Interactive** (`--interactive-cert`): Steer events allowed but audited. Each steer action must have a complete `participant_start → steer_action → participant_end` lifecycle bracket. Authority must be 90, `certification_impact` must be valid, steer stop must not mask incomplete lead lifecycles.
 
 ### Steer participants (Phase 5)
 
@@ -200,7 +200,7 @@ participant_start (web-steer-1) → steer_action → participant_end (web-steer-
 
 Run with `bun test` or `just test`. Tmux smoke coverage is opt-in with `MAE_RUN_TMUX_TESTS=1 bun test engine/tui-harness.test.ts`.
 
-Critical modules tested: certification-validator (55), team-execution (24), event-emitter (26), session-state (13), worker-lifecycle (6), replay (17), ralph-loop (25), steering (20), logger (13), spawn-decision (12), goal-classifier (8), integration (30).
+Critical modules tested: certification-validator (59), team-execution (24), event-emitter (26), session-state (13), trace-recorder (19), worker-lifecycle (6), replay (17), ralph-loop (25), steering (20), logger (13), spawn-decision (12), goal-classifier (8), integration (30).
 
 ## Build & Install
 
