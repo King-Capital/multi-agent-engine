@@ -908,15 +908,16 @@ describe("certification-validator", () => {
 	// -----------------------------------------------------------------------
 
 	describe("steer event checks", () => {
-		function steerActionEvent(sessionId: string, overrides?: Record<string, unknown>): object {
+		function steerActionEvent(sessionId: string, overrides?: Record<string, unknown>, kind: string = "web-steer"): object {
 			return {
 				type: "steer.action",
 				event_type: "steer_action",
 				session_id: sessionId,
-				agent_id: "web-steer-1",
+				agent_id: `${kind}-1`,
 				data: {
+					participant_id: `${kind}-1`,
 					sender: "user",
-					source: "web",
+					source: kind === "cli-steer" ? "cli" : "web",
 					authority: 90,
 					intent: "freeform",
 					target: "orchestrator",
@@ -941,6 +942,25 @@ describe("certification-validator", () => {
 					role: "steer",
 				},
 			};
+		}
+
+		function steerParticipantEnd(sessionId: string, kind: string = "web-steer"): object {
+			return {
+				type: "participant.end",
+				event_type: "participant_end",
+				session_id: sessionId,
+				agent_id: `${kind}-1`,
+				data: { participant_id: `${kind}-1`, status: "completed" },
+			};
+		}
+
+		/** Full steer bracket: start → action → end */
+		function steerBracket(sessionId: string, overrides?: Record<string, unknown>, kind: string = "web-steer"): object[] {
+			return [
+				steerParticipantStart(sessionId, kind),
+				steerActionEvent(sessionId, overrides, kind),
+				steerParticipantEnd(sessionId, kind),
+			];
 		}
 
 		// --- Default = fail-closed (unattended) ---
@@ -1006,8 +1026,7 @@ describe("certification-validator", () => {
 			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
 			const traceFile = writeTrace(sid, [
 				{ type: "session.start", session_id: sid },
-				steerParticipantStart(sid),
-				steerActionEvent(sid),
+				...steerBracket(sid),
 				...allLeadEndEvents(sid),
 				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
 				{ type: "session.end", session_id: sid, status: "completed" },
@@ -1026,9 +1045,8 @@ describe("certification-validator", () => {
 			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
 			const traceFile = writeTrace(sid, [
 				{ type: "session.start", session_id: sid },
-				steerParticipantStart(sid, "cli-steer"),
-				steerActionEvent(sid, { source: "cli", intent: "pause" }),
-				steerActionEvent(sid, { source: "cli", intent: "resume" }),
+				...steerBracket(sid, { source: "cli", intent: "pause" }, "cli-steer"),
+				...steerBracket(sid, { source: "cli", intent: "resume" }, "cli-steer"),
 				...allLeadEndEvents(sid),
 				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
 				{ type: "session.end", session_id: sid, status: "completed" },
@@ -1049,7 +1067,7 @@ describe("certification-validator", () => {
 			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
 			const traceFile = writeTrace(sid, [
 				{ type: "session.start", session_id: sid },
-				steerActionEvent(sid, { authority: 50 }),
+				...steerBracket(sid, { authority: 50 }),
 				...allLeadEndEvents(sid),
 				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
 				{ type: "session.end", session_id: sid, status: "completed" },
@@ -1069,7 +1087,7 @@ describe("certification-validator", () => {
 			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
 			const traceFile = writeTrace(sid, [
 				{ type: "session.start", session_id: sid },
-				steerActionEvent(sid, { certification_impact: undefined }),
+				...steerBracket(sid, { certification_impact: undefined }),
 				...allLeadEndEvents(sid),
 				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
 				{ type: "session.end", session_id: sid, status: "completed" },
@@ -1087,7 +1105,7 @@ describe("certification-validator", () => {
 			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
 			const traceFile = writeTrace(sid, [
 				{ type: "session.start", session_id: sid },
-				steerActionEvent(sid, { certification_impact: "corrupted" }),
+				...steerBracket(sid, { certification_impact: "corrupted" }),
 				...allLeadEndEvents(sid),
 				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
 				{ type: "session.end", session_id: sid, status: "completed" },
@@ -1105,7 +1123,65 @@ describe("certification-validator", () => {
 			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
 			const traceFile = writeTrace(sid, [
 				{ type: "session.start", session_id: sid },
-				steerActionEvent(sid, { certification_impact: "none" }),
+				...steerBracket(sid, { certification_impact: "none" }),
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(true);
+		});
+
+		// --- Lifecycle bracket validation ---
+
+		test("fails when steer_action has no participant_start bracket", () => {
+			const sid = makeSessionId(115);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				// steer_action with NO preceding participant_start
+				steerActionEvent(sid),
+				{ type: "participant.end", event_type: "participant_end", session_id: sid, agent_id: "web-steer-1", data: { participant_id: "web-steer-1", status: "completed" } },
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(false);
+			expect(check?.details).toContain("missing participant_start bracket");
+		});
+
+		test("fails when steer_action has no participant_end bracket", () => {
+			const sid = makeSessionId(116);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				steerParticipantStart(sid),
+				steerActionEvent(sid),
+				// NO participant_end
+				...allLeadEndEvents(sid),
+				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
+				{ type: "session.end", session_id: sid, status: "completed" },
+			]);
+
+			const result = validateCertificationEvidence(makeCtx(traceFile, { expectedFixture: "clean", interactiveCert: true }));
+			const check = findCheck(result, "steer_events_valid");
+			expect(check?.passed).toBe(false);
+			expect(check?.details).toContain("missing participant_end bracket");
+		});
+
+		test("passes when steer_action has complete start/end bracket", () => {
+			const sid = makeSessionId(117);
+			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
+			const traceFile = writeTrace(sid, [
+				{ type: "session.start", session_id: sid },
+				steerParticipantStart(sid),
+				steerActionEvent(sid),
+				{ type: "participant.end", event_type: "participant_end", session_id: sid, agent_id: "web-steer-1", data: { participant_id: "web-steer-1", status: "completed" } },
 				...allLeadEndEvents(sid),
 				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
 				{ type: "session.end", session_id: sid, status: "completed" },
@@ -1126,7 +1202,7 @@ describe("certification-validator", () => {
 				// Only 2 of 5 leads complete before steer stop
 				{ type: "agent.end", session_id: sid, agent_id: "pi-correctness-lead", team: "Correctness Review" },
 				{ type: "agent.end", session_id: sid, agent_id: "pi-adversarial-lead", team: "Adversarial Review" },
-				steerActionEvent(sid, { intent: "stop" }),
+				...steerBracket(sid, { intent: "stop" }),
 				// No more lead ends after the stop
 				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
 				{ type: "session.end", session_id: sid, status: "error" },
@@ -1146,7 +1222,7 @@ describe("certification-validator", () => {
 				// Only 2 unique leads complete before stop
 				{ type: "agent.end", session_id: sid, agent_id: "pi-correctness-lead", team: "Correctness Review" },
 				{ type: "agent.end", session_id: sid, agent_id: "pi-adversarial-lead", team: "Adversarial Review" },
-				steerActionEvent(sid, { intent: "stop" }),
+				...steerBracket(sid, { intent: "stop" }),
 				// Duplicate/fake lead end after stop — should NOT bypass the check
 				{ type: "agent.end", session_id: sid, agent_id: "pi-correctness-lead", team: "Correctness Review" },
 				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
@@ -1165,8 +1241,8 @@ describe("certification-validator", () => {
 			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
 			const traceFile = writeTrace(sid, [
 				{ type: "session.start", session_id: sid },
-				steerActionEvent(sid, { intent: "pause" }),
-				steerActionEvent(sid, { intent: "resume" }),
+				...steerBracket(sid, { intent: "pause" }),
+				...steerBracket(sid, { intent: "resume" }),
 				// All 5 leads complete after the steer events
 				...allLeadEndEvents(sid),
 				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
@@ -1185,6 +1261,7 @@ describe("certification-validator", () => {
 			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
 			const traceFile = writeTrace(sid, [
 				{ type: "session.start", session_id: sid },
+				steerParticipantStart(sid),
 				{
 					event_type: "steer_action",
 					session_id: sid,
@@ -1195,6 +1272,7 @@ describe("certification-validator", () => {
 						certification_impact: "blocks_unattended",
 					},
 				},
+				steerParticipantEnd(sid),
 				...allLeadEndEvents(sid),
 				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
 				{ type: "session.end", session_id: sid, status: "completed" },
@@ -1218,7 +1296,8 @@ describe("certification-validator", () => {
 			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
 			const traceFile = writeTrace(sid, [
 				{ type: "session.start", session_id: sid },
-				// Flat fields — trace-recorder format, no data wrapper
+				// Flat bracket: trace-recorder format
+				{ type: "participant.start", session_id: sid, agent_id: "cli-steer-1", data: { participant_id: "cli-steer-1", kind: "cli-steer", status: "active" } },
 				{
 					type: "steer.action",
 					session_id: sid,
@@ -1230,6 +1309,7 @@ describe("certification-validator", () => {
 					target: "orchestrator",
 					certification_impact: "blocks_unattended",
 				},
+				{ type: "participant.end", session_id: sid, agent_id: "cli-steer-1", data: { participant_id: "cli-steer-1", status: "completed" } },
 				...allLeadEndEvents(sid),
 				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
 				{ type: "session.end", session_id: sid, status: "completed" },
@@ -1251,7 +1331,7 @@ describe("certification-validator", () => {
 			const synthRef = writeArtifact(sid, "synth.txt", validCleanContract());
 			const traceFile = writeTrace(sid, [
 				{ type: "session.start", session_id: sid },
-				steerActionEvent(sid, { authority: "90" }),
+				...steerBracket(sid, { authority: "90" }),
 				...allLeadEndEvents(sid),
 				{ type: "agent.end", session_id: sid, agent_id: "pi-orchestrator", output_artifact: synthRef },
 				{ type: "session.end", session_id: sid, status: "completed" },

@@ -833,6 +833,41 @@ function checkSteerEvents(events: TraceEvent[], interactiveCert: boolean): Valid
 		issues.push(`${missingImpact.length} steer action(s) with missing or invalid certification_impact`);
 	}
 
+	// Lifecycle bracket validation: each steer_action must have a matching
+	// participant_start (steer kind, before action) and participant_end (after action)
+	for (const steerEvt of steerEvents) {
+		const pid = String(steerField(steerEvt, "participant_id") ?? agentId(steerEvt) ?? "");
+		if (!pid) {
+			issues.push("steer_action missing participant_id");
+			continue;
+		}
+		const steerIdx = events.indexOf(steerEvt);
+
+		// Find matching participant_start with steer kind before this action
+		const matchingStart = events.find((evt, idx) => {
+			if (idx >= steerIdx) return false;
+			if (evt.type !== "participant.start" && evt.event_type !== "participant_start") return false;
+			const evtPid = String((evt.data as Record<string, unknown> | undefined)?.participant_id ?? agentId(evt));
+			if (evtPid !== pid) return false;
+			const kind = ((evt.data as Record<string, unknown> | undefined)?.kind ?? (evt as Record<string, unknown>).kind) as string | undefined;
+			return kind === "web-steer" || kind === "cli-steer";
+		});
+		if (!matchingStart) {
+			issues.push(`steer_action ${pid} missing participant_start bracket`);
+		}
+
+		// Find matching participant_end after this action
+		const matchingEnd = events.find((evt, idx) => {
+			if (idx <= steerIdx) return false;
+			if (evt.type !== "participant.end" && evt.event_type !== "participant_end") return false;
+			const evtPid = String((evt.data as Record<string, unknown> | undefined)?.participant_id ?? agentId(evt));
+			return evtPid === pid;
+		});
+		if (!matchingEnd) {
+			issues.push(`steer_action ${pid} missing participant_end bracket`);
+		}
+	}
+
 	// Evidence-hiding detection (interactive mode): steer stop must not mask
 	// incomplete lifecycle evidence
 	if (interactiveCert && steerCount > 0) {
