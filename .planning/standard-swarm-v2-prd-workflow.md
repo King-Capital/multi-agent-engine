@@ -280,7 +280,7 @@ Make all MAE actors visible as participants with lifecycle/status/activity state
    - terminal event clears active state
 7. Add heartbeat volume policy:
    - emit activity events for meaningful state/tool changes
-   - emit heartbeat snapshots at bounded intervals only
+   - emit heartbeat snapshots on a bounded monitor cadence, with lifecycle/cost transitions also refreshing participant heartbeat state
    - do not stream high-frequency tick events into trace/Langfuse
 8. Update trace schema docs.
 9. Add tests for state transitions.
