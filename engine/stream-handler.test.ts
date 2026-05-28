@@ -22,19 +22,24 @@ function makeSession(status: SessionState["status"]): SessionState {
 
 function makeEmitter() {
   const events: string[] = [];
+  const participantActivities: Array<{ sessionId: string; agentId: string; data: { currentTask?: string; currentTool?: string; lastEvent?: string } }> = [];
   const emitter = {
     severityAlert: () => events.push("severity_alert"),
     autoPause: () => events.push("auto_pause"),
     toolCall: () => events.push("tool_call"),
     costUpdate: () => events.push("cost_update"),
+    participantActivity: (sessionId: string, agentId: string, data: { currentTask?: string; currentTool?: string; lastEvent?: string }) => {
+      events.push("participant_activity");
+      participantActivities.push({ sessionId, agentId, data });
+    },
   } as unknown as EventEmitter;
 
-  return { emitter, events };
+  return { emitter, events, participantActivities };
 }
 
 describe("buildStreamHandler", () => {
   test("auto-pauses active sessions on concrete severity findings", () => {
-    const { emitter, events } = makeEmitter();
+    const { emitter, events, participantActivities } = makeEmitter();
     const pausedSessions = new Set<string>();
     const session = makeSession("active");
     const handler = buildStreamHandler({
@@ -51,11 +56,18 @@ describe("buildStreamHandler", () => {
 
     expect(pausedSessions.has(session.id)).toBe(true);
     expect(session.status).toBe("paused");
-    expect(events).toEqual(["severity_alert", "auto_pause"]);
+    expect(events).toEqual(["participant_activity", "severity_alert", "auto_pause"]);
+    expect(participantActivities).toEqual([
+      {
+        sessionId: "session-1",
+        agentId: "agent-1",
+        data: { currentTask: "responding", lastEvent: "assistant_text" },
+      },
+    ]);
   });
 
   test("does not auto-pause completed sessions from final report text", () => {
-    const { emitter, events } = makeEmitter();
+    const { emitter, events, participantActivities } = makeEmitter();
     const pausedSessions = new Set<string>();
     const session = makeSession("completed");
     const handler = buildStreamHandler({
@@ -72,11 +84,18 @@ describe("buildStreamHandler", () => {
 
     expect(pausedSessions.has(session.id)).toBe(false);
     expect(session.status).toBe("completed");
-    expect(events).toEqual([]);
+    expect(events).toEqual(["participant_activity"]);
+    expect(participantActivities).toEqual([
+      {
+        sessionId: "session-1",
+        agentId: "agent-1",
+        data: { currentTask: "responding", lastEvent: "assistant_text" },
+      },
+    ]);
   });
 
   test("does not auto-pause final assistant report text before session completion", () => {
-    const { emitter, events } = makeEmitter();
+    const { emitter, events, participantActivities } = makeEmitter();
     const pausedSessions = new Set<string>();
     const session = makeSession("active");
     const handler = buildStreamHandler({
@@ -93,6 +112,13 @@ describe("buildStreamHandler", () => {
 
     expect(pausedSessions.has(session.id)).toBe(false);
     expect(session.status).toBe("active");
-    expect(events).toEqual([]);
+    expect(events).toEqual(["participant_activity"]);
+    expect(participantActivities).toEqual([
+      {
+        sessionId: "session-1",
+        agentId: "agent-1",
+        data: { currentTask: "final_report", lastEvent: "assistant_text_final" },
+      },
+    ]);
   });
 });

@@ -34,6 +34,10 @@ export function buildStreamHandler(opts: StreamHandlerOpts): (evt: StreamEvent) 
       emitter.costUpdate(sessionId, agentId, streamEvt.costUsd ?? 0, streamEvt.tokensUsed ?? 0, streamEvt.cacheReadTokens ?? 0);
     } else if (streamEvt.type === "assistant_text" && streamEvt.content) {
       trackToolCall(agentId, "assistant_text");
+      emitter.participantActivity(sessionId, agentId, {
+        currentTask: streamEvt.final ? "final_report" : "responding",
+        lastEvent: streamEvt.final ? "assistant_text_final" : "assistant_text",
+      });
       if (pausedSessions && session && session.status === "active" && !streamEvt.final) {
         const severity = scanSeverity(streamEvt.content);
         if (severity && shouldAutoPause(severity, sessionId)) {

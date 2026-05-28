@@ -179,23 +179,48 @@ func (s *Store) applyEvent(evt models.Event) {
 
 	case models.EventAgentSpawn:
 		agent := &models.Agent{
-			ID:          evt.AgentID,
-			Name:        evt.Data.AgentName,
-			Role:        evt.Data.AgentRole,
-			Model:       evt.Data.Model,
-			TeamName:    evt.Data.TeamName,
-			TeamColor:   evt.Data.TeamColor,
-			ParentID:    evt.ParentID,
-			Status:      models.StatusRunning,
-			PersonaPath: evt.Data.PersonaPath,
-			StartedAt:   evt.Timestamp,
+			ID:              evt.AgentID,
+			Name:            evt.Data.AgentName,
+			Role:            evt.Data.AgentRole,
+			Model:           evt.Data.Model,
+			TeamName:        evt.Data.TeamName,
+			TeamColor:       evt.Data.TeamColor,
+			ParentID:        evt.ParentID,
+			Status:          models.StatusRunning,
+			PersonaPath:     evt.Data.PersonaPath,
+			StartedAt:       evt.Timestamp,
+			LastActivityAt:  evt.Timestamp,
+			CurrentActivity: "spawned",
+		}
+		if existing, ok := sess.Agents[evt.AgentID]; ok {
+			agent.CostUSD = existing.CostUSD
+			agent.TokensUsed = existing.TokensUsed
+			agent.ContextTokens = existing.ContextTokens
+			if !existing.LastActivityAt.IsZero() {
+				agent.LastActivityAt = existing.LastActivityAt
+			}
+			if existing.CurrentActivity != "" {
+				agent.CurrentActivity = existing.CurrentActivity
+			}
+			if existing.CurrentTool != "" {
+				agent.CurrentTool = existing.CurrentTool
+			}
 		}
 		sess.Agents[evt.AgentID] = agent
+
+	case models.EventParticipantStart,
+		models.EventParticipantActivity,
+		models.EventParticipantHeartbeat,
+		models.EventParticipantStale,
+		models.EventParticipantEnd:
+		applyParticipantEvent(sess, evt)
 
 	case models.EventAgentDone:
 		if a, ok := sess.Agents[evt.AgentID]; ok {
 			a.Status = models.StatusDone
 			a.ElapsedMs = time.Since(a.StartedAt).Milliseconds()
+			a.LastActivityAt = evt.Timestamp
+			a.CurrentActivity = "done"
 		}
 
 	case models.EventCostUpdate:
@@ -210,6 +235,10 @@ func (s *Store) applyEvent(evt models.Event) {
 			}
 			if evt.ContextTokens > a.ContextTokens {
 				a.ContextTokens = evt.ContextTokens
+			}
+			a.LastActivityAt = evt.Timestamp
+			if a.CurrentActivity == "" {
+				a.CurrentActivity = "cost_update"
 			}
 		}
 		sess.TotalCost = 0
@@ -226,11 +255,102 @@ func (s *Store) applyEvent(evt models.Event) {
 		if evt.AgentID != "" {
 			if a, ok := sess.Agents[evt.AgentID]; ok {
 				a.Status = models.StatusError
+				a.LastActivityAt = evt.Timestamp
+				a.CurrentActivity = "error"
 			}
 		} else {
 			sess.Status = "error"
 		}
 	}
+}
+
+func applyParticipantEvent(sess *models.Session, evt models.Event) {
+	agentID := evt.Data.ParticipantID
+	if agentID == "" {
+		agentID = evt.AgentID
+	}
+	if agentID == "" {
+		return
+	}
+
+	agent, ok := sess.Agents[agentID]
+	if !ok {
+		agent = &models.Agent{ID: agentID}
+		sess.Agents[agentID] = agent
+	}
+
+	if agent.Name == "" {
+		agent.Name = firstNonEmpty(evt.Data.Name, evt.Data.AgentName, agentID)
+	}
+	if agent.Role == "" {
+		agent.Role = models.AgentRole(firstNonEmpty(evt.Data.Role, string(evt.Data.AgentRole)))
+	}
+	if agent.TeamName == "" {
+		agent.TeamName = firstNonEmpty(evt.Data.Team, evt.Data.TeamName)
+	}
+	if agent.Model == "" {
+		agent.Model = evt.Data.Model
+	}
+	if evt.EventType == models.EventParticipantStart && agent.StartedAt.IsZero() {
+		agent.StartedAt = evt.Timestamp
+	}
+	if agent.Status == "" {
+		agent.Status = models.StatusIdle
+	}
+
+	agent.Status = participantStatusToAgentStatus(evt.Data.Status, agent.Status)
+	if activity := firstNonEmpty(evt.Data.CurrentTask, evt.Data.LastEvent, evt.Data.Reason); activity != "" {
+		agent.CurrentActivity = activity
+	}
+	if evt.Data.CurrentTool != "" {
+		agent.CurrentTool = evt.Data.CurrentTool
+	}
+	if last := participantLastActivity(evt); !last.IsZero() {
+		agent.LastActivityAt = last
+	} else {
+		agent.LastActivityAt = evt.Timestamp
+	}
+}
+
+func participantStatusToAgentStatus(status models.AgentStatus, fallback models.AgentStatus) models.AgentStatus {
+	switch status {
+	case "starting", "online", "active":
+		return models.StatusRunning
+	case "idle":
+		return models.StatusIdle
+	case "stale":
+		return models.StatusStale
+	case "completed":
+		return models.StatusDone
+	case "failed":
+		return models.StatusError
+	case "blocked":
+		return models.StatusBlocked
+	case "":
+		return fallback
+	default:
+		return models.AgentStatus(status)
+	}
+}
+
+func participantLastActivity(evt models.Event) time.Time {
+	if evt.Data.LastHeartbeatTS == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, evt.Data.LastHeartbeatTS)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (s *Store) GetSession(id string) *models.Session {
@@ -261,7 +381,7 @@ func (s *Store) CloseStale() int {
 			sess.Status = "completed"
 			sess.ElapsedMs = time.Since(sess.StartedAt).Milliseconds()
 			for _, a := range sess.Agents {
-				if a.Status == models.StatusRunning || a.Status == models.StatusIdle {
+				if a.Status == models.StatusRunning || a.Status == models.StatusIdle || a.Status == models.StatusStale {
 					a.Status = models.StatusDone
 					a.ElapsedMs = time.Since(a.StartedAt).Milliseconds()
 				}
@@ -302,7 +422,7 @@ func (s *Store) ReapInactiveSessions(timeout time.Duration) int {
 			sess.Status = "completed"
 			sess.ElapsedMs = time.Since(sess.StartedAt).Milliseconds()
 			for _, a := range sess.Agents {
-				if a.Status == models.StatusRunning || a.Status == models.StatusIdle {
+				if a.Status == models.StatusRunning || a.Status == models.StatusIdle || a.Status == models.StatusStale {
 					a.Status = models.StatusDone
 					a.ElapsedMs = time.Since(a.StartedAt).Milliseconds()
 				}
