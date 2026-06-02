@@ -5,21 +5,26 @@ usage() {
   cat <<'EOF'
 Usage: dashboard-production-smoke [--url URL] [--token TOKEN] [--require-spa]
 
-Runs a minimal production smoke against the MAE dashboard API/UI surface:
+Runs a safe shadow/side-hustle MAE dashboard smoke against the API/UI surface.
+This is intentionally additive: it creates a dashboard-visible smoke session for
+full MAE testing evidence without replacing or cutting over current king-agents.
+
+Checks:
   - /api/health returns ok with runtime fields (version, db, uptime_seconds)
   - SPA root returns HTML when --require-spa is set
   - unauthenticated protected API requests are rejected
   - bearer-auth event ingest works when --token is supplied
-  - session list and per-session SSE replay expose the injected smoke session
+  - session list and per-session SSE replay expose the injected shadow smoke session
 
 Environment defaults:
-  DASHBOARD_URL   Dashboard base URL (default: http://127.0.0.1:8400)
-  DASHBOARD_TOKEN Bearer token for authenticated API checks (optional)
+  DASHBOARD_URL          Dashboard base URL (default: http://127.0.0.1:8400)
+  DASHBOARD_TOKEN        Bearer token for authenticated API checks (optional)
+  MAE_DASHBOARD_TOKEN    Alternate bearer token env var (optional)
 EOF
 }
 
 base_url="${DASHBOARD_URL:-http://127.0.0.1:8400}"
-token="${DASHBOARD_TOKEN:-}"
+token="${DASHBOARD_TOKEN:-${MAE_DASHBOARD_TOKEN:-}}"
 require_spa=0
 
 while [[ $# -gt 0 ]]; do
@@ -80,7 +85,7 @@ if [[ -z "$token" ]]; then
   exit 0
 fi
 
-session_id="dashboard-smoke-$(date +%s)-$$"
+session_id="mae-shadow-side-hustle-smoke-$(date +%s)-$$"
 timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 payload="$tmp_dir/event.json"
 cat > "$payload" <<EOF
@@ -90,20 +95,21 @@ cat > "$payload" <<EOF
   "event_type": "session_start",
   "timestamp": "${timestamp}",
   "data": {
-    "session_name": "Dashboard production smoke ${session_id}",
-    "task_prompt": "verify dashboard health, auth, event ingest, sessions, and SSE replay"
+    "session_name": "MAE shadow side-hustle smoke ${session_id}",
+    "task_prompt": "shadow-only MAE smoke: verify current king-agents dashboard behavior without replacement or cutover"
   }
 }
 EOF
 
 curl_json -X POST "$base_url/api/events" \
   -H "Authorization: Bearer ${token}" \
-  -H 'Content-Type: application/json' \
+  -H "Content-Type: application/json" \
   --data-binary "@$payload" > "$tmp_dir/post-event.json"
 assert_json_field "$tmp_dir/post-event.json" "data.get('status') == 'ok'" "event ingest status"
 echo "ok: event ingest created ${session_id}"
 
-curl_json "$base_url/api/sessions" -H "Authorization: Bearer ${token}" > "$tmp_dir/sessions.json"
+curl_json "$base_url/api/sessions" \
+  -H "Authorization: Bearer ${token}" > "$tmp_dir/sessions.json"
 python3 - "$tmp_dir/sessions.json" "$session_id" <<'PY'
 import json, sys
 sessions = json.load(open(sys.argv[1], encoding='utf-8'))
