@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: dashboard-production-smoke [--url URL] [--token TOKEN] [--require-spa]
+
+Runs a minimal production smoke against the MAE dashboard API/UI surface:
+  - /api/health returns ok with runtime fields (version, db, uptime_seconds)
+  - SPA root returns HTML when --require-spa is set
+  - unauthenticated protected API requests are rejected
+  - bearer-auth event ingest works when --token is supplied
+  - session list and per-session SSE replay expose the injected smoke session
+
+Environment defaults:
+  DASHBOARD_URL   Dashboard base URL (default: http://127.0.0.1:8400)
+  DASHBOARD_TOKEN Bearer token for authenticated API checks (optional)
+EOF
+}
+
+base_url="${DASHBOARD_URL:-http://127.0.0.1:8400}"
+token="${DASHBOARD_TOKEN:-}"
+require_spa=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --url) base_url="${2:?missing URL}"; shift 2 ;;
+    --token) token="${2:?missing token}"; shift 2 ;;
+    --require-spa) require_spa=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+base_url="${base_url%/}"
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+
+curl_json() {
+  curl --fail --silent --show-error --max-time 10 "$@"
+}
+
+assert_json_field() {
+  local file="$1" expr="$2" label="$3"
+  python3 - "$file" "$expr" "$label" <<'PY'
+import json, sys
+path, expr, label = sys.argv[1:]
+with open(path, 'r', encoding='utf-8') as f:
+    data = json.load(f)
+if not eval(expr, {}, {'data': data}):
+    raise SystemExit(f"assertion failed: {label}; payload={data!r}")
+PY
+}
+
+echo "dashboard smoke: target=${base_url}"
+
+health="$tmp_dir/health.json"
+curl_json "$base_url/api/health" > "$health"
+assert_json_field "$health" "data.get('status') == 'ok'" "/api/health status ok"
+assert_json_field "$health" "'version' in data and 'db' in data and isinstance(data.get('uptime_seconds'), int)" "/api/health runtime fields"
+echo "ok: /api/health $(tr -d '\n' < "$health")"
+
+if [[ "$require_spa" -eq 1 ]]; then
+  root_headers="$tmp_dir/root.headers"
+  root_body="$tmp_dir/root.html"
+  curl --fail --silent --show-error --max-time 10 -D "$root_headers" "$base_url/" -o "$root_body"
+  grep -qi '<html' "$root_body"
+  echo "ok: SPA root served html"
+fi
+
+unauth_status="$(curl --silent --show-error --max-time 10 -o /dev/null -w '%{http_code}' "$base_url/api/sessions")"
+if [[ "$unauth_status" != "401" ]]; then
+  echo "expected /api/sessions without auth to return 401, got ${unauth_status}" >&2
+  exit 1
+fi
+echo "ok: protected API rejects unauthenticated requests"
+
+if [[ -z "$token" ]]; then
+  echo "skip: authenticated event/SSE checks (set DASHBOARD_TOKEN or --token)"
+  exit 0
+fi
+
+session_id="dashboard-smoke-$(date +%s)-$$"
+timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+payload="$tmp_dir/event.json"
+cat > "$payload" <<EOF
+{
+  "session_id": "${session_id}",
+  "agent_id": "smoke-orchestrator",
+  "event_type": "session_start",
+  "timestamp": "${timestamp}",
+  "data": {
+    "session_name": "Dashboard production smoke ${session_id}",
+    "task_prompt": "verify dashboard health, auth, event ingest, sessions, and SSE replay"
+  }
+}
+EOF
+
+curl_json -X POST "$base_url/api/events" \
+  -H "Authorization: Bearer ${token}" \
+  -H 'Content-Type: application/json' \
+  --data-binary "@$payload" > "$tmp_dir/post-event.json"
+assert_json_field "$tmp_dir/post-event.json" "data.get('status') == 'ok'" "event ingest status"
+echo "ok: event ingest created ${session_id}"
+
+curl_json "$base_url/api/sessions" -H "Authorization: Bearer ${token}" > "$tmp_dir/sessions.json"
+python3 - "$tmp_dir/sessions.json" "$session_id" <<'PY'
+import json, sys
+sessions = json.load(open(sys.argv[1], encoding='utf-8'))
+sid = sys.argv[2]
+if not any(s.get('id') == sid for s in sessions):
+    raise SystemExit(f"smoke session {sid} missing from /api/sessions")
+PY
+echo "ok: session list includes smoke session"
+
+sse="$tmp_dir/session.sse"
+curl --fail --silent --show-error --max-time 3 -N \
+  "$base_url/api/sessions/${session_id}/stream" \
+  -H "Authorization: Bearer ${token}" > "$sse" || true
+if ! grep -q "$session_id" "$sse"; then
+  echo "expected SSE replay to include ${session_id}; got:" >&2
+  cat "$sse" >&2
+  exit 1
+fi
+echo "ok: session SSE replay includes smoke session"
+echo "dashboard smoke: PASS"
