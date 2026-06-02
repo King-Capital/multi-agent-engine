@@ -56,13 +56,13 @@ Echo certification is PR/developer plumbing smoke only. It proves the dashboard 
 scripts/certify-live-swarm --dashboard-url http://127.0.0.1:8400
 ```
 
-Production releases are blocked by live Pi certification after deploy. The deploy workflow runs:
+Live Pi certification is a side-hustle/shadow safety signal until Rico explicitly approves MAE cutover and promotes the check to a blocking production gate. It must not block existing production releases while MAE remains unproven. The deploy workflow runs it non-blocking when a deployed dashboard URL is configured:
 
 ```bash
 scripts/certify-live-swarm --live-pi --dashboard-url "$MAE_DASHBOARD_URL"
 ```
 
-Live Pi certification requires an explicit deployed dashboard URL (`MAE_DASHBOARD_URL` repository variable or `--dashboard-url`) and rejects localhost. The gate validates schema-aware `CERTIFICATION_CONTRACT` evidence for clean, seeded command-injection, and failing-readiness fixtures; runs `mae validate-cert --live-pi` against each completed trace; requires the five canonical review leads; rejects worker-spawn drift, operational failures, wrong-fixture/source inspection, spoofed non-synthesis contracts, and empty-output artifacts; and preserves evidence under `/tmp/mae-cert.*` with `evidence-manifest.json`, stdout/stderr, JSONL traces, and output artifacts.
+Live Pi certification requires an explicit deployed dashboard URL (`MAE_DASHBOARD_URL` repository variable or `--dashboard-url`) and rejects localhost. If `MAE_DASHBOARD_URL` is missing in the deploy workflow, the shadow check is skipped successfully rather than failing the deployment. When it runs, the check validates schema-aware `CERTIFICATION_CONTRACT` evidence for clean, seeded command-injection, and failing-readiness fixtures; runs `mae validate-cert --live-pi` against each completed trace; requires the five canonical review leads; rejects worker-spawn drift, operational failures, wrong-fixture/source inspection, spoofed non-synthesis contracts, and empty-output artifacts; and preserves evidence under `/tmp/mae-cert.*` with `evidence-manifest.json`, stdout/stderr, JSONL traces, and output artifacts.
 
 ## Documentation Gate
 
