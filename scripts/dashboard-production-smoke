@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: dashboard-production-smoke [--url URL] [--token TOKEN] [--require-spa]
+Usage: dashboard-production-smoke [--url URL] [--token TOKEN] [--env-file PATH] [--require-spa]
 
 Runs a safe shadow/side-hustle MAE dashboard smoke against the API/UI surface.
 This is intentionally additive: it creates a dashboard-visible smoke session for
@@ -13,29 +13,47 @@ Checks:
   - /api/health returns ok with runtime fields (version, db, uptime_seconds)
   - SPA root returns HTML when --require-spa is set
   - unauthenticated protected API requests are rejected
-  - bearer-auth event ingest works when --token is supplied
-  - session list and per-session SSE replay expose the injected shadow smoke session
+  - bearer-auth PG session creation works when a token is supplied
+  - bearer-auth event ingest works after the PG session exists
+  - session list, per-session SSE replay, and PG events expose the smoke session
 
 Environment defaults:
-  DASHBOARD_URL          Dashboard base URL (default: http://127.0.0.1:8400)
-  DASHBOARD_TOKEN        Bearer token for authenticated API checks (optional)
+  MAE_DASHBOARD_URL      Dashboard base URL (preferred)
+  DASHBOARD_URL          Alternate dashboard base URL (default: http://127.0.0.1:8400)
+  MAE_API_TOKEN          Bearer token for authenticated API checks (preferred)
   MAE_DASHBOARD_TOKEN    Alternate bearer token env var (optional)
+  DASHBOARD_TOKEN        Alternate bearer token env var (optional)
 EOF
 }
 
-base_url="${DASHBOARD_URL:-http://127.0.0.1:8400}"
-token="${DASHBOARD_TOKEN:-${MAE_DASHBOARD_TOKEN:-}}"
+base_url="${MAE_DASHBOARD_URL:-${DASHBOARD_URL:-http://127.0.0.1:8400}}"
+token="${MAE_API_TOKEN:-${MAE_DASHBOARD_TOKEN:-${DASHBOARD_TOKEN:-}}}"
 require_spa=0
+env_file=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --url) base_url="${2:?missing URL}"; shift 2 ;;
     --token) token="${2:?missing token}"; shift 2 ;;
+    --env-file) env_file="${2:?missing env file}"; shift 2 ;;
     --require-spa) require_spa=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+if [[ -n "$env_file" ]]; then
+  if [[ ! -f "$env_file" ]]; then
+    echo "env file not found: $env_file" >&2
+    exit 2
+  fi
+  set -a
+  # shellcheck source=/dev/null
+  source "$env_file"
+  set +a
+  base_url="${MAE_DASHBOARD_URL:-${DASHBOARD_URL:-$base_url}}"
+  token="${MAE_API_TOKEN:-${MAE_DASHBOARD_TOKEN:-${DASHBOARD_TOKEN:-$token}}}"
+fi
 
 base_url="${base_url%/}"
 tmp_dir="$(mktemp -d)"
@@ -81,13 +99,39 @@ fi
 echo "ok: protected API rejects unauthenticated requests"
 
 if [[ -z "$token" ]]; then
-  echo "skip: authenticated event/SSE checks (set DASHBOARD_TOKEN or --token)"
+  echo "skip: authenticated PG/event/SSE checks (set MAE_API_TOKEN, MAE_DASHBOARD_TOKEN, DASHBOARD_TOKEN, or --token)"
   exit 0
 fi
 
-session_id="mae-shadow-side-hustle-smoke-$(date +%s)-$$"
+session_id="$(python3 - <<'PY'
+import uuid
+print(uuid.uuid4())
+PY
+)"
 timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+session_payload="$tmp_dir/session.json"
 payload="$tmp_dir/event.json"
+cat > "$session_payload" <<EOF
+{
+  "id": "${session_id}",
+  "name": "MAE shadow side-hustle smoke ${session_id}",
+  "platform": "multi-agent-engine",
+  "team": "shadow-smoke",
+  "chain": "dashboard-production-smoke",
+  "config": {
+    "source": "scripts/dashboard-production-smoke",
+    "shadow_only": true
+  }
+}
+EOF
+
+curl_json -X POST "$base_url/api/pg/sessions/" \
+  -H "Authorization: Bearer ${token}" \
+  -H "Content-Type: application/json" \
+  --data-binary "@$session_payload" > "$tmp_dir/post-session.json"
+assert_json_field "$tmp_dir/post-session.json" "data.get('id') == '${session_id}'" "pg session create id"
+echo "ok: pg session created ${session_id}"
+
 cat > "$payload" <<EOF
 {
   "session_id": "${session_id}",
@@ -129,4 +173,15 @@ if ! grep -q "$session_id" "$sse"; then
   exit 1
 fi
 echo "ok: session SSE replay includes smoke session"
-echo "dashboard smoke: PASS"
+
+curl_json "$base_url/api/pg/sessions/${session_id}/events" \
+  -H "Authorization: Bearer ${token}" > "$tmp_dir/pg-events.json"
+python3 - "$tmp_dir/pg-events.json" "$session_id" <<'PY'
+import json, sys
+events = json.load(open(sys.argv[1], encoding='utf-8'))
+sid = sys.argv[2]
+if not any(e.get('session_id') == sid for e in events):
+    raise SystemExit(f"smoke session {sid} missing from PG events")
+PY
+echo "ok: pg session events include smoke session"
+echo "dashboard smoke: PASS session_id=${session_id}"
