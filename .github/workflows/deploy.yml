@@ -96,3 +96,36 @@ jobs:
         run: |
           curl -sf http://localhost:8400/api/health > /dev/null
           echo "Engine deployed, dashboard healthy"
+
+  live-pi-certification:
+    needs: deploy
+    runs-on: [self-hosted, mae]
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install engine dependencies
+        working-directory: engine
+        run: bun install
+
+      - name: Live Pi production certification gate
+        env:
+          MAE_DASHBOARD_URL: ${{ vars.MAE_DASHBOARD_URL }}
+          MAE_CERT_KEEP_ARTIFACTS: "1"
+        run: |
+          set -euo pipefail
+          if [ -z "${MAE_DASHBOARD_URL:-}" ]; then
+            echo "MAE_DASHBOARD_URL repository variable is required for the live Pi release gate" >&2
+            exit 1
+          fi
+          scripts/certify-live-swarm --live-pi --dashboard-url "$MAE_DASHBOARD_URL"
+
+      - name: Upload certification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: live-pi-certification-evidence
+          path: /tmp/mae-cert.*/
+          if-no-files-found: ignore

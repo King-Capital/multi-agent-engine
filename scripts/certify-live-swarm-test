@@ -348,6 +348,15 @@ expect_failure "live pi non-synthesis certification contract rejected" require_t
 
 adapter=echo
 
+expect_failure "live pi rejects implicit localhost dashboard" \
+  bash -c 'MAE_CERT_SOURCE_ONLY=1 source "$0"; live_pi=1; adapter=echo; dashboard_url="http://127.0.0.1:8400"; dashboard_url_explicit=0; unset MAE_DASHBOARD_URL; parse_args --live-pi' "$root/scripts/certify-live-swarm"
+
+expect_failure "live pi rejects explicit localhost dashboard" \
+  bash -c 'MAE_CERT_SOURCE_ONLY=1 source "$0"; parse_args --live-pi --dashboard-url http://localhost:8400' "$root/scripts/certify-live-swarm"
+
+expect_success "live pi accepts explicit deployed dashboard" \
+  bash -c 'MAE_CERT_SOURCE_ONLY=1 source "$0"; parse_args --live-pi --dashboard-url https://k-board.rodaddy.live; [[ "$adapter" == pi ]]' "$root/scripts/certify-live-swarm"
+
 # --- Phase 3: TS validator integration tests ---
 
 validator_session="00000000-0000-0000-0000-000000000020"
