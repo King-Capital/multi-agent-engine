@@ -409,7 +409,7 @@ parse_args() {
     if [[ "$dashboard_url_explicit" != 1 && -z "${MAE_DASHBOARD_URL:-}" ]]; then
       fail "--live-pi requires an explicit deployed dashboard URL via --dashboard-url or MAE_DASHBOARD_URL"
     fi
-    if [[ "$dashboard_url" =~ ^https?://(127\.0\.0\.1|localhost)(:[0-9]+)?/?$ ]]; then
+    if [[ "${dashboard_url,,}" =~ ^https?://(127\.[0-9]+\.[0-9]+\.[0-9]+|localhost|\[::1\]|0\.0\.0\.0)(:[0-9]+)?(/.*)?$ ]]; then
       fail "--live-pi requires a deployed dashboard URL, not localhost: $dashboard_url"
     fi
   fi
