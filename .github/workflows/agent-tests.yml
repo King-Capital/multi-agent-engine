@@ -7,10 +7,6 @@ on:
       - 'agents/**'
       - 'configs/**'
   pull_request:
-    paths:
-      - 'engine/**'
-      - 'agents/**'
-      - 'configs/**'
 
 permissions:
   contents: read
