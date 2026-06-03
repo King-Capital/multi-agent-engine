@@ -16,6 +16,7 @@ function mockEmitter() {
     stallDetected: handler("stallDetected"),
     nudgeSent: handler("nudgeSent"),
     budgetWarning: handler("budgetWarning"),
+    participantHeartbeat: handler("participantHeartbeat"),
     participantStale: handler("participantStale"),
     autoPause: handler("autoPause"),
     message: handler("message"),
@@ -117,6 +118,39 @@ describe("ActiveMonitor", () => {
 
     const stallEvents = emitter.calls.filter((c: { method: string }) => c.method === "stallDetected");
     expect(stallEvents.length).toBe(0);
+  });
+
+  test("emits participant heartbeats with status and current tool", () => {
+    const m = createMonitor();
+    agentActivity.set("agent-1", makeActivity("agent-1", "Scout", "worker", 5000));
+
+    m.runTick();
+    m.runTick();
+
+    const heartbeats = emitter.calls.filter((c: { method: string }) => c.method === "participantHeartbeat");
+    expect(heartbeats).toHaveLength(1);
+    expect(heartbeats[0]?.args).toEqual([
+      "test-session",
+      "agent-1",
+      { status: "active", currentTool: "Read", lastEvent: "heartbeat" },
+    ]);
+  });
+
+  test("marks idle heartbeat status before escalating to stale", () => {
+    const m = createMonitor();
+    agentActivity.set("agent-1", makeActivity("agent-1", "Scout", "worker", IDLE_WARN_MS + 5000));
+
+    m.runTick();
+    emitter.calls.length = 0;
+    m.runTick();
+
+    const heartbeats = emitter.calls.filter((c: { method: string }) => c.method === "participantHeartbeat");
+    expect(heartbeats).toHaveLength(1);
+    expect(heartbeats[0]?.args).toEqual([
+      "test-session",
+      "agent-1",
+      { status: "idle", currentTool: "Read", lastEvent: "idle_heartbeat" },
+    ]);
   });
 
   test("sends nudge on stalled agent", async () => {

@@ -214,7 +214,13 @@ describe("EventEmitter", () => {
         capabilities: { canReceiveSteer: true, toolCount: 2, model: "gpt-5.5" },
       });
       await emitter.participantActivity("s1", "lead-1", { currentTool: "read", currentTask: "README.md" });
-      await emitter.participantHeartbeat("s1", "lead-1", { costUsd: 0.12, tokensUsed: 42 });
+      await emitter.participantHeartbeat("s1", "lead-1", {
+        status: "idle",
+        currentTask: "waiting_for_review",
+        currentTool: "read",
+        costUsd: 0.12,
+        tokensUsed: 42,
+      });
       await emitter.participantStale("s1", "lead-1", "no activity for 60s");
       await emitter.participantEnd("s1", "lead-1", "completed", { costUsd: 0.12, tokensUsed: 42 });
 
@@ -232,6 +238,9 @@ describe("EventEmitter", () => {
       ]);
       expect(bodies[0]!.data.capabilities.toolCount).toBe(2);
       expect(bodies[1]!.data.current_tool).toBe("read");
+      expect(bodies[2]!.data.status).toBe("idle");
+      expect(bodies[2]!.data.current_task).toBe("waiting_for_review");
+      expect(bodies[2]!.data.current_tool).toBe("read");
       expect(bodies[2]!.data.cost_usd).toBe(0.12);
       expect(bodies[3]!.data.status).toBe("stale");
       expect(bodies[4]!.data.status).toBe("completed");
