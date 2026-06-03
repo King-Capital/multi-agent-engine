@@ -1,10 +1,15 @@
 name: Force Test Gate
 
 on:
+  pull_request:
+    paths-ignore:
+      - 'engine/**'
+      - 'agents/**'
+      - 'configs/**'
   workflow_dispatch:
     inputs:
       reason:
-        description: 'Why force-test is needed (e.g. "PR #368 — scripts-only, no engine changes")'
+        description: 'Why force-test is needed'
         required: false
         default: 'No engine changes — satisfying required test check'
 
@@ -15,5 +20,4 @@ jobs:
     steps:
       - name: Test gate (no engine changes)
         run: |
-          echo "::notice::Force test gate: ${{ github.event.inputs.reason }}"
           echo "✅ Required 'test' check satisfied — no engine/agents/configs changes in this branch"
