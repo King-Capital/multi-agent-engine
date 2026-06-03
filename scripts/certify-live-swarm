@@ -23,6 +23,7 @@ adapter="echo"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 workdir=""
 trace_dir=""
+dashboard_url_explicit=0
 certification_done=0
 
 # Dashboard auth accepts MAE_API_TOKEN in the engine. Operator configs often use
@@ -206,11 +207,10 @@ missing_required_review_leads() {
   for entry in "${required[@]}"; do
     team="${entry%%:*}"
     lead_id="${entry#*:}"
-    if ! jq -e --arg team "$team" --arg lead_id "$lead_id" '
+    if ! jq -s -e --arg team "$team" --arg lead_id "$lead_id" '
       def aid: (.agent_id // .data.agent_id // "");
       def team_name: (.team // .data.team_name // "");
-      select(.type == "agent.end" or .event_type == "agent_done")
-      | select((aid == $lead_id) or (team_name == $team and (aid | test("-lead$"))))
+      any(.[]; (.type == "agent.end" or .event_type == "agent_done") and ((aid == $lead_id) or (team_name == $team and (aid | test("-lead$")))))
     ' "$trace_file" >/dev/null; then
       printf '%s\n' "$team"
     fi
@@ -387,7 +387,7 @@ run_review() {
 }
 
 cleanup() {
-  if [[ -n "$workdir" && "$certification_done" == 1 && "${MAE_CERT_KEEP_ARTIFACTS:-0}" != 1 ]]; then
+  if [[ -n "$workdir" && "$certification_done" == 1 && "$live_pi" != 1 && "${MAE_CERT_KEEP_ARTIFACTS:-0}" != 1 ]]; then
     rm -rf "$workdir"
   elif [[ -n "$workdir" ]]; then
     printf '\n==> preserved certification artifacts: %s\n' "$workdir" >&2
@@ -401,6 +401,7 @@ parse_args() {
       --dashboard-url)
         [[ $# -ge 2 && -n "${2:-}" ]] || { echo "--dashboard-url requires a URL" >&2; usage >&2; exit 1; }
         dashboard_url="$2"
+        dashboard_url_explicit=1
         shift 2
         ;;
       --only)
@@ -415,7 +416,30 @@ parse_args() {
 
   if [[ "$live_pi" == 1 ]]; then
     adapter="pi"
+    if [[ "$dashboard_url_explicit" != 1 && -z "${MAE_DASHBOARD_URL:-}" ]]; then
+      fail "--live-pi requires an explicit deployed dashboard URL via --dashboard-url or MAE_DASHBOARD_URL"
+    fi
+    if [[ "${dashboard_url,,}" =~ ^https?://(127\.[0-9]+\.[0-9]+\.[0-9]+|localhost|\[::1\]|0\.0\.0\.0)(:[0-9]+)?(/.*)?$ ]]; then
+      fail "--live-pi requires a deployed dashboard URL, not localhost: $dashboard_url"
+    fi
   fi
+}
+
+write_evidence_manifest() {
+  local manifest="$workdir/evidence-manifest.json"
+  jq -n \
+    --arg adapter "$adapter" \
+    --arg dashboard_url "$dashboard_url" \
+    --arg workdir "$workdir" \
+    --arg trace_dir "$trace_dir" \
+    --argjson sessions "$(for candidate in clean seeded failing; do
+      if [[ -f "$workdir/$candidate.out" || -f "$workdir/$candidate.err" ]]; then
+        sid="$(extract_session_id "$workdir/$candidate.out" "$workdir/$candidate.err")"
+        [[ -n "$sid" ]] && jq -n --arg fixture "$candidate" --arg session_id "$sid" --arg trace "$trace_dir/$sid.jsonl" '{fixture:$fixture, session_id:$session_id, trace:$trace}'
+      fi
+    done | jq -s '.')" \
+    '{adapter:$adapter,dashboard_url:$dashboard_url,workdir:$workdir,trace_dir:$trace_dir,sessions:$sessions}' > "$manifest"
+  printf '%s\n' "$manifest"
 }
 
 main() {
@@ -528,10 +552,11 @@ MD
   fi
 
   certification_done=1
+  manifest="$(write_evidence_manifest)"
   if [[ "$adapter" == "echo" ]]; then
-    log "CERTIFICATION PASS (smoke-only) adapter=$adapter trace=$trace_file"
+    log "CERTIFICATION PASS (smoke-only) adapter=$adapter trace=$trace_file evidence=$manifest"
   else
-    log "CERTIFICATION PASS (validator-verified) adapter=$adapter trace=$trace_file"
+    log "CERTIFICATION PASS (validator-verified) adapter=$adapter trace=$trace_file evidence=$manifest"
   fi
 }
 
