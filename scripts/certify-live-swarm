@@ -25,6 +25,16 @@ workdir=""
 trace_dir=""
 certification_done=0
 
+# Dashboard auth accepts MAE_API_TOKEN in the engine. Operator configs often use
+# MAE_DASHBOARD_TOKEN/DASHBOARD_TOKEN; normalize them here without printing them.
+if [[ -z "${MAE_API_TOKEN:-}" ]]; then
+  if [[ -n "${MAE_DASHBOARD_TOKEN:-}" ]]; then
+    export MAE_API_TOKEN="$MAE_DASHBOARD_TOKEN"
+  elif [[ -n "${DASHBOARD_TOKEN:-}" ]]; then
+    export MAE_API_TOKEN="$DASHBOARD_TOKEN"
+  fi
+fi
+
 log() { printf '\n==> %s\n' "$*" >&2; }
 fail() { echo "CERTIFICATION FAILED: $*" >&2; exit 1; }
 
