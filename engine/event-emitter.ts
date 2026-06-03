@@ -483,11 +483,6 @@ export class EventEmitter {
     tokensUsed: number,
     contextTokens: number
   ) {
-    await this.participantHeartbeat(sessionId, agentId, {
-      costUsd,
-      tokensUsed,
-      lastEvent: "cost_update",
-    });
     return this.emit({
       session_id: sessionId,
       agent_id: agentId,

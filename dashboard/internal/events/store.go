@@ -196,15 +196,6 @@ func (s *Store) applyEvent(evt models.Event) {
 			agent.CostUSD = existing.CostUSD
 			agent.TokensUsed = existing.TokensUsed
 			agent.ContextTokens = existing.ContextTokens
-			if !existing.LastActivityAt.IsZero() {
-				agent.LastActivityAt = existing.LastActivityAt
-			}
-			if existing.CurrentActivity != "" {
-				agent.CurrentActivity = existing.CurrentActivity
-			}
-			if existing.CurrentTool != "" {
-				agent.CurrentTool = existing.CurrentTool
-			}
 		}
 		sess.Agents[evt.AgentID] = agent
 
@@ -269,7 +260,7 @@ func applyParticipantEvent(sess *models.Session, evt models.Event) {
 	if agentID == "" {
 		agentID = evt.AgentID
 	}
-	if agentID == "" {
+	if agentID == "" || len(agentID) > 128 || !validSessionID.MatchString(agentID) {
 		return
 	}
 
@@ -310,11 +301,18 @@ func applyParticipantEvent(sess *models.Session, evt models.Event) {
 	} else {
 		agent.LastActivityAt = evt.Timestamp
 	}
+
+	if evt.EventType == models.EventParticipantEnd {
+		agent.CurrentTool = ""
+		if !agent.StartedAt.IsZero() {
+			agent.ElapsedMs = time.Since(agent.StartedAt).Milliseconds()
+		}
+	}
 }
 
 func participantStatusToAgentStatus(status models.AgentStatus, fallback models.AgentStatus) models.AgentStatus {
 	switch status {
-	case "starting", "online", "active":
+	case "starting", "active":
 		return models.StatusRunning
 	case "idle":
 		return models.StatusIdle
@@ -329,7 +327,7 @@ func participantStatusToAgentStatus(status models.AgentStatus, fallback models.A
 	case "":
 		return fallback
 	default:
-		return models.AgentStatus(status)
+		return fallback
 	}
 }
 
@@ -491,7 +489,7 @@ func (s *Store) SetSessionStatus(id, status string) bool {
 	sess.Status = status
 	sess.ElapsedMs = time.Since(sess.StartedAt).Milliseconds()
 	for _, a := range sess.Agents {
-		if a.Status == models.StatusRunning || a.Status == models.StatusIdle {
+		if a.Status == models.StatusRunning || a.Status == models.StatusIdle || a.Status == models.StatusStale {
 			if status == "error" {
 				a.Status = models.StatusError
 			} else {
