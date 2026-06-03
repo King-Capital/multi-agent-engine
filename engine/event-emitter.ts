@@ -151,9 +151,22 @@ export class EventEmitter {
     });
   }
 
-  participantHeartbeat(sessionId: string, agentId: string, opts: { costUsd?: number; tokensUsed?: number; lastEvent?: string } = {}) {
+  participantHeartbeat(
+    sessionId: string,
+    agentId: string,
+    opts: {
+      status?: ParticipantStatus;
+      currentTask?: string;
+      currentTool?: string;
+      costUsd?: number;
+      tokensUsed?: number;
+      lastEvent?: string;
+    } = {}
+  ) {
     return this.participantEvent(sessionId, agentId, "participant_heartbeat", {
-      status: "active",
+      status: opts.status ?? "active",
+      currentTask: opts.currentTask,
+      currentTool: opts.currentTool,
       costUsd: opts.costUsd,
       tokensUsed: opts.tokensUsed,
       lastEvent: opts.lastEvent ?? "heartbeat",
@@ -470,11 +483,6 @@ export class EventEmitter {
     tokensUsed: number,
     contextTokens: number
   ) {
-    await this.participantHeartbeat(sessionId, agentId, {
-      costUsd,
-      tokensUsed,
-      lastEvent: "cost_update",
-    });
     return this.emit({
       session_id: sessionId,
       agent_id: agentId,

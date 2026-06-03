@@ -65,7 +65,7 @@ export class ActiveMonitor {
       const idle = now - activity.lastEventAt;
 
       if (isHeartbeat) {
-        const status = idle > IDLE_WARN_MS ? "idle" : "working";
+        const status = idle > IDLE_WARN_MS ? "idle" : "active";
         log.debug("Heartbeat", {
           agent_id: id,
           agent_name: activity.name,
@@ -75,6 +75,11 @@ export class ActiveMonitor {
           last_tool: activity.lastTool || "none",
           idle_s: Math.round(idle / 1000),
           session_id: this.opts.session.id,
+        });
+        void this.opts.emitter.participantHeartbeat(this.opts.session.id, id, {
+          status,
+          currentTool: activity.lastTool,
+          lastEvent: status === "idle" ? "idle_heartbeat" : "heartbeat",
         });
       }
 

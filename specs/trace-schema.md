@@ -41,7 +41,7 @@ Phase 2 adds participant events as the canonical visibility layer for orchestrat
 
 {"ts":"...","type":"participant.activity","id":"...","session_id":"...","agent_id":"pi-correctness-lead","participant_id":"pi-correctness-lead","status":"active","current_tool":"read","current_task":"README.md","last_event":"tool_call","last_heartbeat_ts":"..."}
 
-{"ts":"...","type":"participant.heartbeat","id":"...","session_id":"...","agent_id":"pi-correctness-lead","participant_id":"pi-correctness-lead","status":"active","last_event":"cost_update","last_heartbeat_ts":"...","cost_usd":0.12,"tokens_used":4200}
+{"ts":"...","type":"participant.heartbeat","id":"...","session_id":"...","agent_id":"pi-correctness-lead","participant_id":"pi-correctness-lead","status":"active|idle","current_tool":"read","last_event":"heartbeat|idle_heartbeat|cost_update","last_heartbeat_ts":"...","cost_usd":0.12,"tokens_used":4200}
 
 {"ts":"...","type":"participant.stale","id":"...","session_id":"...","agent_id":"pi-correctness-lead","participant_id":"pi-correctness-lead","status":"stale","reason":"no activity for 60s","last_heartbeat_ts":"..."}
 
@@ -66,7 +66,7 @@ Participant fields:
 | `cost_usd` / `tokens_used` | number | no | Latest participant economics snapshot |
 | `capabilities` | object | no | Bounded policy metadata for later validator/dashboard checks |
 
-Heartbeat volume is intentionally bounded: MAE emits heartbeats on lifecycle/cost/activity transitions rather than a high-frequency timer in Phase 2.
+Heartbeat volume is intentionally bounded: the active monitor emits periodic participant heartbeat snapshots on a coarse cadence (reporting `active` or `idle` plus the latest tool context), while lifecycle/activity/cost/stale/end events also refresh `last_heartbeat_ts`. MAE does not stream per-second tick heartbeats into the trace.
 
 ### Agent Lifecycle
 
