@@ -11,6 +11,17 @@ on:
       - 'engine/**'
       - 'agents/**'
       - 'configs/**'
+  workflow_dispatch:
+    inputs:
+      test_scope:
+        description: 'Test scope to run'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - typecheck-only
+          - tests-only
 
 permissions:
   contents: read
@@ -28,13 +39,16 @@ jobs:
         run: bun install
 
       - name: Type check
+        if: inputs.test_scope != 'tests-only'
         working-directory: engine
         run: bunx tsc --noEmit
 
       - name: Run tests
+        if: inputs.test_scope != 'typecheck-only'
         working-directory: engine
         run: bun test
 
       - name: Verify configs load
+        if: inputs.test_scope != 'typecheck-only'
         working-directory: engine
         run: bun cli.ts adapters
