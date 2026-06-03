@@ -49,10 +49,10 @@ if [[ -n "$env_file" ]]; then
     echo "env file not found: $env_file" >&2
     exit 2
   fi
-  set -a
-  # shellcheck source=/dev/null
-  source "$env_file"
-  set +a
+  while IFS='=' read -r key value; do
+    [[ -z "$key" || "$key" =~ ^# ]] && continue
+    export "$key=$value"
+  done < <(grep -E '^[A-Za-z_][A-Za-z_0-9]*=' "$env_file")
   base_url="${MAE_DASHBOARD_URL:-${DASHBOARD_URL:-$base_url}}"
   token="${MAE_API_TOKEN:-${MAE_DASHBOARD_TOKEN:-${DASHBOARD_TOKEN:-$token}}}"
 fi
@@ -67,17 +67,80 @@ curl_json() {
 
 auth_args=()
 if [[ -n "$token" ]]; then
-  auth_args=(-H "Authorization: Bearer ${token}")
+  auth_config="$tmp_dir/.curl-auth"
+  printf 'header = "Authorization: Bearer %s"\n' "$token" > "$auth_config"
+  chmod 600 "$auth_config"
+  auth_args=(-K "$auth_config")
 fi
 
 assert_json_field() {
   local file="$1" expr="$2" label="$3"
   python3 - "$file" "$expr" "$label" <<'PY'
-import json, sys
-path, expr, label = sys.argv[1:]
+import json, sys, operator
+
+path, expr_str, label = sys.argv[1:]
 with open(path, 'r', encoding='utf-8') as f:
     data = json.load(f)
-if not eval(expr, {}, {'data': data}):
+
+def check(data, expr_str):
+    """Safe assertion checks without eval. Supports:
+      - data.get('key') == 'value'
+      - 'key' in data and 'key2' in data and isinstance(data.get('key3'), int)
+      - data.get('key', 0) > 0 and data.get('key2')
+    """
+    parts = [p.strip() for p in expr_str.split(' and ')]
+    for part in parts:
+        if '==' in part:
+            lhs, rhs = part.split('==', 1)
+            lhs, rhs = lhs.strip(), rhs.strip()
+            if not _eval_atom(data, lhs) == _eval_literal(rhs):
+                return False
+        elif '>' in part and '==' not in part:
+            lhs, rhs = part.split('>', 1)
+            lhs, rhs = lhs.strip(), rhs.strip()
+            lval = _eval_atom(data, lhs)
+            rval = float(rhs) if rhs.replace('.','',1).isdigit() else _eval_literal(rhs)
+            if not (lval is not None and float(lval) > float(rval)):
+                return False
+        elif part.startswith("'") and "' in data" in part:
+            key = part.split("'")[1]
+            if key not in data:
+                return False
+        elif 'isinstance' in part:
+            if 'int' in part:
+                key = part.split("data.get('")[1].split("')")[0]
+                if not isinstance(data.get(key), int):
+                    return False
+        else:
+            if not _eval_atom(data, part):
+                return False
+    return True
+
+def _eval_atom(data, expr):
+    expr = expr.strip()
+    if expr.startswith("data.get("):
+        inner = expr[len("data.get("):]
+        if inner.endswith(")"):
+            inner = inner[:-1]
+        parts = [p.strip().strip("'\"") for p in inner.split(",", 1)]
+        key = parts[0]
+        default = None
+        if len(parts) > 1:
+            try:
+                default = json.loads(parts[1])
+            except Exception:
+                default = parts[1]
+        return data.get(key, default)
+    return expr
+
+def _eval_literal(s):
+    s = s.strip()
+    try:
+        return json.loads(s)
+    except Exception:
+        return s.strip("'\"")
+
+if not check(data, expr_str):
     raise SystemExit(f"assertion failed: {label}; payload={data!r}")
 PY
 }
@@ -179,6 +242,10 @@ import json, sys
 print(json.load(open(sys.argv[1], encoding='utf-8'))['id'])
 PY
 )"
+if [[ ! "$agent_db_id" =~ ^[0-9]+$ ]]; then
+  echo "unexpected agent_db_id format: ${agent_db_id}" >&2
+  exit 1
+fi
 echo "ok: pg agent created id=${agent_db_id}"
 
 for direction in input output; do
@@ -213,7 +280,7 @@ cat > "$tmp_dir/cost-event.json" <<EOF
   "timestamp": "${completion_timestamp}",
   "data": {
     "agent_id": "smoke-worker",
-    "agent_db_id": ${agent_db_id},
+    "agent_db_id": "${agent_db_id}",
     "model": "script-smoke",
     "tokens_used": 128,
     "cost_usd": 0.000128,
@@ -268,9 +335,16 @@ PY
 echo "ok: session list includes smoke session"
 
 sse="$tmp_dir/session.sse"
+sse_err="$tmp_dir/session.sse.err"
+sse_exit=0
 curl --fail --silent --show-error --max-time 3 -N \
   "$base_url/api/sessions/${session_id}/stream" \
-  "${auth_args[@]}" > "$sse" || true
+  "${auth_args[@]}" > "$sse" 2>"$sse_err" || sse_exit=$?
+if [[ "$sse_exit" -ne 0 && "$sse_exit" -ne 28 ]]; then
+  echo "SSE curl failed (exit ${sse_exit}):" >&2
+  cat "$sse_err" >&2
+  exit 1
+fi
 if ! grep -q "$session_id" "$sse"; then
   echo "expected SSE replay to include ${session_id}; got:" >&2
   cat "$sse" >&2
