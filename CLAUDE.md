@@ -1,3 +1,5 @@
+@AGENTS.md
+
 # Multi-Agent Engine
 
 > All LAWs (#!/bin/bash, protected branches, stack prefs) enforced via ~/.claude/CLAUDE.md and hooks.
